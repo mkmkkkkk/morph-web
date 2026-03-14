@@ -6,7 +6,8 @@ import {
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
-import { readAsStringAsync, EncodingType } from 'expo-file-system/src/legacy/FileSystem';
+import { readAsStringAsync } from 'expo-file-system/src/legacy/FileSystem';
+import { EncodingType } from 'expo-file-system/src/legacy/FileSystem.types';
 
 interface InputBarProps {
   onSend: (text: string) => void;

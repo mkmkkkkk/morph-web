@@ -3,6 +3,7 @@ import { useColorScheme } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { loadSettings } from '../lib/settings';
+import { ConnectionProvider } from '../lib/ConnectionContext';
 
 export default function RootLayout() {
   const isDark = useColorScheme() !== 'light';
@@ -12,7 +13,7 @@ export default function RootLayout() {
   }, []);
 
   return (
-    <>
+    <ConnectionProvider>
       <StatusBar style={isDark ? 'light' : 'dark'} />
       <Stack
         screenOptions={{
@@ -32,6 +33,6 @@ export default function RootLayout() {
           }}
         />
       </Stack>
-    </>
+    </ConnectionProvider>
   );
 }

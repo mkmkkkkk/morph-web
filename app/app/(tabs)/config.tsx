@@ -5,7 +5,8 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import InputBar from '../../components/InputBar';
-import { loadCredentials, deleteCredentials, type HappyCredentials } from '../../lib/credentials';
+import { deleteCredentials } from '../../lib/credentials';
+import { useConnection } from '../../lib/ConnectionContext';
 import { getSetting, setSetting, loadScheduledTasks, saveScheduledTasks, addScheduledTask, updateScheduledTask, removeScheduledTask, type ScheduledTask } from '../../lib/settings';
 import { ComponentStore, type CanvasSnapshot, type LibraryEntry } from '../../lib/store';
 
@@ -34,15 +35,21 @@ const INTERVAL_OPTIONS = [
   { label: '24 hr', ms: 24 * 60 * 60 * 1000 },
 ];
 
-type ConnectionStatus = 'unpaired' | 'disconnected' | 'connecting' | 'connected';
-
 export default function ConfigScreen() {
   const router = useRouter();
   const isDark = useColorScheme() !== 'light';
   const storeRef = useRef(new ComponentStore());
 
-  const [credentials, setCredentials] = useState<HappyCredentials | null>(null);
-  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('unpaired');
+  const {
+    connectionState,
+    connected,
+    credentials,
+    sendMessage,
+    sendInterrupt,
+    connect: reconnect,
+    disconnect,
+  } = useConnection();
+
   const [serverUrl, setServerUrl] = useState(getSetting('serverUrl'));
   const [editingServer, setEditingServer] = useState(false);
 
@@ -52,8 +59,8 @@ export default function ConfigScreen() {
   const [library, setLibrary] = useState<LibraryEntry[]>([]);
   // Scheduled Tasks
   const [tasks, setTasks] = useState<ScheduledTask[]>([]);
-  // System session processing state
-  const [sysProcessing, setSysProcessing] = useState(false);
+  // Processing state for system chat bar
+  const [isProcessing, setIsProcessing] = useState(false);
 
   const colors = {
     bg: isDark ? '#000' : '#f2f2f7',
@@ -69,10 +76,6 @@ export default function ConfigScreen() {
   };
 
   const loadState = useCallback(async () => {
-    const creds = await loadCredentials();
-    setCredentials(creds);
-    setConnectionStatus(creds ? 'disconnected' : 'unpaired');
-
     await storeRef.current.init();
     setSnapshots(await storeRef.current.listSnapshots());
     setLibrary(await storeRef.current.listLibrary());
@@ -114,9 +117,8 @@ export default function ConfigScreen() {
       {
         text: 'Unpair', style: 'destructive',
         onPress: async () => {
+          disconnect();
           await deleteCredentials();
-          setCredentials(null);
-          setConnectionStatus('unpaired');
         },
       },
     ]);
@@ -213,22 +215,28 @@ export default function ConfigScreen() {
     return `${Math.round(ms / 86400000)}d`;
   };
 
-  const handleChatSend = (text: string) => {
-    setSysProcessing(true);
-    Alert.alert('System Session', `Would send: "${text}"`);
-    setTimeout(() => setSysProcessing(false), 2000);
-  };
+  const handleChatSend = useCallback((text: string) => {
+    if (!connected) return;
+    setIsProcessing(true);
+    sendMessage(text);
+    // Processing will be cleared when user sends stop or next message
+    setTimeout(() => setIsProcessing(false), 30_000); // timeout fallback
+  }, [connected, sendMessage]);
 
-  const handleChatStop = () => {
-    setSysProcessing(false);
-  };
+  const handleChatStop = useCallback(() => {
+    sendInterrupt();
+    setIsProcessing(false);
+  }, [sendInterrupt]);
 
-  const statusColor = {
+  const displayStatus = !credentials ? 'unpaired' : connectionState;
+  const statusColorMap: Record<string, string> = {
     unpaired: '#888',
     disconnected: '#ff4444',
     connecting: '#ffaa00',
     connected: '#44cc44',
-  }[connectionStatus];
+    error: '#ff4444',
+  };
+  const statusColor = statusColorMap[displayStatus] || '#888';
 
   const timeAgo = (ts: number) => {
     const diff = Date.now() - ts;
@@ -247,7 +255,7 @@ export default function ConfigScreen() {
     { key: 'tasks', label: 'Scheduled Tasks', detail: `${tasks.filter(t => t.enabled).length}/${tasks.length} active`, icon: '⏱' },
     { key: 'history', label: 'Canvas History', detail: `${snapshots.length} saved`, icon: '◷' },
     { key: 'library', label: 'Component Library', detail: `${library.length} components`, icon: '❖' },
-    { key: 'connection', label: 'Connection', detail: connectionStatus.charAt(0).toUpperCase() + connectionStatus.slice(1), icon: '●' },
+    { key: 'connection', label: 'Connection', detail: displayStatus.charAt(0).toUpperCase() + displayStatus.slice(1), icon: '●' },
     { key: 'server', label: 'Server', detail: serverUrl.replace('https://', '').replace('http://', ''), icon: '⬡' },
     { key: 'about', label: 'About', detail: 'v0.1.0', icon: 'ℹ' },
   ];
@@ -444,8 +452,8 @@ export default function ConfigScreen() {
       <InputBar
         onSend={handleChatSend}
         onStop={handleChatStop}
-        connected={connectionStatus !== 'unpaired'}
-        isProcessing={sysProcessing}
+        connected={connected}
+        isProcessing={isProcessing}
       />
     </View>
   );

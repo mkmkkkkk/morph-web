@@ -14,6 +14,7 @@ import {
 import { useRouter } from 'expo-router';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { pairFromQR, pairFromJson, type PairResult } from '../lib/auth';
+import { useConnection } from '../lib/ConnectionContext';
 
 type Mode = 'scan' | 'manual';
 
@@ -21,9 +22,12 @@ export default function ConnectScreen() {
   const router = useRouter();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
+  const { connect } = useConnection();
 
   const [mode, setMode] = useState<Mode>('scan');
   const [pairing, setPairing] = useState(false);
+  const [pairStatus, setPairStatus] = useState<'idle' | 'pairing' | 'connecting' | 'done' | 'error'>('idle');
+  const [statusText, setStatusText] = useState('');
   const [manualInput, setManualInput] = useState('');
   const [permission, requestPermission] = useCameraPermissions();
   const scannedRef = useRef(false);
@@ -34,15 +38,28 @@ export default function ConnectScreen() {
     text: isDark ? '#fff' : '#000',
     secondary: isDark ? '#8e8e93' : '#6e6e73',
     accent: '#007aff',
+    green: '#30d158',
   };
 
-  const handlePairResult = (result: PairResult) => {
-    setPairing(false);
+  const handlePairResult = async (result: PairResult) => {
     if (result.success) {
-      Alert.alert('Paired', 'Successfully connected to Claude Code.', [
-        { text: 'OK', onPress: () => router.back() },
-      ]);
+      setPairStatus('connecting');
+      setStatusText('Credentials saved. Connecting...');
+      try {
+        await connect();
+        setPairStatus('done');
+        setStatusText('Connected to Claude Code');
+        // Auto-navigate back after short delay
+        setTimeout(() => router.back(), 800);
+      } catch {
+        setPairStatus('done');
+        setStatusText('Paired. Connection will retry automatically.');
+        setTimeout(() => router.back(), 1200);
+      }
     } else {
+      setPairing(false);
+      setPairStatus('error');
+      setStatusText(result.error);
       scannedRef.current = false;
       Alert.alert('Pairing Failed', result.error);
     }
@@ -52,14 +69,17 @@ export default function ConnectScreen() {
     if (scannedRef.current || pairing) return;
     scannedRef.current = true;
     setPairing(true);
+    setPairStatus('pairing');
+    setStatusText('QR scanned. Saving credentials...');
 
     try {
       const result = await pairFromQR(data);
-      handlePairResult(result);
+      await handlePairResult(result);
     } catch (err: any) {
       setPairing(false);
+      setPairStatus('error');
+      setStatusText(err?.message || 'Failed to process QR code');
       scannedRef.current = false;
-      Alert.alert('Error', err?.message || 'Failed to process QR code');
     }
   };
 
@@ -67,13 +87,16 @@ export default function ConnectScreen() {
     const trimmed = manualInput.trim();
     if (!trimmed) return;
     setPairing(true);
+    setPairStatus('pairing');
+    setStatusText('Parsing credentials...');
 
     try {
       const result = await pairFromJson(trimmed);
-      handlePairResult(result);
+      await handlePairResult(result);
     } catch (err: any) {
       setPairing(false);
-      Alert.alert('Error', err?.message || 'Failed to parse credentials');
+      setPairStatus('error');
+      setStatusText(err?.message || 'Failed to parse credentials');
     }
   };
 
@@ -129,8 +152,14 @@ export default function ConnectScreen() {
         <View style={styles.scanContainer}>
           {pairing ? (
             <View style={styles.loadingOverlay}>
-              <ActivityIndicator size="large" color={colors.accent} />
-              <Text style={[styles.loadingText, { color: colors.text }]}>Pairing...</Text>
+              {pairStatus === 'done' ? (
+                <Text style={styles.checkmark}>✅</Text>
+              ) : pairStatus === 'error' ? (
+                <Text style={styles.checkmark}>❌</Text>
+              ) : (
+                <ActivityIndicator size="large" color={colors.accent} />
+              )}
+              <Text style={[styles.loadingText, { color: colors.text }]}>{statusText}</Text>
             </View>
           ) : (
             <>
@@ -222,7 +251,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 16,
   },
-  loadingText: { fontSize: 16 },
+  loadingText: { fontSize: 16, textAlign: 'center', marginTop: 8 },
+  checkmark: { fontSize: 48 },
   manualContainer: { flex: 1, padding: 20 },
   manualLabel: { fontSize: 16, fontWeight: '600', marginBottom: 4 },
   manualHint: { fontSize: 13, marginBottom: 12 },
