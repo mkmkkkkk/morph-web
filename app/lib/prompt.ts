@@ -64,3 +64,26 @@ export function buildImageMessage(imageDataUrl: string, caption?: string): strin
     : '[Photo attached from device camera/library]';
   return `${intro}\n![photo](${imageDataUrl})`;
 }
+
+/**
+ * Build a message wrapping a file attachment for CC.
+ * Text files are sent inline; binary files as base64.
+ */
+export function buildFileMessage(file: { name: string; mime: string; base64: string; size: number }): string {
+  const sizeStr = file.size > 1024 * 1024
+    ? `${(file.size / 1024 / 1024).toFixed(1)}MB`
+    : `${(file.size / 1024).toFixed(1)}KB`;
+
+  const isText = file.mime.startsWith('text/') ||
+    /\.(json|md|yml|yaml|xml|csv|tsv|log|sh|py|ts|tsx|js|jsx|html|css|sql|toml|ini|cfg|conf|env|txt)$/i.test(file.name);
+
+  if (isText) {
+    // Decode base64 → utf-8 text for inline display
+    const text = globalThis.atob
+      ? globalThis.atob(file.base64)
+      : Buffer.from(file.base64, 'base64').toString('utf-8');
+    return `[File: ${file.name} (${sizeStr})]\n\`\`\`\n${text}\n\`\`\``;
+  }
+
+  return `[File: ${file.name} (${sizeStr}, ${file.mime})]\n[base64 data attached — use this to write the file on the computer]\ndata:${file.mime};base64,${file.base64}`;
+}

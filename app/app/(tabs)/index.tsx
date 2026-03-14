@@ -9,7 +9,7 @@ import { getSetting, setSetting } from '../../lib/settings';
 import { encryptUserMessage, parseUpdate, type SessionMessage } from '../../lib/protocol';
 import { HappyApi } from '../../lib/api';
 import { ComponentStore } from '../../lib/store';
-import { wrapUserMessage, buildSketchMessage, buildImageMessage } from '../../lib/prompt';
+import { wrapUserMessage, buildSketchMessage, buildImageMessage, buildFileMessage } from '../../lib/prompt';
 
 const KEEP_ALIVE_MS = 20_000;
 
@@ -199,6 +199,16 @@ export default function CanvasScreen() {
     connectionRef.current.sendMessage(sessionId, encrypted).catch(console.warn);
   }, [sessionId, sessionKey, sessionVariant, connected]);
 
+  // Handle file from document picker
+  const handleFile = useCallback((file: { name: string; mime: string; base64: string; size: number }) => {
+    if (!sessionId || !sessionKey || !connected) return;
+    const manifest = storeRef.current.getManifest();
+    const fileText = buildFileMessage(file);
+    const msg = wrapUserMessage(fileText, manifest);
+    const encrypted = encryptUserMessage(msg, sessionKey, sessionVariant);
+    connectionRef.current.sendMessage(sessionId, encrypted).catch(console.warn);
+  }, [sessionId, sessionKey, sessionVariant, connected]);
+
   // Open sketch mode
   const handleOpenSketch = useCallback(() => {
     bridgeRef.current?.openSketch();
@@ -213,7 +223,7 @@ export default function CanvasScreen() {
         onSketch={handleSketch}
         bridgeRef={bridgeRef}
       />
-      <InputBar onSend={handleSend} onSketch={handleOpenSketch} onImage={handleImage} connected={connected} />
+      <InputBar onSend={handleSend} onSketch={handleOpenSketch} onImage={handleImage} onFile={handleFile} connected={connected} />
     </View>
   );
 }

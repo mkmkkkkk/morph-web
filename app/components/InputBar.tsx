@@ -5,15 +5,20 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
+import { readAsStringAsync, EncodingType } from 'expo-file-system/build/legacy';
 
 interface InputBarProps {
   onSend: (text: string) => void;
   onSketch?: () => void;
   onImage?: (base64DataUrl: string) => void;
+  onFile?: (file: { name: string; mime: string; base64: string; size: number }) => void;
   connected: boolean;
 }
 
-export default function InputBar({ onSend, onSketch, onImage, connected }: InputBarProps) {
+const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB limit for happy-wire
+
+export default function InputBar({ onSend, onSketch, onImage, onFile, connected }: InputBarProps) {
   const [text, setText] = useState('');
   const inputRef = useRef<TextInput>(null);
   const router = useRouter();
@@ -46,24 +51,50 @@ export default function InputBar({ onSend, onSketch, onImage, connected }: Input
     }
   };
 
+  const pickFile = async () => {
+    const result = await DocumentPicker.getDocumentAsync({
+      copyToCacheDirectory: true,
+    });
+
+    if (result.canceled || !result.assets?.[0]) return;
+    const asset = result.assets[0];
+
+    if (asset.size && asset.size > MAX_FILE_SIZE) {
+      Alert.alert('File too large', `Max ${MAX_FILE_SIZE / 1024 / 1024}MB. This file is ${(asset.size / 1024 / 1024).toFixed(1)}MB.`);
+      return;
+    }
+
+    const base64 = await readAsStringAsync(asset.uri, {
+      encoding: EncodingType.Base64,
+    });
+
+    onFile?.({
+      name: asset.name,
+      mime: asset.mimeType || 'application/octet-stream',
+      base64,
+      size: asset.size || 0,
+    });
+  };
+
   const handleAttach = () => {
     if (Platform.OS === 'ios') {
       ActionSheetIOS.showActionSheetWithOptions(
         {
-          options: ['Cancel', 'Take Photo', 'Choose from Library', 'Sketch'],
+          options: ['Cancel', 'Take Photo', 'Photo Library', 'File', 'Sketch'],
           cancelButtonIndex: 0,
         },
         (idx) => {
           if (idx === 1) pickImage(true);
           else if (idx === 2) pickImage(false);
-          else if (idx === 3) onSketch?.();
+          else if (idx === 3) pickFile();
+          else if (idx === 4) onSketch?.();
         },
       );
     } else {
-      // Android: show simple alert as action sheet
       Alert.alert('Attach', undefined, [
         { text: 'Take Photo', onPress: () => pickImage(true) },
-        { text: 'Choose from Library', onPress: () => pickImage(false) },
+        { text: 'Photo Library', onPress: () => pickImage(false) },
+        { text: 'File', onPress: pickFile },
         { text: 'Sketch', onPress: onSketch },
         { text: 'Cancel', style: 'cancel' },
       ]);
