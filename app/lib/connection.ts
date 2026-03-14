@@ -159,6 +159,17 @@ export class HappyConnection {
     });
   }
 
+  /**
+   * Send interrupt/abort to stop the current CC turn.
+   * Sends session-end which signals the server to abort the running turn.
+   */
+  sendInterrupt(sessionId: string): void {
+    this.socket?.emit('session-end', {
+      sid: sessionId,
+      time: Date.now(),
+    });
+  }
+
   // ------------------------------------------------------------------
   // Machine keep-alive (mirrors ApiMachineClient, 20s interval)
   // ------------------------------------------------------------------

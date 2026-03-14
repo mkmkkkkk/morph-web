@@ -10,15 +10,17 @@ import { readAsStringAsync, EncodingType } from 'expo-file-system/build/legacy';
 
 interface InputBarProps {
   onSend: (text: string) => void;
+  onStop?: () => void;
   onSketch?: () => void;
   onImage?: (base64DataUrl: string) => void;
   onFile?: (file: { name: string; mime: string; base64: string; size: number }) => void;
   connected: boolean;
+  isProcessing?: boolean;
 }
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB limit for happy-wire
 
-export default function InputBar({ onSend, onSketch, onImage, onFile, connected }: InputBarProps) {
+export default function InputBar({ onSend, onStop, onSketch, onImage, onFile, connected, isProcessing }: InputBarProps) {
   const [text, setText] = useState('');
   const inputRef = useRef<TextInput>(null);
   const router = useRouter();
@@ -130,14 +132,24 @@ export default function InputBar({ onSend, onSketch, onImage, onFile, connected 
               onSubmitEditing={handleSend}
               blurOnSubmit={false}
             />
-            <TouchableOpacity
-              style={[styles.sendBtn, !text.trim() && styles.sendBtnDisabled]}
-              onPress={handleSend}
-              disabled={!text.trim()}
-              activeOpacity={0.7}
-            >
-              <Text style={[styles.sendText, !text.trim() && styles.sendTextDisabled]}>{'↑'}</Text>
-            </TouchableOpacity>
+            {isProcessing ? (
+              <TouchableOpacity
+                style={styles.stopBtn}
+                onPress={onStop}
+                activeOpacity={0.7}
+              >
+                <View style={styles.stopSquare} />
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={[styles.sendBtn, !text.trim() && styles.sendBtnDisabled]}
+                onPress={handleSend}
+                disabled={!text.trim()}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.sendText, !text.trim() && styles.sendTextDisabled]}>{'↑'}</Text>
+              </TouchableOpacity>
+            )}
           </>
         ) : (
           <TouchableOpacity
@@ -223,6 +235,21 @@ const styles = StyleSheet.create({
   sendBtnDisabled: { backgroundColor: '#1c1c1e' },
   sendText: { color: '#fff', fontSize: 18, fontWeight: 'bold', marginTop: -1 },
   sendTextDisabled: { color: '#444' },
+  stopBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#ff3b30',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 6,
+  },
+  stopSquare: {
+    width: 12,
+    height: 12,
+    borderRadius: 2,
+    backgroundColor: '#fff',
+  },
   connectBar: {
     flex: 1,
     flexDirection: 'row',

@@ -21,6 +21,7 @@ export default function CanvasScreen() {
   const keepAliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [connected, setConnected] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessionKey, setSessionKey] = useState<Uint8Array | null>(null);
   const [sessionVariant, setSessionVariant] = useState<'legacy' | 'dataKey'>('legacy');
@@ -150,6 +151,7 @@ export default function CanvasScreen() {
         break;
 
       case 'turn_end':
+        setIsProcessing(false);
         bridgeRef.current.sendEvent('turn_end', msg.content);
         break;
     }
@@ -163,8 +165,16 @@ export default function CanvasScreen() {
     const wrappedText = wrapUserMessage(text, manifest);
     const encrypted = encryptUserMessage(wrappedText, sessionKey, sessionVariant);
 
+    setIsProcessing(true);
     connectionRef.current.sendMessage(sessionId, encrypted).catch(console.warn);
   }, [sessionId, sessionKey, sessionVariant, connected]);
+
+  // Stop / interrupt CC
+  const handleStop = useCallback(() => {
+    if (!sessionId || !connected) return;
+    connectionRef.current.sendInterrupt(sessionId);
+    setIsProcessing(false);
+  }, [sessionId, connected]);
 
   // Adopt a component (persist it)
   const handleAdopt = useCallback(async (componentId: string) => {
@@ -223,7 +233,7 @@ export default function CanvasScreen() {
         onSketch={handleSketch}
         bridgeRef={bridgeRef}
       />
-      <InputBar onSend={handleSend} onSketch={handleOpenSketch} onImage={handleImage} onFile={handleFile} connected={connected} />
+      <InputBar onSend={handleSend} onStop={handleStop} onSketch={handleOpenSketch} onImage={handleImage} onFile={handleFile} connected={connected} isProcessing={isProcessing} />
     </View>
   );
 }

@@ -53,6 +53,7 @@ export default function ConfigScreen() {
   const [tasks, setTasks] = useState<ScheduledTask[]>([]);
   // Chat input
   const [chatText, setChatText] = useState('');
+  const [sysProcessing, setSysProcessing] = useState(false);
 
   const colors = {
     bg: isDark ? '#000' : '#f2f2f7',
@@ -225,8 +226,16 @@ export default function ConfigScreen() {
     const trimmed = chatText.trim();
     if (!trimmed) return;
     // TODO: Send to system session
+    setSysProcessing(true);
     Alert.alert('System Session', `Would send: "${trimmed}"`);
     setChatText('');
+    // Simulate turn end for now
+    setTimeout(() => setSysProcessing(false), 2000);
+  };
+
+  const handleChatStop = () => {
+    // TODO: Send interrupt to system session
+    setSysProcessing(false);
   };
 
   const statusColor = {
@@ -485,14 +494,24 @@ export default function ConfigScreen() {
             onSubmitEditing={handleChatSend}
             blurOnSubmit={false}
           />
-          <TouchableOpacity
-            style={[styles.chatSendBtn, !chatText.trim() && styles.chatSendDisabled]}
-            onPress={handleChatSend}
-            disabled={!chatText.trim()}
-            activeOpacity={0.7}
-          >
-            <Text style={[styles.chatSendText, !chatText.trim() && { color: '#444' }]}>{'↑'}</Text>
-          </TouchableOpacity>
+          {sysProcessing ? (
+            <TouchableOpacity
+              style={styles.chatStopBtn}
+              onPress={handleChatStop}
+              activeOpacity={0.7}
+            >
+              <View style={styles.chatStopSquare} />
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={[styles.chatSendBtn, !chatText.trim() && styles.chatSendDisabled]}
+              onPress={handleChatSend}
+              disabled={!chatText.trim()}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.chatSendText, !chatText.trim() && { color: '#444' }]}>{'↑'}</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </KeyboardAvoidingView>
     </View>
@@ -574,4 +593,11 @@ const styles = StyleSheet.create({
   },
   chatSendDisabled: { backgroundColor: '#1c1c1e' },
   chatSendText: { color: '#fff', fontSize: 18, fontWeight: 'bold', marginTop: -1 },
+  chatStopBtn: {
+    width: 34, height: 34, borderRadius: 17, backgroundColor: '#ff3b30',
+    justifyContent: 'center', alignItems: 'center', marginLeft: 6,
+  },
+  chatStopSquare: {
+    width: 12, height: 12, borderRadius: 2, backgroundColor: '#fff',
+  },
 });
