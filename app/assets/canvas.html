@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      background: #0a0a0a; color: #fff;
+      min-height: 100vh;
+      padding: 0;
+      padding-bottom: 80px;
+      -webkit-font-smoothing: antialiased;
+      /* Grid background */
+      background-image:
+        linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+      background-size: 24px 24px;
+    }
+    #morph-canvas {
+      display: flex; flex-direction: column; gap: 12px;
+      padding: 16px; position: relative; z-index: 1;
+    }
+    .morph-component {
+      background: rgba(28,28,30,0.95); border-radius: 14px; padding: 16px;
+      border: 1px solid rgba(255,255,255,0.06); position: relative;
+      animation: fadeIn 0.3s ease;
+      backdrop-filter: blur(8px);
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .morph-component.draft {
+      border: 1px dashed rgba(255,255,255,0.15);
+    }
+    .morph-component.draft::after {
+      content: 'DRAFT'; position: absolute; top: 10px; right: 10px;
+      font-size: 9px; color: #666; text-transform: uppercase; letter-spacing: 1px;
+      background: rgba(255,255,255,0.06); padding: 3px 8px; border-radius: 4px;
+      font-weight: 600;
+    }
+    .morph-action-menu {
+      display: none; position: fixed; background: #2c2c2e;
+      border-radius: 14px; padding: 6px; gap: 2px;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.6); z-index: 1000;
+      flex-direction: column; min-width: 160px;
+      border: 1px solid rgba(255,255,255,0.1);
+      animation: menuIn 0.15s ease;
+    }
+    @keyframes menuIn {
+      from { opacity: 0; transform: scale(0.95); }
+      to { opacity: 1; transform: scale(1); }
+    }
+    .morph-action-menu.visible { display: flex; }
+    .morph-action-btn {
+      padding: 11px 16px; border: none; border-radius: 10px;
+      font-size: 15px; cursor: pointer; text-align: left;
+      background: transparent; color: #fff;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .morph-action-btn:active { background: rgba(255,255,255,0.08); }
+    .morph-action-btn .icon { font-size: 16px; width: 20px; text-align: center; }
+    .morph-action-btn.adopt .icon { color: #30d158; }
+    .morph-action-btn.dismiss .icon { color: #ff453a; }
+    .morph-action-btn.edit .icon { color: #5e5ce6; }
+    .morph-menu-sep { height: 1px; background: rgba(255,255,255,0.08); margin: 2px 8px; }
+
+    /* Empty state */
+    #morph-empty {
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; min-height: 70vh; color: #555;
+      padding: 40px 20px; text-align: center;
+    }
+    #morph-empty .logo {
+      font-size: 48px; margin-bottom: 20px; opacity: 0.12;
+      font-weight: 200; letter-spacing: -2px;
+    }
+    #morph-empty h2 {
+      font-size: 22px; margin-bottom: 8px; color: #666;
+      font-weight: 500; letter-spacing: -0.5px;
+    }
+    #morph-empty p {
+      font-size: 14px; line-height: 1.5; max-width: 260px; color: #444;
+    }
+    #morph-empty .hint {
+      margin-top: 32px; font-size: 12px; color: #444;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    #morph-empty .hint-item {
+      display: flex; align-items: center; gap: 8px;
+      background: rgba(255,255,255,0.02); padding: 8px 14px;
+      border-radius: 8px; font-size: 13px;
+    }
+    #morph-empty .hint-icon { color: #555; font-size: 14px; }
+
+    .morph-message { padding: 12px 16px; border-radius: 14px; margin: 4px 0; max-width: 85%; }
+    .morph-message.agent { background: #1c1c2e; align-self: flex-start; }
+    .morph-message.user { background: #1e3a2f; align-self: flex-end; margin-left: auto; }
+    .morph-message pre { white-space: pre-wrap; font-size: 13px; line-height: 1.5; }
+
+    /* === SKETCH MODE === */
+    #sketch-overlay {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      z-index: 500; display: none;
+      background:
+        linear-gradient(rgba(100,149,237,0.06) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(100,149,237,0.06) 1px, transparent 1px);
+      background-color: rgba(10,10,10,0.92);
+      background-size: 24px 24px;
+    }
+    #sketch-overlay.active { display: block; }
+    #sketch-canvas {
+      width: 100%; height: 100%;
+      touch-action: none;
+    }
+    #sketch-toolbar {
+      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+      display: flex; gap: 8px; z-index: 501;
+      background: #2c2c2e; border-radius: 16px; padding: 8px 12px;
+      border: 1px solid rgba(255,255,255,0.1);
+      box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+    }
+    .sketch-btn {
+      padding: 8px 16px; border: none; border-radius: 10px;
+      font-size: 14px; cursor: pointer; color: #fff;
+      background: transparent; font-weight: 500;
+    }
+    .sketch-btn:active { background: rgba(255,255,255,0.08); }
+    .sketch-btn.send { color: #30d158; }
+    .sketch-btn.clear { color: #ff9f0a; }
+    .sketch-btn.close { color: #ff453a; }
+    .sketch-btn.undo { color: #5e5ce6; }
+
+    /* Color picker dots */
+    .sketch-colors { display: flex; gap: 6px; align-items: center; padding: 0 4px; }
+    .sketch-color {
+      width: 22px; height: 22px; border-radius: 11px; border: 2px solid transparent;
+      cursor: pointer;
+    }
+    .sketch-color.active { border-color: #fff; }
+    .sketch-sep { width: 1px; height: 24px; background: rgba(255,255,255,0.1); }
+
+    /* Sketch mode indicator */
+    #sketch-label {
+      position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
+      z-index: 501; background: rgba(94,92,230,0.2); color: #818cf8;
+      padding: 4px 14px; border-radius: 20px; font-size: 12px;
+      font-weight: 600; letter-spacing: 0.5px;
+    }
+  </style>
+</head>
+<body>
+  <div id="morph-canvas"></div>
+  <div id="morph-empty">
+    <div class="logo">M</div>
+    <h2>Your canvas is empty</h2>
+    <p>Connect to Claude Code, then ask it to build UI components for you.</p>
+    <div class="hint">
+      <div class="hint-item"><span class="hint-icon">1</span> Pair via Settings tab</div>
+      <div class="hint-item"><span class="hint-icon">2</span> Type a request below</div>
+      <div class="hint-item"><span class="hint-icon">3</span> Long-press to adopt or remove</div>
+    </div>
+  </div>
+  <div class="morph-action-menu" id="morph-menu"></div>
+
+  <!-- Sketch overlay -->
+  <div id="sketch-overlay">
+    <canvas id="sketch-canvas"></canvas>
+    <div id="sketch-label">SKETCH MODE</div>
+    <div id="sketch-toolbar">
+      <div class="sketch-colors">
+        <div class="sketch-color active" data-color="#fff" style="background:#fff"></div>
+        <div class="sketch-color" data-color="#ff453a" style="background:#ff453a"></div>
+        <div class="sketch-color" data-color="#30d158" style="background:#30d158"></div>
+        <div class="sketch-color" data-color="#5e5ce6" style="background:#5e5ce6"></div>
+        <div class="sketch-color" data-color="#ff9f0a" style="background:#ff9f0a"></div>
+      </div>
+      <div class="sketch-sep"></div>
+      <button class="sketch-btn undo" onclick="_sketchUndo()">Undo</button>
+      <button class="sketch-btn clear" onclick="_sketchClear()">Clear</button>
+      <div class="sketch-sep"></div>
+      <button class="sketch-btn send" onclick="_sketchSend()">Send</button>
+      <button class="sketch-btn close" onclick="_sketchClose()">X</button>
+    </div>
+  </div>
+
+  <script>
+    // === STATE ===
+    var _components = new Map();
+    var _listeners = new Map();
+    var _store = {};
+    var _menuTarget = null;
+
+    // === SKETCH STATE ===
+    var _sketchActive = false;
+    var _sketchCtx = null;
+    var _sketchDrawing = false;
+    var _sketchColor = '#fff';
+    var _sketchHistory = []; // array of ImageData for undo
+    var _sketchLineWidth = 3;
+
+    // === BRIDGE ===
+    function _postToNative(action, payload) {
+      if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(JSON.stringify(Object.assign({ action: action }, payload || {})));
+      }
+    }
+
+    function _handleNativeMessage(msg) {
+      var data = typeof msg === 'string' ? JSON.parse(msg) : msg;
+      switch (data.action) {
+        case 'canvas.add':
+          _addComponent(data.id, data.html, data.status || 'draft');
+          break;
+        case 'canvas.update':
+          _updateComponent(data.id, data.html);
+          break;
+        case 'canvas.remove':
+          _removeComponent(data.id);
+          break;
+        case 'canvas.reorder':
+          _reorderComponents(data.ids);
+          break;
+        case 'canvas.load':
+          if (data.components) {
+            data.components.forEach(function(c) { _addComponent(c.id, c.html, 'adopted'); });
+          }
+          break;
+        case 'sketch.open':
+          _sketchOpen();
+          break;
+        case 'message':
+          _emit('message', data.data);
+          break;
+        case 'tool_call':
+          _emit('tool_call', data.data);
+          break;
+        case 'turn_end':
+          _emit('turn_end', data.data);
+          break;
+      }
+    }
+
+    window.addEventListener('message', function(e) { _handleNativeMessage(e.data); });
+    window._morphReceive = _handleNativeMessage;
+
+    // === COMPONENTS ===
+    function _addComponent(id, html, status) {
+      _components.set(id, { html: html, status: status });
+      var canvas = document.getElementById('morph-canvas');
+      var empty = document.getElementById('morph-empty');
+      if (empty) empty.style.display = 'none';
+
+      var wrapper = document.createElement('div');
+      wrapper.id = 'morph-c-' + id;
+      wrapper.className = 'morph-component' + (status === 'draft' ? ' draft' : '');
+      wrapper.innerHTML = html;
+      wrapper.setAttribute('data-component-id', id);
+
+      var pressTimer = null;
+      wrapper.addEventListener('touchstart', function(e) {
+        var touch = e.touches[0];
+        var tx = touch.clientX, ty = touch.clientY;
+        pressTimer = setTimeout(function() { _showMenu(id, tx, ty); }, 500);
+      });
+      wrapper.addEventListener('touchend', function() { clearTimeout(pressTimer); });
+      wrapper.addEventListener('touchmove', function() { clearTimeout(pressTimer); });
+
+      canvas.appendChild(wrapper);
+
+      var scripts = wrapper.querySelectorAll('script');
+      scripts.forEach(function(s) {
+        var newScript = document.createElement('script');
+        newScript.textContent = s.textContent;
+        s.parentNode.replaceChild(newScript, s);
+      });
+    }
+
+    function _updateComponent(id, html) {
+      var el = document.getElementById('morph-c-' + id);
+      if (el) {
+        el.innerHTML = html;
+        var comp = _components.get(id);
+        if (comp) comp.html = html;
+        var scripts = el.querySelectorAll('script');
+        scripts.forEach(function(s) {
+          var newScript = document.createElement('script');
+          newScript.textContent = s.textContent;
+          s.parentNode.replaceChild(newScript, s);
+        });
+      }
+    }
+
+    function _removeComponent(id) {
+      var el = document.getElementById('morph-c-' + id);
+      if (el) {
+        el.style.animation = 'fadeOut 0.2s ease forwards';
+        setTimeout(function() { el.remove(); }, 200);
+      }
+      _components.delete(id);
+      if (_components.size === 0) {
+        var empty = document.getElementById('morph-empty');
+        if (empty) empty.style.display = 'flex';
+      }
+    }
+
+    function _reorderComponents(ids) {
+      var canvas = document.getElementById('morph-canvas');
+      ids.forEach(function(id) {
+        var el = document.getElementById('morph-c-' + id);
+        if (el) canvas.appendChild(el);
+      });
+    }
+
+    // === ACTION MENU ===
+    function _showMenu(id, x, y) {
+      if (_sketchActive) return;
+      _menuTarget = id;
+      var comp = _components.get(id);
+      var menu = document.getElementById('morph-menu');
+      menu.innerHTML = '';
+
+      if (comp && comp.status === 'draft') {
+        var adoptBtn = document.createElement('button');
+        adoptBtn.className = 'morph-action-btn adopt';
+        adoptBtn.innerHTML = '<span class="icon">+</span> Adopt';
+        adoptBtn.onclick = function() { _hideMenu(); morph.adopt(id); };
+        menu.appendChild(adoptBtn);
+        menu.appendChild(_sep());
+      }
+
+      var editBtn = document.createElement('button');
+      editBtn.className = 'morph-action-btn edit';
+      editBtn.innerHTML = '<span class="icon">/</span> Edit';
+      editBtn.onclick = function() { _hideMenu(); morph.send('Edit component ' + id); };
+      menu.appendChild(editBtn);
+      menu.appendChild(_sep());
+
+      var dismissBtn = document.createElement('button');
+      dismissBtn.className = 'morph-action-btn dismiss';
+      dismissBtn.innerHTML = '<span class="icon">-</span> Remove';
+      dismissBtn.onclick = function() { _hideMenu(); morph.dismiss(id); };
+      menu.appendChild(dismissBtn);
+
+      menu.style.left = Math.min(x, window.innerWidth - 180) + 'px';
+      menu.style.top = Math.min(y - 20, window.innerHeight - 180) + 'px';
+      menu.classList.add('visible');
+    }
+
+    function _sep() {
+      var d = document.createElement('div');
+      d.className = 'morph-menu-sep';
+      return d;
+    }
+
+    function _hideMenu() {
+      document.getElementById('morph-menu').classList.remove('visible');
+      _menuTarget = null;
+    }
+    document.addEventListener('touchstart', function(e) {
+      if (!e.target.closest('.morph-action-menu') && !_sketchActive) _hideMenu();
+    });
+
+    // === SKETCH MODE ===
+    function _sketchInit() {
+      var c = document.getElementById('sketch-canvas');
+      var dpr = window.devicePixelRatio || 1;
+      c.width = window.innerWidth * dpr;
+      c.height = window.innerHeight * dpr;
+      c.style.width = window.innerWidth + 'px';
+      c.style.height = window.innerHeight + 'px';
+      _sketchCtx = c.getContext('2d');
+      _sketchCtx.scale(dpr, dpr);
+      _sketchCtx.lineCap = 'round';
+      _sketchCtx.lineJoin = 'round';
+      _sketchCtx.lineWidth = _sketchLineWidth;
+      _sketchCtx.strokeStyle = _sketchColor;
+
+      // Touch handlers
+      c.addEventListener('touchstart', _sketchTouchStart, { passive: false });
+      c.addEventListener('touchmove', _sketchTouchMove, { passive: false });
+      c.addEventListener('touchend', _sketchTouchEnd);
+
+      // Color picker
+      document.querySelectorAll('.sketch-color').forEach(function(el) {
+        el.addEventListener('click', function() {
+          document.querySelectorAll('.sketch-color').forEach(function(e) { e.classList.remove('active'); });
+          el.classList.add('active');
+          _sketchColor = el.dataset.color;
+          if (_sketchCtx) _sketchCtx.strokeStyle = _sketchColor;
+        });
+      });
+    }
+
+    function _sketchTouchStart(e) {
+      e.preventDefault();
+      _sketchDrawing = true;
+      // Save state for undo
+      var c = document.getElementById('sketch-canvas');
+      _sketchHistory.push(_sketchCtx.getImageData(0, 0, c.width, c.height));
+      if (_sketchHistory.length > 30) _sketchHistory.shift();
+
+      var t = e.touches[0];
+      _sketchCtx.beginPath();
+      _sketchCtx.moveTo(t.clientX, t.clientY);
+    }
+
+    function _sketchTouchMove(e) {
+      e.preventDefault();
+      if (!_sketchDrawing) return;
+      var t = e.touches[0];
+      _sketchCtx.lineTo(t.clientX, t.clientY);
+      _sketchCtx.stroke();
+    }
+
+    function _sketchTouchEnd() {
+      _sketchDrawing = false;
+      _sketchCtx.closePath();
+    }
+
+    function _sketchOpen() {
+      _sketchActive = true;
+      var overlay = document.getElementById('sketch-overlay');
+      overlay.classList.add('active');
+      _sketchInit();
+      _sketchClear();
+    }
+
+    function _sketchClose() {
+      _sketchActive = false;
+      document.getElementById('sketch-overlay').classList.remove('active');
+      _sketchHistory = [];
+    }
+
+    function _sketchClear() {
+      if (!_sketchCtx) return;
+      var c = document.getElementById('sketch-canvas');
+      _sketchCtx.clearRect(0, 0, c.width / (window.devicePixelRatio || 1), c.height / (window.devicePixelRatio || 1));
+      _sketchHistory = [];
+    }
+
+    function _sketchUndo() {
+      if (!_sketchCtx || _sketchHistory.length === 0) return;
+      var prev = _sketchHistory.pop();
+      _sketchCtx.putImageData(prev, 0, 0);
+    }
+
+    function _sketchSend() {
+      var c = document.getElementById('sketch-canvas');
+      // Downscale to max 400px to keep base64 under ~30KB
+      var maxDim = 400;
+      var dpr = window.devicePixelRatio || 1;
+      var w = c.width / dpr, h = c.height / dpr;
+      var scale = Math.min(maxDim / w, maxDim / h, 1);
+      var outW = Math.round(w * scale), outH = Math.round(h * scale);
+      var tmp = document.createElement('canvas');
+      tmp.width = outW; tmp.height = outH;
+      var tCtx = tmp.getContext('2d');
+      tCtx.fillStyle = '#0a0a0a';
+      tCtx.fillRect(0, 0, outW, outH);
+      // Draw grid on the compressed version for spatial reference
+      tCtx.strokeStyle = 'rgba(100,149,237,0.1)';
+      tCtx.lineWidth = 0.5;
+      var gridSize = 24 * scale;
+      for (var gx = 0; gx < outW; gx += gridSize) { tCtx.beginPath(); tCtx.moveTo(gx, 0); tCtx.lineTo(gx, outH); tCtx.stroke(); }
+      for (var gy = 0; gy < outH; gy += gridSize) { tCtx.beginPath(); tCtx.moveTo(0, gy); tCtx.lineTo(outW, gy); tCtx.stroke(); }
+      tCtx.drawImage(c, 0, 0, c.width, c.height, 0, 0, outW, outH);
+      var dataUrl = tmp.toDataURL('image/png');
+      _postToNative('sketch', { image: dataUrl });
+      _sketchClose();
+    }
+
+    // === EVENT SYSTEM ===
+    function _emit(event, data) {
+      var cbs = _listeners.get(event);
+      if (cbs) cbs.forEach(function(cb) { cb(data); });
+    }
+
+    // === PUBLIC API ===
+    window.morph = {
+      send: function(message) {
+        _postToNative('send', { message: message });
+      },
+      on: function(event, callback) {
+        if (!_listeners.has(event)) _listeners.set(event, new Set());
+        _listeners.get(event).add(callback);
+        return function() { _listeners.get(event).delete(callback); };
+      },
+      adopt: function(componentId) {
+        var comp = _components.get(componentId);
+        if (comp) {
+          comp.status = 'adopted';
+          var el = document.getElementById('morph-c-' + componentId);
+          if (el) el.classList.remove('draft');
+        }
+        _postToNative('adopt', { componentId: componentId });
+      },
+      dismiss: function(componentId) {
+        _removeComponent(componentId);
+        _postToNative('dismiss', { componentId: componentId });
+      },
+      sketch: function() {
+        _sketchOpen();
+      },
+      canvas: {
+        add: function(id, html) { _postToNative('canvas.add', { id: id, html: html }); },
+        update: function(id, html) { _postToNative('canvas.update', { id: id, html: html }); },
+        remove: function(id) { _postToNative('canvas.remove', { id: id }); },
+        reorder: function(ids) { _postToNative('canvas.reorder', { ids: ids }); },
+        getAll: function() {
+          return Array.from(_components.entries()).map(function(entry) {
+            return { id: entry[0], status: entry[1].status, hasHtml: !!entry[1].html };
+          });
+        }
+      },
+      store: {
+        get: function(key) { return _store[key]; },
+        set: function(key, value) {
+          _store[key] = value;
+          _postToNative('store.set', { key: key, value: value });
+        }
+      }
+    };
+
+    var style = document.createElement('style');
+    style.textContent = '@keyframes fadeOut { to { opacity: 0; transform: translateY(-8px); } }';
+    document.head.appendChild(style);
+
+    _postToNative('canvas.ready', {});
+  </script>
+</body>
+</html>

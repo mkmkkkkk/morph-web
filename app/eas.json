@@ -1,0 +1,25 @@
+{
+  "cli": { "version": ">= 15.0.0" },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "ios": { "simulator": false }
+    },
+    "preview": {
+      "distribution": "internal",
+      "ios": { "simulator": false }
+    },
+    "production": {
+      "autoIncrement": true
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "appleId": "yangzk01@gmail.com",
+        "ascAppId": "TBD"
+      }
+    }
+  }
+}
