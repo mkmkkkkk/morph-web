@@ -35,7 +35,14 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Morph needs camera access to scan QR codes for pairing."
+          "cameraPermission": "Morph needs camera access to scan QR codes and take photos."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Morph needs access to your photos to send images to Claude Code.",
+          "cameraPermission": "Morph needs camera access to take photos for Claude Code."
         }
       ]
     ]

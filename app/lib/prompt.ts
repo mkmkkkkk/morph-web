@@ -54,3 +54,13 @@ export function buildSketchMessage(imageDataUrl: string): string {
 Boxes→buttons/cards, lines→layout, text→labels, position→approximate layout on the grid.]
 ![sketch](${imageDataUrl})`;
 }
+
+/**
+ * Build a message wrapping a photo/image attachment for CC.
+ */
+export function buildImageMessage(imageDataUrl: string, caption?: string): string {
+  const intro = caption
+    ? `[Photo attached: ${caption}]`
+    : '[Photo attached from device camera/library]';
+  return `${intro}\n![photo](${imageDataUrl})`;
+}

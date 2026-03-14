@@ -1,17 +1,19 @@
 import React, { useState, useRef } from 'react';
 import {
   View, TextInput, TouchableOpacity, Text, StyleSheet,
-  KeyboardAvoidingView, Platform, useColorScheme,
+  KeyboardAvoidingView, Platform, useColorScheme, ActionSheetIOS, Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import * as ImagePicker from 'expo-image-picker';
 
 interface InputBarProps {
   onSend: (text: string) => void;
   onSketch?: () => void;
+  onImage?: (base64DataUrl: string) => void;
   connected: boolean;
 }
 
-export default function InputBar({ onSend, onSketch, connected }: InputBarProps) {
+export default function InputBar({ onSend, onSketch, onImage, connected }: InputBarProps) {
   const [text, setText] = useState('');
   const inputRef = useRef<TextInput>(null);
   const router = useRouter();
@@ -24,6 +26,50 @@ export default function InputBar({ onSend, onSketch, connected }: InputBarProps)
     setText('');
   };
 
+  const pickImage = async (useCamera: boolean) => {
+    const opts: ImagePicker.ImagePickerOptions = {
+      mediaTypes: ['images'],
+      base64: true,
+      quality: 0.7,
+      allowsEditing: true,
+    };
+
+    const result = useCamera
+      ? await ImagePicker.launchCameraAsync(opts)
+      : await ImagePicker.launchImageLibraryAsync(opts);
+
+    if (!result.canceled && result.assets[0]?.base64) {
+      const asset = result.assets[0];
+      const mime = asset.mimeType || 'image/jpeg';
+      const dataUrl = `data:${mime};base64,${asset.base64}`;
+      onImage?.(dataUrl);
+    }
+  };
+
+  const handleAttach = () => {
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options: ['Cancel', 'Take Photo', 'Choose from Library', 'Sketch'],
+          cancelButtonIndex: 0,
+        },
+        (idx) => {
+          if (idx === 1) pickImage(true);
+          else if (idx === 2) pickImage(false);
+          else if (idx === 3) onSketch?.();
+        },
+      );
+    } else {
+      // Android: show simple alert as action sheet
+      Alert.alert('Attach', undefined, [
+        { text: 'Take Photo', onPress: () => pickImage(true) },
+        { text: 'Choose from Library', onPress: () => pickImage(false) },
+        { text: 'Sketch', onPress: onSketch },
+        { text: 'Cancel', style: 'cancel' },
+      ]);
+    }
+  };
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -34,11 +80,11 @@ export default function InputBar({ onSend, onSketch, connected }: InputBarProps)
           <>
             <View style={[styles.dot, styles.dotConnected]} />
             <TouchableOpacity
-              style={styles.sketchBtn}
-              onPress={onSketch}
+              style={styles.attachBtn}
+              onPress={handleAttach}
               activeOpacity={0.6}
             >
-              <Text style={styles.sketchIcon}>/</Text>
+              <Text style={styles.attachIcon}>+</Text>
             </TouchableOpacity>
             <TextInput
               ref={inputRef}
@@ -103,7 +149,7 @@ const styles = StyleSheet.create({
   },
   dotConnected: { backgroundColor: '#30d158' },
   dotDisconnected: { backgroundColor: '#636366' },
-  sketchBtn: {
+  attachBtn: {
     width: 34,
     height: 34,
     borderRadius: 17,
@@ -112,11 +158,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 6,
   },
-  sketchIcon: {
+  attachIcon: {
     color: '#818cf8',
-    fontSize: 18,
-    fontWeight: '600',
-    transform: [{ rotate: '-45deg' }],
+    fontSize: 22,
+    fontWeight: '400',
+    marginTop: -1,
   },
   input: {
     flex: 1,

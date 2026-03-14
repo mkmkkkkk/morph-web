@@ -9,7 +9,7 @@ import { getSetting, setSetting } from '../../lib/settings';
 import { encryptUserMessage, parseUpdate, type SessionMessage } from '../../lib/protocol';
 import { HappyApi } from '../../lib/api';
 import { ComponentStore } from '../../lib/store';
-import { wrapUserMessage, buildSketchMessage } from '../../lib/prompt';
+import { wrapUserMessage, buildSketchMessage, buildImageMessage } from '../../lib/prompt';
 
 const KEEP_ALIVE_MS = 20_000;
 
@@ -189,6 +189,16 @@ export default function CanvasScreen() {
     connectionRef.current.sendMessage(sessionId, encrypted).catch(console.warn);
   }, [sessionId, sessionKey, sessionVariant, connected]);
 
+  // Handle photo/image from device camera or library
+  const handleImage = useCallback((imageDataUrl: string) => {
+    if (!sessionId || !sessionKey || !connected) return;
+    const manifest = storeRef.current.getManifest();
+    const imageText = buildImageMessage(imageDataUrl);
+    const msg = wrapUserMessage(imageText, manifest);
+    const encrypted = encryptUserMessage(msg, sessionKey, sessionVariant);
+    connectionRef.current.sendMessage(sessionId, encrypted).catch(console.warn);
+  }, [sessionId, sessionKey, sessionVariant, connected]);
+
   // Open sketch mode
   const handleOpenSketch = useCallback(() => {
     bridgeRef.current?.openSketch();
@@ -203,7 +213,7 @@ export default function CanvasScreen() {
         onSketch={handleSketch}
         bridgeRef={bridgeRef}
       />
-      <InputBar onSend={handleSend} onSketch={handleOpenSketch} connected={connected} />
+      <InputBar onSend={handleSend} onSketch={handleOpenSketch} onImage={handleImage} connected={connected} />
     </View>
   );
 }
