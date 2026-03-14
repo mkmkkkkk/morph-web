@@ -1,9 +1,10 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Alert, useColorScheme, KeyboardAvoidingView, Platform,
+  TextInput, Alert, useColorScheme,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import InputBar from '../../components/InputBar';
 import { loadCredentials, deleteCredentials, type HappyCredentials } from '../../lib/credentials';
 import { getSetting, setSetting, loadScheduledTasks, saveScheduledTasks, addScheduledTask, updateScheduledTask, removeScheduledTask, type ScheduledTask } from '../../lib/settings';
 import { ComponentStore, type CanvasSnapshot, type LibraryEntry } from '../../lib/store';
@@ -51,8 +52,7 @@ export default function ConfigScreen() {
   const [library, setLibrary] = useState<LibraryEntry[]>([]);
   // Scheduled Tasks
   const [tasks, setTasks] = useState<ScheduledTask[]>([]);
-  // Chat input
-  const [chatText, setChatText] = useState('');
+  // System session processing state
   const [sysProcessing, setSysProcessing] = useState(false);
 
   const colors = {
@@ -66,7 +66,6 @@ export default function ConfigScreen() {
     green: '#30d158',
     purple: '#5e5ce6',
     orange: '#ff9f0a',
-    inputBg: isDark ? '#1c1c1e' : '#e8e8e8',
   };
 
   const loadState = useCallback(async () => {
@@ -93,8 +92,6 @@ export default function ConfigScreen() {
         if (!task.enabled) continue;
         const lastRun = task.lastRun || 0;
         if (now - lastRun >= task.intervalMs) {
-          // TODO: Send task.prompt to system session when wired
-          // For now, mark as run and log
           console.log(`[Scheduler] Firing task: ${task.name}`);
           task.lastRun = now;
           updated = true;
@@ -105,7 +102,7 @@ export default function ConfigScreen() {
         await saveScheduledTasks(currentTasks);
         setTasks([...currentTasks]);
       }
-    }, 30_000); // Check every 30 seconds
+    }, 30_000);
 
     return () => clearInterval(interval);
   }, []);
@@ -136,11 +133,7 @@ export default function ConfigScreen() {
   };
 
   const handleQuickAction = (action: QuickAction) => {
-    // TODO: Send to system session when connected
-    // For now, show what would be sent
-    Alert.alert(action.label, `Prompt: "${action.prompt}"`, [
-      { text: 'OK' },
-    ]);
+    Alert.alert(action.label, `Prompt: "${action.prompt}"`, [{ text: 'OK' }]);
   };
 
   const handleRestoreSnapshot = (snap: CanvasSnapshot) => {
@@ -167,13 +160,11 @@ export default function ConfigScreen() {
   const handleExportComponent = async (entry: LibraryEntry) => {
     const json = await storeRef.current.exportLibraryComponent(entry.id);
     if (json) {
-      // Copy-like behavior: show the JSON for sharing
       Alert.alert('Export', `Share this JSON to import on another device:\n\n${json.substring(0, 200)}...`);
     }
   };
 
   const handleAddTask = async () => {
-    // Add a default example task — user can customize via system session
     const existingCount = tasks.length;
     const templates = [
       { name: 'Auto-Save Canvas', prompt: '[System] Save a snapshot of the current canvas state.', intervalMs: 30 * 60 * 1000 },
@@ -183,7 +174,7 @@ export default function ConfigScreen() {
     const template = templates[existingCount % templates.length];
     const task = await addScheduledTask({ ...template, enabled: false });
     setTasks(prev => [...prev, task]);
-    Alert.alert('Task Added', `"${template.name}" added (disabled). Tap toggle to enable, tap row to change interval, long-press to delete.`);
+    Alert.alert('Task Added', `"${template.name}" added (disabled). Toggle to enable, tap to change interval, long-press to delete.`);
   };
 
   const handleToggleTask = async (task: ScheduledTask) => {
@@ -222,19 +213,13 @@ export default function ConfigScreen() {
     return `${Math.round(ms / 86400000)}d`;
   };
 
-  const handleChatSend = () => {
-    const trimmed = chatText.trim();
-    if (!trimmed) return;
-    // TODO: Send to system session
+  const handleChatSend = (text: string) => {
     setSysProcessing(true);
-    Alert.alert('System Session', `Would send: "${trimmed}"`);
-    setChatText('');
-    // Simulate turn end for now
+    Alert.alert('System Session', `Would send: "${text}"`);
     setTimeout(() => setSysProcessing(false), 2000);
   };
 
   const handleChatStop = () => {
-    // TODO: Send interrupt to system session
     setSysProcessing(false);
   };
 
@@ -253,267 +238,215 @@ export default function ConfigScreen() {
     return `${Math.floor(diff / 86400000)}d ago`;
   };
 
+  // ===== Directory expand/collapse =====
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const toggle = (key: string) => setExpanded(prev => ({ ...prev, [key]: !prev[key] }));
+
+  const menuItems = [
+    { key: 'actions', label: 'Quick Actions', detail: `${DEFAULT_ACTIONS.length} actions`, icon: '◆' },
+    { key: 'tasks', label: 'Scheduled Tasks', detail: `${tasks.filter(t => t.enabled).length}/${tasks.length} active`, icon: '⏱' },
+    { key: 'history', label: 'Canvas History', detail: `${snapshots.length} saved`, icon: '◷' },
+    { key: 'library', label: 'Component Library', detail: `${library.length} components`, icon: '❖' },
+    { key: 'connection', label: 'Connection', detail: connectionStatus.charAt(0).toUpperCase() + connectionStatus.slice(1), icon: '●' },
+    { key: 'server', label: 'Server', detail: serverUrl.replace('https://', '').replace('http://', ''), icon: '⬡' },
+    { key: 'about', label: 'About', detail: 'v0.1.0', icon: 'ℹ' },
+  ];
+
   return (
     <View style={[styles.outerContainer, { backgroundColor: colors.bg }]}>
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+        <View style={styles.menuCard}>
+          <View style={[styles.card, { backgroundColor: colors.card }]}>
+            {menuItems.map((item, i) => (
+              <View key={item.key}>
+                {i > 0 && <View style={[styles.separator, { backgroundColor: colors.border }]} />}
 
-        {/* ===== QUICK ACTIONS ===== */}
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.secondary }]}>QUICK ACTIONS</Text>
-          <View style={styles.actionsGrid}>
-            {DEFAULT_ACTIONS.map((action) => (
-              <TouchableOpacity
-                key={action.id}
-                style={[styles.actionCard, { backgroundColor: colors.card }]}
-                onPress={() => handleQuickAction(action)}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.actionIcon, { color: colors.purple }]}>{action.icon}</Text>
-                <Text style={[styles.actionLabel, { color: colors.text }]} numberOfLines={1}>{action.label}</Text>
-              </TouchableOpacity>
+                {/* Directory row */}
+                <TouchableOpacity
+                  style={styles.row}
+                  onPress={() => toggle(item.key)}
+                  activeOpacity={0.6}
+                >
+                  <Text style={[styles.menuIcon, { color: item.key === 'connection' ? statusColor : colors.purple }]}>{item.icon}</Text>
+                  <Text style={[styles.label, { color: colors.text, flex: 1 }]}>{item.label}</Text>
+                  <Text style={[styles.detail, { color: colors.secondary }]}>{item.detail}</Text>
+                  <Text style={[styles.chevron, { color: colors.secondary, transform: [{ rotate: expanded[item.key] ? '90deg' : '0deg' }] }]}>{'>'}</Text>
+                </TouchableOpacity>
+
+                {/* Expanded: Quick Actions */}
+                {expanded[item.key] && item.key === 'actions' && (
+                  <View style={styles.expandedContent}>
+                    {DEFAULT_ACTIONS.map((action) => (
+                      <TouchableOpacity
+                        key={action.id}
+                        style={styles.subRow}
+                        onPress={() => handleQuickAction(action)}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={[styles.subIcon, { color: colors.purple }]}>{action.icon}</Text>
+                        <Text style={[styles.label, { color: colors.text }]}>{action.label}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+
+                {/* Expanded: Scheduled Tasks */}
+                {expanded[item.key] && item.key === 'tasks' && (
+                  <View style={styles.expandedContent}>
+                    {tasks.length === 0 ? (
+                      <Text style={[styles.emptyText, { color: colors.secondary }]}>No scheduled tasks</Text>
+                    ) : (
+                      tasks.map((task) => (
+                        <TouchableOpacity
+                          key={task.id}
+                          style={styles.subRow}
+                          onPress={() => handleChangeInterval(task)}
+                          onLongPress={() => handleDeleteTask(task)}
+                          activeOpacity={0.7}
+                        >
+                          <View style={{ flex: 1, opacity: task.enabled ? 1 : 0.4 }}>
+                            <Text style={[styles.label, { color: colors.text }]}>{task.name}</Text>
+                            <Text style={[styles.meta, { color: colors.secondary }]}>
+                              Every {formatInterval(task.intervalMs)}
+                              {task.lastRun ? ` · ${timeAgo(task.lastRun)}` : ''}
+                            </Text>
+                          </View>
+                          <TouchableOpacity
+                            style={[styles.toggleBtn, { backgroundColor: task.enabled ? colors.green : colors.border }]}
+                            onPress={() => handleToggleTask(task)}
+                            activeOpacity={0.6}
+                          >
+                            <View style={[styles.toggleKnob, { alignSelf: task.enabled ? 'flex-end' : 'flex-start' }]} />
+                          </TouchableOpacity>
+                        </TouchableOpacity>
+                      ))
+                    )}
+                    <TouchableOpacity style={styles.subRow} onPress={handleAddTask} activeOpacity={0.6}>
+                      <Text style={{ color: colors.purple, fontSize: 15, fontWeight: '600' }}>+ Add Task</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                {/* Expanded: Canvas History */}
+                {expanded[item.key] && item.key === 'history' && (
+                  <View style={styles.expandedContent}>
+                    {snapshots.length === 0 ? (
+                      <Text style={[styles.emptyText, { color: colors.secondary }]}>No saved canvases yet</Text>
+                    ) : (
+                      snapshots.map((snap) => (
+                        <TouchableOpacity key={snap.id} style={styles.subRow} onPress={() => handleRestoreSnapshot(snap)}>
+                          <View style={{ flex: 1 }}>
+                            <Text style={[styles.label, { color: colors.text }]}>{snap.name}</Text>
+                            <Text style={[styles.meta, { color: colors.secondary }]}>{snap.componentCount} components · {timeAgo(snap.createdAt)}</Text>
+                          </View>
+                        </TouchableOpacity>
+                      ))
+                    )}
+                  </View>
+                )}
+
+                {/* Expanded: Component Library */}
+                {expanded[item.key] && item.key === 'library' && (
+                  <View style={styles.expandedContent}>
+                    {library.length === 0 ? (
+                      <Text style={[styles.emptyText, { color: colors.secondary }]}>No saved components</Text>
+                    ) : (
+                      library.map((entry) => (
+                        <TouchableOpacity
+                          key={entry.id}
+                          style={styles.subRow}
+                          onPress={() => handleUseLibraryComponent(entry)}
+                          onLongPress={() => handleExportComponent(entry)}
+                        >
+                          <View style={{ flex: 1 }}>
+                            <Text style={[styles.label, { color: colors.text }]}>{entry.name}</Text>
+                            <Text style={[styles.meta, { color: colors.secondary }]} numberOfLines={1}>
+                              {entry.description || entry.tags.join(', ') || 'No description'}
+                            </Text>
+                          </View>
+                          <Text style={{ color: colors.green, fontSize: 18 }}>+</Text>
+                        </TouchableOpacity>
+                      ))
+                    )}
+                  </View>
+                )}
+
+                {/* Expanded: Connection */}
+                {expanded[item.key] && item.key === 'connection' && (
+                  <View style={styles.expandedContent}>
+                    <View style={styles.subRow}>
+                      <Text style={[styles.label, { color: colors.text }]}>Encryption</Text>
+                      <Text style={[styles.detail, { color: colors.secondary }]}>
+                        {credentials?.encryption.type === 'legacy' ? 'TweetNaCl' :
+                         credentials?.encryption.type === 'dataKey' ? 'AES-256-GCM' : 'N/A'}
+                      </Text>
+                    </View>
+                    {credentials ? (
+                      <TouchableOpacity style={styles.subRow} onPress={handleUnpair}>
+                        <Text style={[styles.label, { color: colors.danger }]}>Unpair Device</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <TouchableOpacity style={styles.subRow} onPress={() => router.push('/connect')}>
+                        <Text style={[styles.label, { color: colors.accent }]}>Connect to Claude Code</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
+
+                {/* Expanded: Server */}
+                {expanded[item.key] && item.key === 'server' && (
+                  <View style={styles.expandedContent}>
+                    {editingServer ? (
+                      <View style={{ padding: 12 }}>
+                        <TextInput
+                          style={[styles.serverInput, { color: colors.text, borderColor: colors.border }]}
+                          value={serverUrl}
+                          onChangeText={setServerUrl}
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                          keyboardType="url"
+                          placeholder="https://api.cluster-fluster.com"
+                          placeholderTextColor={colors.secondary}
+                        />
+                        <View style={styles.editButtons}>
+                          <TouchableOpacity onPress={() => { setEditingServer(false); setServerUrl(getSetting('serverUrl')); }}>
+                            <Text style={{ color: colors.secondary, fontSize: 16 }}>Cancel</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={handleSaveServer}>
+                            <Text style={{ color: colors.accent, fontSize: 16, fontWeight: '600' }}>Save</Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    ) : (
+                      <TouchableOpacity style={styles.subRow} onPress={() => setEditingServer(true)}>
+                        <Text style={[styles.label, { color: colors.accent }]}>Edit Server URL</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
+
+                {/* Expanded: About */}
+                {expanded[item.key] && item.key === 'about' && (
+                  <View style={styles.expandedContent}>
+                    <View style={styles.subRow}>
+                      <Text style={[styles.label, { color: colors.text }]}>Build</Text>
+                      <Text style={[styles.detail, { color: colors.secondary }]}>Expo SDK 54</Text>
+                    </View>
+                  </View>
+                )}
+              </View>
             ))}
           </View>
         </View>
-
-        {/* ===== SCHEDULED TASKS ===== */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, { color: colors.secondary, marginBottom: 0, marginLeft: 0 }]}>SCHEDULED TASKS</Text>
-            <TouchableOpacity onPress={handleAddTask} activeOpacity={0.6}>
-              <Text style={{ color: colors.purple, fontSize: 15, fontWeight: '600' }}>+ Add</Text>
-            </TouchableOpacity>
-          </View>
-          <View style={[styles.card, { backgroundColor: colors.card }]}>
-            {tasks.length === 0 ? (
-              <View style={styles.row}>
-                <Text style={[styles.label, { color: colors.secondary }]}>No scheduled tasks</Text>
-              </View>
-            ) : (
-              tasks.map((task, i) => (
-                <View key={task.id}>
-                  {i > 0 && <View style={[styles.separator, { backgroundColor: colors.border }]} />}
-                  <TouchableOpacity
-                    style={styles.row}
-                    onPress={() => handleChangeInterval(task)}
-                    onLongPress={() => handleDeleteTask(task)}
-                    activeOpacity={0.7}
-                  >
-                    <View style={{ flex: 1, opacity: task.enabled ? 1 : 0.4 }}>
-                      <Text style={[styles.label, { color: colors.text }]}>{task.name}</Text>
-                      <Text style={[styles.meta, { color: colors.secondary }]} numberOfLines={1}>
-                        Every {formatInterval(task.intervalMs)}
-                        {task.lastRun ? ` · ran ${timeAgo(task.lastRun)}` : ' · never ran'}
-                      </Text>
-                    </View>
-                    <TouchableOpacity
-                      style={[styles.toggleBtn, { backgroundColor: task.enabled ? colors.green : colors.border }]}
-                      onPress={() => handleToggleTask(task)}
-                      activeOpacity={0.6}
-                    >
-                      <View style={[styles.toggleKnob, { alignSelf: task.enabled ? 'flex-end' : 'flex-start' }]} />
-                    </TouchableOpacity>
-                  </TouchableOpacity>
-                </View>
-              ))
-            )}
-          </View>
-        </View>
-
-        {/* ===== CANVAS HISTORY ===== */}
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.secondary }]}>CANVAS HISTORY</Text>
-          <View style={[styles.card, { backgroundColor: colors.card }]}>
-            {snapshots.length === 0 ? (
-              <View style={styles.row}>
-                <Text style={[styles.label, { color: colors.secondary }]}>No saved canvases yet</Text>
-              </View>
-            ) : (
-              snapshots.map((snap, i) => (
-                <View key={snap.id}>
-                  {i > 0 && <View style={[styles.separator, { backgroundColor: colors.border }]} />}
-                  <TouchableOpacity style={styles.row} onPress={() => handleRestoreSnapshot(snap)}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.label, { color: colors.text }]}>{snap.name}</Text>
-                      <Text style={[styles.meta, { color: colors.secondary }]}>
-                        {snap.componentCount} components · {timeAgo(snap.createdAt)}
-                      </Text>
-                    </View>
-                    <Text style={[styles.chevron, { color: colors.secondary }]}>{'>'}</Text>
-                  </TouchableOpacity>
-                </View>
-              ))
-            )}
-          </View>
-        </View>
-
-        {/* ===== COMPONENT LIBRARY ===== */}
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.secondary }]}>COMPONENT LIBRARY</Text>
-          <View style={[styles.card, { backgroundColor: colors.card }]}>
-            {library.length === 0 ? (
-              <View style={styles.row}>
-                <Text style={[styles.label, { color: colors.secondary }]}>No saved components</Text>
-              </View>
-            ) : (
-              library.map((entry, i) => (
-                <View key={entry.id}>
-                  {i > 0 && <View style={[styles.separator, { backgroundColor: colors.border }]} />}
-                  <TouchableOpacity
-                    style={styles.row}
-                    onPress={() => handleUseLibraryComponent(entry)}
-                    onLongPress={() => handleExportComponent(entry)}
-                  >
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.label, { color: colors.text }]}>{entry.name}</Text>
-                      <Text style={[styles.meta, { color: colors.secondary }]} numberOfLines={1}>
-                        {entry.description || entry.tags.join(', ') || 'No description'}
-                      </Text>
-                    </View>
-                    <Text style={[styles.chevron, { color: colors.green }]}>+</Text>
-                  </TouchableOpacity>
-                </View>
-              ))
-            )}
-          </View>
-        </View>
-
-        {/* ===== CONNECTION ===== */}
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.secondary }]}>CONNECTION</Text>
-          <View style={[styles.card, { backgroundColor: colors.card }]}>
-            <View style={styles.row}>
-              <Text style={[styles.label, { color: colors.text }]}>Status</Text>
-              <View style={styles.statusRow}>
-                <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
-                <Text style={[styles.value, { color: colors.secondary }]}>
-                  {connectionStatus.charAt(0).toUpperCase() + connectionStatus.slice(1)}
-                </Text>
-              </View>
-            </View>
-            <View style={[styles.separator, { backgroundColor: colors.border }]} />
-            <View style={styles.row}>
-              <Text style={[styles.label, { color: colors.text }]}>Encryption</Text>
-              <Text style={[styles.value, { color: colors.secondary }]}>
-                {credentials?.encryption.type === 'legacy' ? 'TweetNaCl' :
-                 credentials?.encryption.type === 'dataKey' ? 'AES-256-GCM' : 'N/A'}
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        {/* ===== PAIRING ===== */}
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.secondary }]}>PAIRING</Text>
-          <View style={[styles.card, { backgroundColor: colors.card }]}>
-            {credentials ? (
-              <>
-                <View style={styles.row}>
-                  <Text style={[styles.label, { color: colors.text }]}>Device</Text>
-                  <Text style={[styles.value, { color: colors.secondary }]}>Paired</Text>
-                </View>
-                <View style={[styles.separator, { backgroundColor: colors.border }]} />
-                <TouchableOpacity style={styles.row} onPress={handleUnpair}>
-                  <Text style={[styles.label, { color: colors.danger }]}>Unpair Device</Text>
-                </TouchableOpacity>
-              </>
-            ) : (
-              <TouchableOpacity style={styles.row} onPress={() => router.push('/connect')}>
-                <Text style={[styles.label, { color: colors.accent }]}>Connect to Claude Code</Text>
-                <Text style={[styles.chevron, { color: colors.secondary }]}>{'>'}</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        </View>
-
-        {/* ===== SERVER ===== */}
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.secondary }]}>SERVER</Text>
-          <View style={[styles.card, { backgroundColor: colors.card }]}>
-            {editingServer ? (
-              <View style={styles.editRow}>
-                <TextInput
-                  style={[styles.serverInput, { color: colors.text, borderColor: colors.border }]}
-                  value={serverUrl}
-                  onChangeText={setServerUrl}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  keyboardType="url"
-                  placeholder="https://api.cluster-fluster.com"
-                  placeholderTextColor={colors.secondary}
-                />
-                <View style={styles.editButtons}>
-                  <TouchableOpacity onPress={() => { setEditingServer(false); setServerUrl(getSetting('serverUrl')); }}>
-                    <Text style={{ color: colors.secondary, fontSize: 16 }}>Cancel</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={handleSaveServer}>
-                    <Text style={{ color: colors.accent, fontSize: 16, fontWeight: '600' }}>Save</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ) : (
-              <TouchableOpacity style={styles.row} onPress={() => setEditingServer(true)}>
-                <Text style={[styles.label, { color: colors.text }]}>Server URL</Text>
-                <Text style={[styles.value, { color: colors.secondary }]} numberOfLines={1}>
-                  {serverUrl.replace('https://', '')}
-                </Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        </View>
-
-        {/* ===== ABOUT ===== */}
-        <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.secondary }]}>ABOUT</Text>
-          <View style={[styles.card, { backgroundColor: colors.card }]}>
-            <View style={styles.row}>
-              <Text style={[styles.label, { color: colors.text }]}>Version</Text>
-              <Text style={[styles.value, { color: colors.secondary }]}>0.1.0</Text>
-            </View>
-          </View>
-        </View>
-
-        <View style={{ height: 20 }} />
       </ScrollView>
 
-      {/* ===== SYSTEM SESSION CHAT BAR ===== */}
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={90}
-      >
-        <View style={[styles.chatBar, { backgroundColor: isDark ? '#0a0a0a' : '#f8f8f8', borderTopColor: isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.08)' }]}>
-          <View style={[styles.sessionDot, { backgroundColor: connectionStatus === 'connected' ? colors.green : '#636366' }]} />
-          <TextInput
-            style={[styles.chatInput, { backgroundColor: colors.inputBg, color: colors.text }]}
-            value={chatText}
-            onChangeText={setChatText}
-            placeholder="System session..."
-            placeholderTextColor={colors.secondary}
-            multiline
-            maxLength={10000}
-            returnKeyType="send"
-            onSubmitEditing={handleChatSend}
-            blurOnSubmit={false}
-          />
-          {sysProcessing ? (
-            <TouchableOpacity
-              style={styles.chatStopBtn}
-              onPress={handleChatStop}
-              activeOpacity={0.7}
-            >
-              <View style={styles.chatStopSquare} />
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity
-              style={[styles.chatSendBtn, !chatText.trim() && styles.chatSendDisabled]}
-              onPress={handleChatSend}
-              disabled={!chatText.trim()}
-              activeOpacity={0.7}
-            >
-              <Text style={[styles.chatSendText, !chatText.trim() && { color: '#444' }]}>{'↑'}</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      </KeyboardAvoidingView>
+      {/* System Session — identical InputBar as Canvas */}
+      <InputBar
+        onSend={handleChatSend}
+        onStop={handleChatStop}
+        connected={connectionStatus !== 'unpaired'}
+        isProcessing={sysProcessing}
+      />
     </View>
   );
 }
@@ -523,28 +456,27 @@ const styles = StyleSheet.create({
   scrollView: { flex: 1 },
   scrollContent: { paddingBottom: 20 },
 
-  section: { marginTop: 20, paddingHorizontal: 16 },
-  sectionTitle: { fontSize: 13, fontWeight: '500', marginBottom: 6, marginLeft: 16, letterSpacing: 0.5 },
-  card: { borderRadius: 10, overflow: 'hidden' },
+  menuCard: { marginTop: 20, paddingHorizontal: 16 },
+  card: { borderRadius: 12, overflow: 'hidden' },
   row: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingVertical: 12, paddingHorizontal: 16, minHeight: 44,
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: 13, paddingHorizontal: 16, minHeight: 48,
   },
+  menuIcon: { fontSize: 16, width: 28 },
   label: { fontSize: 16 },
-  value: { fontSize: 16 },
+  detail: { fontSize: 14, marginRight: 8 },
   meta: { fontSize: 13, marginTop: 2 },
-  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  statusDot: { width: 8, height: 8, borderRadius: 4 },
-  separator: { height: StyleSheet.hairlineWidth, marginLeft: 16 },
-  chevron: { fontSize: 18, fontWeight: '300' },
+  chevron: { fontSize: 16, fontWeight: '300' },
+  separator: { height: StyleSheet.hairlineWidth, marginLeft: 44 },
 
-  // Section header with right-side button
-  sectionHeader: {
-    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    marginBottom: 6, marginLeft: 16, marginRight: 16,
+  expandedContent: { paddingLeft: 28, paddingBottom: 4 },
+  subRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingVertical: 10, paddingHorizontal: 16, minHeight: 40,
   },
+  subIcon: { fontSize: 14, width: 24 },
+  emptyText: { paddingHorizontal: 16, paddingVertical: 10, fontSize: 14 },
 
-  // Toggle switch
   toggleBtn: {
     width: 44, height: 26, borderRadius: 13, padding: 2,
     justifyContent: 'center',
@@ -553,51 +485,8 @@ const styles = StyleSheet.create({
     width: 22, height: 22, borderRadius: 11, backgroundColor: '#fff',
   },
 
-  // Quick Actions grid
-  actionsGrid: {
-    flexDirection: 'row', flexWrap: 'wrap', gap: 8,
-  },
-  actionCard: {
-    width: '48%' as any,
-    flexBasis: '47%',
-    flexGrow: 1,
-    borderRadius: 12, padding: 14,
-    alignItems: 'center', gap: 6,
-  },
-  actionIcon: { fontSize: 22 },
-  actionLabel: { fontSize: 13, fontWeight: '500' },
-
-  // Server edit
-  editRow: { padding: 16 },
   serverInput: {
     fontSize: 16, borderWidth: 1, borderRadius: 8, padding: 10, marginBottom: 12,
   },
   editButtons: { flexDirection: 'row', justifyContent: 'flex-end', gap: 20 },
-
-  // Chat bar
-  chatBar: {
-    flexDirection: 'row', alignItems: 'flex-end',
-    paddingHorizontal: 10, paddingVertical: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  sessionDot: {
-    width: 7, height: 7, borderRadius: 3.5, marginRight: 6, marginBottom: 14,
-  },
-  chatInput: {
-    flex: 1, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10,
-    fontSize: 16, maxHeight: 120,
-  },
-  chatSendBtn: {
-    width: 34, height: 34, borderRadius: 17, backgroundColor: '#5e5ce6',
-    justifyContent: 'center', alignItems: 'center', marginLeft: 6,
-  },
-  chatSendDisabled: { backgroundColor: '#1c1c1e' },
-  chatSendText: { color: '#fff', fontSize: 18, fontWeight: 'bold', marginTop: -1 },
-  chatStopBtn: {
-    width: 34, height: 34, borderRadius: 17, backgroundColor: '#ff3b30',
-    justifyContent: 'center', alignItems: 'center', marginLeft: 6,
-  },
-  chatStopSquare: {
-    width: 12, height: 12, borderRadius: 2, backgroundColor: '#fff',
-  },
 });
