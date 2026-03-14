@@ -85,3 +85,60 @@ export const Settings = {
   getProxyUrl: (): string | null => cache.proxyUrl,
   setProxyUrl: (url: string | null): void => setSetting('proxyUrl', url),
 };
+
+// ===== SCHEDULED TASKS =====
+
+const TASKS_STORAGE_KEY = 'morph-scheduled-tasks';
+
+export interface ScheduledTask {
+  id: string;
+  name: string;
+  prompt: string;
+  intervalMs: number;
+  lastRun: number | null;
+  enabled: boolean;
+}
+
+let tasksCache: ScheduledTask[] | null = null;
+
+export async function loadScheduledTasks(): Promise<ScheduledTask[]> {
+  if (tasksCache) return tasksCache;
+  try {
+    const raw = await AsyncStorage.getItem(TASKS_STORAGE_KEY);
+    tasksCache = raw ? JSON.parse(raw) : [];
+  } catch {
+    tasksCache = [];
+  }
+  return tasksCache!;
+}
+
+export async function saveScheduledTasks(tasks: ScheduledTask[]): Promise<void> {
+  tasksCache = tasks;
+  await AsyncStorage.setItem(TASKS_STORAGE_KEY, JSON.stringify(tasks));
+}
+
+export async function addScheduledTask(task: Omit<ScheduledTask, 'id' | 'lastRun'>): Promise<ScheduledTask> {
+  const tasks = await loadScheduledTasks();
+  const newTask: ScheduledTask = {
+    ...task,
+    id: 'task-' + Date.now(),
+    lastRun: null,
+  };
+  tasks.push(newTask);
+  await saveScheduledTasks(tasks);
+  return newTask;
+}
+
+export async function updateScheduledTask(id: string, updates: Partial<ScheduledTask>): Promise<void> {
+  const tasks = await loadScheduledTasks();
+  const idx = tasks.findIndex(t => t.id === id);
+  if (idx >= 0) {
+    tasks[idx] = { ...tasks[idx], ...updates };
+    await saveScheduledTasks(tasks);
+  }
+}
+
+export async function removeScheduledTask(id: string): Promise<void> {
+  const tasks = await loadScheduledTasks();
+  await saveScheduledTasks(tasks.filter(t => t.id !== id));
+}

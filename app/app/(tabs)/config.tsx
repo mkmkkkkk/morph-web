@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { loadCredentials, deleteCredentials, type HappyCredentials } from '../../lib/credentials';
-import { getSetting, setSetting } from '../../lib/settings';
+import { getSetting, setSetting, loadScheduledTasks, saveScheduledTasks, addScheduledTask, updateScheduledTask, removeScheduledTask, type ScheduledTask } from '../../lib/settings';
 import { ComponentStore, type CanvasSnapshot, type LibraryEntry } from '../../lib/store';
 
 // ===== Quick Actions — programmable one-tap prompts =====
@@ -21,6 +21,16 @@ const DEFAULT_ACTIONS: QuickAction[] = [
   { id: 'status', label: 'Status Check', prompt: '[System] Report: connection status, canvas component count, storage usage.', icon: '◇' },
   { id: 'clear', label: 'Clear Canvas', prompt: '[System] Remove all draft components from the canvas.', icon: '×' },
   { id: 'dashboard', label: 'Build Dashboard', prompt: 'Build me a dashboard component with: connection status, component count, last snapshot time, and storage usage.', icon: '▦' },
+];
+
+// Interval presets for scheduled tasks
+const INTERVAL_OPTIONS = [
+  { label: '5 min', ms: 5 * 60 * 1000 },
+  { label: '15 min', ms: 15 * 60 * 1000 },
+  { label: '30 min', ms: 30 * 60 * 1000 },
+  { label: '1 hr', ms: 60 * 60 * 1000 },
+  { label: '6 hr', ms: 6 * 60 * 60 * 1000 },
+  { label: '24 hr', ms: 24 * 60 * 60 * 1000 },
 ];
 
 type ConnectionStatus = 'unpaired' | 'disconnected' | 'connecting' | 'connected';
@@ -39,6 +49,8 @@ export default function ConfigScreen() {
   const [snapshots, setSnapshots] = useState<CanvasSnapshot[]>([]);
   // Component Library
   const [library, setLibrary] = useState<LibraryEntry[]>([]);
+  // Scheduled Tasks
+  const [tasks, setTasks] = useState<ScheduledTask[]>([]);
   // Chat input
   const [chatText, setChatText] = useState('');
 
@@ -64,9 +76,38 @@ export default function ConfigScreen() {
     await storeRef.current.init();
     setSnapshots(await storeRef.current.listSnapshots());
     setLibrary(await storeRef.current.listLibrary());
+    setTasks(await loadScheduledTasks());
   }, []);
 
   useEffect(() => { loadState(); }, [loadState]);
+
+  // ===== Task Scheduler — fires enabled tasks when due =====
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      const currentTasks = await loadScheduledTasks();
+      const now = Date.now();
+      let updated = false;
+
+      for (const task of currentTasks) {
+        if (!task.enabled) continue;
+        const lastRun = task.lastRun || 0;
+        if (now - lastRun >= task.intervalMs) {
+          // TODO: Send task.prompt to system session when wired
+          // For now, mark as run and log
+          console.log(`[Scheduler] Firing task: ${task.name}`);
+          task.lastRun = now;
+          updated = true;
+        }
+      }
+
+      if (updated) {
+        await saveScheduledTasks(currentTasks);
+        setTasks([...currentTasks]);
+      }
+    }, 30_000); // Check every 30 seconds
+
+    return () => clearInterval(interval);
+  }, []);
 
   // --- Handlers ---
   const handleUnpair = () => {
@@ -130,6 +171,56 @@ export default function ConfigScreen() {
     }
   };
 
+  const handleAddTask = async () => {
+    // Add a default example task — user can customize via system session
+    const existingCount = tasks.length;
+    const templates = [
+      { name: 'Auto-Save Canvas', prompt: '[System] Save a snapshot of the current canvas state.', intervalMs: 30 * 60 * 1000 },
+      { name: 'Health Check', prompt: '[System] Report: connection status, component count, storage usage, last error.', intervalMs: 60 * 60 * 1000 },
+      { name: 'Daily Summary', prompt: '[System] Generate a daily summary: what changed on the canvas today, key metrics, and suggestions.', intervalMs: 24 * 60 * 60 * 1000 },
+    ];
+    const template = templates[existingCount % templates.length];
+    const task = await addScheduledTask({ ...template, enabled: false });
+    setTasks(prev => [...prev, task]);
+    Alert.alert('Task Added', `"${template.name}" added (disabled). Tap toggle to enable, tap row to change interval, long-press to delete.`);
+  };
+
+  const handleToggleTask = async (task: ScheduledTask) => {
+    await updateScheduledTask(task.id, { enabled: !task.enabled });
+    setTasks(prev => prev.map(t => t.id === task.id ? { ...t, enabled: !t.enabled } : t));
+  };
+
+  const handleDeleteTask = (task: ScheduledTask) => {
+    Alert.alert('Delete Task', `Remove "${task.name}"?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete', style: 'destructive',
+        onPress: async () => {
+          await removeScheduledTask(task.id);
+          setTasks(prev => prev.filter(t => t.id !== task.id));
+        },
+      },
+    ]);
+  };
+
+  const handleChangeInterval = (task: ScheduledTask) => {
+    const buttons = INTERVAL_OPTIONS.map(opt => ({
+      text: opt.label + (task.intervalMs === opt.ms ? ' ✓' : ''),
+      onPress: async () => {
+        await updateScheduledTask(task.id, { intervalMs: opt.ms });
+        setTasks(prev => prev.map(t => t.id === task.id ? { ...t, intervalMs: opt.ms } : t));
+      },
+    }));
+    buttons.push({ text: 'Cancel', onPress: async () => {} });
+    Alert.alert('Set Interval', `Current: ${formatInterval(task.intervalMs)}`, buttons);
+  };
+
+  const formatInterval = (ms: number) => {
+    if (ms < 60 * 60 * 1000) return `${Math.round(ms / 60000)}m`;
+    if (ms < 24 * 60 * 60 * 1000) return `${Math.round(ms / 3600000)}h`;
+    return `${Math.round(ms / 86400000)}d`;
+  };
+
   const handleChatSend = () => {
     const trimmed = chatText.trim();
     if (!trimmed) return;
@@ -172,6 +263,50 @@ export default function ConfigScreen() {
                 <Text style={[styles.actionLabel, { color: colors.text }]} numberOfLines={1}>{action.label}</Text>
               </TouchableOpacity>
             ))}
+          </View>
+        </View>
+
+        {/* ===== SCHEDULED TASKS ===== */}
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={[styles.sectionTitle, { color: colors.secondary, marginBottom: 0, marginLeft: 0 }]}>SCHEDULED TASKS</Text>
+            <TouchableOpacity onPress={handleAddTask} activeOpacity={0.6}>
+              <Text style={{ color: colors.purple, fontSize: 15, fontWeight: '600' }}>+ Add</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={[styles.card, { backgroundColor: colors.card }]}>
+            {tasks.length === 0 ? (
+              <View style={styles.row}>
+                <Text style={[styles.label, { color: colors.secondary }]}>No scheduled tasks</Text>
+              </View>
+            ) : (
+              tasks.map((task, i) => (
+                <View key={task.id}>
+                  {i > 0 && <View style={[styles.separator, { backgroundColor: colors.border }]} />}
+                  <TouchableOpacity
+                    style={styles.row}
+                    onPress={() => handleChangeInterval(task)}
+                    onLongPress={() => handleDeleteTask(task)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={{ flex: 1, opacity: task.enabled ? 1 : 0.4 }}>
+                      <Text style={[styles.label, { color: colors.text }]}>{task.name}</Text>
+                      <Text style={[styles.meta, { color: colors.secondary }]} numberOfLines={1}>
+                        Every {formatInterval(task.intervalMs)}
+                        {task.lastRun ? ` · ran ${timeAgo(task.lastRun)}` : ' · never ran'}
+                      </Text>
+                    </View>
+                    <TouchableOpacity
+                      style={[styles.toggleBtn, { backgroundColor: task.enabled ? colors.green : colors.border }]}
+                      onPress={() => handleToggleTask(task)}
+                      activeOpacity={0.6}
+                    >
+                      <View style={[styles.toggleKnob, { alignSelf: task.enabled ? 'flex-end' : 'flex-start' }]} />
+                    </TouchableOpacity>
+                  </TouchableOpacity>
+                </View>
+              ))
+            )}
           </View>
         </View>
 
@@ -383,6 +518,21 @@ const styles = StyleSheet.create({
   statusDot: { width: 8, height: 8, borderRadius: 4 },
   separator: { height: StyleSheet.hairlineWidth, marginLeft: 16 },
   chevron: { fontSize: 18, fontWeight: '300' },
+
+  // Section header with right-side button
+  sectionHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    marginBottom: 6, marginLeft: 16, marginRight: 16,
+  },
+
+  // Toggle switch
+  toggleBtn: {
+    width: 44, height: 26, borderRadius: 13, padding: 2,
+    justifyContent: 'center',
+  },
+  toggleKnob: {
+    width: 22, height: 22, borderRadius: 11, backgroundColor: '#fff',
+  },
 
   // Quick Actions grid
   actionsGrid: {
