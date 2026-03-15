@@ -6,6 +6,7 @@
  */
 
 import React, { createContext, useContext, useRef, useState, useCallback, useEffect } from 'react';
+import { Alert } from 'react-native';
 import { HappyConnection, type ConnectionState } from './connection';
 import { HappyApi } from './api';
 import { loadCredentials, type HappyCredentials } from './credentials';
@@ -18,6 +19,7 @@ export interface ConnectionContextValue {
   connected: boolean;
   sessionId: string | null;
   credentials: HappyCredentials | null;
+  lastError: string | null;
 
   // Actions
   connect: () => Promise<void>;
@@ -45,11 +47,15 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
   const keepAliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const messageHandlersRef = useRef(new Set<(msg: SessionMessage) => void>());
 
+  // Track registered unsubscribe functions so we can clean up
+  const cleanupRef = useRef<(() => void)[]>([]);
+
   const [connectionState, setConnectionState] = useState<ConnectionState>('disconnected');
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessionKey, setSessionKey] = useState<Uint8Array | null>(null);
   const [sessionVariant, setSessionVariant] = useState<'legacy' | 'dataKey'>('legacy');
   const [credentials, setCredentials] = useState<HappyCredentials | null>(null);
+  const [lastError, setLastError] = useState<string | null>(null);
 
   const connected = connectionState === 'connected';
 
@@ -68,65 +74,105 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
 
   // Connect to HappyCoder server
   const doConnect = useCallback(async () => {
+    setLastError(null);
+    setConnectionState('connecting');
+
     const creds = await loadCredentials();
-    if (!creds) return;
+    if (!creds) throw new Error('No credentials found. Scan a QR code first.');
     setCredentials(creds);
 
     const serverUrl = getSetting('serverUrl');
-    const lastSessionId = getSetting('lastSessionId');
+    const api = new HappyApi(creds.token, serverUrl);
 
-    try {
-      const api = new HappyApi(creds.token, serverUrl);
+    let encKey = creds.encryption.key;
+    let variant = creds.encryption.type;
 
-      let sid = lastSessionId;
-      let encKey = creds.encryption.key;
-      let variant = creds.encryption.type;
+    // Create a fresh session
+    const session = await api.createSession(
+      'morph-' + Date.now(),
+      { title: 'Morph Canvas', device: 'mobile' },
+      null,
+      encKey,
+      variant,
+      creds.encryption.publicKey,
+    );
+    const sid = session.id;
+    encKey = session.encryptionKey;
+    variant = session.encryptionVariant;
 
-      if (!sid) {
-        const session = await api.createSession(
-          'morph-' + Date.now(),
-          { title: 'Morph Canvas', device: 'mobile' },
-          null,
-          encKey,
-          variant,
-          creds.encryption.publicKey,
-        );
-        sid = session.id;
-        encKey = session.encryptionKey;
-        variant = session.encryptionVariant;
-      }
+    setSessionId(sid);
+    setSessionKey(encKey);
+    setSessionVariant(variant);
+    setSetting('lastSessionId', sid);
 
-      setSessionId(sid);
-      setSessionKey(encKey);
-      setSessionVariant(variant);
-      setSetting('lastSessionId', sid);
+    const conn = connectionRef.current;
 
-      const conn = connectionRef.current;
+    // Clean up ALL old listeners before adding new ones
+    for (const unsub of cleanupRef.current) {
+      try { unsub(); } catch { /* ignore */ }
+    }
+    cleanupRef.current = [];
 
-      // Clear old listeners
-      conn.disconnect();
+    // Kill old socket
+    conn.disconnect();
 
-      conn.onStateChange((state: ConnectionState) => {
+    // Wait for Socket.IO to actually connect (or fail)
+    await new Promise<void>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        conn.disconnect();
+        setConnectionState('error');
+        reject(new Error('Connection timed out (10s)'));
+      }, 10_000);
+
+      let settled = false;
+
+      // Register state listener — persists after promise settles
+      const unsubState = conn.onStateChange((state: ConnectionState) => {
         setConnectionState(state);
+
+        if (!settled) {
+          if (state === 'connected') {
+            settled = true;
+            clearTimeout(timeout);
+            resolve();
+          } else if (state === 'error') {
+            settled = true;
+            clearTimeout(timeout);
+            reject(new Error('Socket connection error'));
+          }
+        }
       });
 
-      conn.onUpdate((data: any) => {
+      const unsubUpdate = conn.onUpdate((data: any) => {
         if (!encKey) return;
         const msg = parseUpdate(data, encKey, variant);
         if (msg) dispatchMessage(msg);
       });
 
-      conn.connect(serverUrl, creds.token, 'session-scoped', sid);
+      // Track for cleanup on next connect
+      cleanupRef.current.push(unsubState, unsubUpdate);
 
-      // Keep-alive
-      if (keepAliveRef.current) clearInterval(keepAliveRef.current);
-      keepAliveRef.current = setInterval(() => {
-        if (sid) conn.sendKeepAlive(sid, false, 'canvas');
-      }, 20_000);
-    } catch (err) {
-      console.warn('Connection failed:', err);
-    }
+      conn.connect(serverUrl, creds.token, 'session-scoped', sid);
+    });
+
+    // Keep-alive (only runs after successful connect)
+    if (keepAliveRef.current) clearInterval(keepAliveRef.current);
+    keepAliveRef.current = setInterval(() => {
+      if (sid) conn.sendKeepAlive(sid, false, 'canvas');
+    }, 20_000);
   }, [dispatchMessage]);
+
+  // Wrapped connect with error capture
+  const safeConnect = useCallback(async () => {
+    try {
+      await doConnect();
+      setLastError(null);
+    } catch (err: any) {
+      const msg = err?.message || 'Unknown error';
+      setLastError(msg);
+      throw err; // Re-throw so callers can catch too
+    }
+  }, [doConnect]);
 
   // Disconnect
   const doDisconnect = useCallback(() => {
@@ -134,6 +180,11 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
       clearInterval(keepAliveRef.current);
       keepAliveRef.current = null;
     }
+    // Clean up listeners
+    for (const unsub of cleanupRef.current) {
+      try { unsub(); } catch { /* ignore */ }
+    }
+    cleanupRef.current = [];
     connectionRef.current.disconnect();
     setConnectionState('disconnected');
   }, []);
@@ -151,9 +202,9 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
     connectionRef.current.sendInterrupt(sessionId);
   }, [sessionId, connected]);
 
-  // Auto-connect on mount
+  // Auto-connect on mount (best-effort)
   useEffect(() => {
-    doConnect();
+    safeConnect().catch(() => {});
     return () => doDisconnect();
   }, []);
 
@@ -164,7 +215,8 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
         connected,
         sessionId,
         credentials,
-        connect: doConnect,
+        lastError,
+        connect: safeConnect,
         disconnect: doDisconnect,
         sendMessage,
         sendInterrupt,

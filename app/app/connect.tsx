@@ -44,17 +44,21 @@ export default function ConnectScreen() {
   const handlePairResult = async (result: PairResult) => {
     if (result.success) {
       setPairStatus('connecting');
-      setStatusText('Credentials saved. Connecting...');
+      setStatusText('Credentials saved. Connecting to server...');
       try {
         await connect();
         setPairStatus('done');
-        setStatusText('Connected to Claude Code');
-        // Auto-navigate back after short delay
-        setTimeout(() => router.back(), 800);
-      } catch {
-        setPairStatus('done');
-        setStatusText('Paired. Connection will retry automatically.');
+        setStatusText('Connected to Claude Code!');
         setTimeout(() => router.back(), 1200);
+      } catch (err: any) {
+        setPairStatus('error');
+        const msg = err?.message || 'Connection failed';
+        setStatusText(`Paired but: ${msg}`);
+        // Still navigate back — credentials are saved, will retry next app open
+        setTimeout(() => {
+          scannedRef.current = false;
+          setPairing(false);
+        }, 3000);
       }
     } else {
       setPairing(false);
@@ -155,11 +159,26 @@ export default function ConnectScreen() {
               {pairStatus === 'done' ? (
                 <Text style={styles.checkmark}>✅</Text>
               ) : pairStatus === 'error' ? (
-                <Text style={styles.checkmark}>❌</Text>
+                <>
+                  <Text style={styles.checkmark}>❌</Text>
+                  <Text style={[styles.loadingText, { color: colors.text }]}>{statusText}</Text>
+                  <TouchableOpacity
+                    style={[styles.button, { backgroundColor: colors.accent, marginTop: 16, paddingHorizontal: 32 }]}
+                    onPress={() => {
+                      setPairing(false);
+                      setPairStatus('idle');
+                      scannedRef.current = false;
+                    }}
+                  >
+                    <Text style={styles.buttonText}>Try Again</Text>
+                  </TouchableOpacity>
+                </>
               ) : (
                 <ActivityIndicator size="large" color={colors.accent} />
               )}
-              <Text style={[styles.loadingText, { color: colors.text }]}>{statusText}</Text>
+              {pairStatus !== 'error' && (
+                <Text style={[styles.loadingText, { color: colors.text }]}>{statusText}</Text>
+              )}
             </View>
           ) : (
             <>
