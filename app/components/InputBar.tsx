@@ -17,15 +17,11 @@ interface InputBarProps {
   onFile?: (file: { name: string; mime: string; base64: string; size: number }) => void;
   connected: boolean;
   isProcessing?: boolean;
-  connectionState?: string;
-  hasCreds?: boolean;
-  onReconnect?: () => void;
-  lastError?: string | null;
 }
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB limit for happy-wire
 
-export default function InputBar({ onSend, onStop, onSketch, onImage, onFile, connected, isProcessing, connectionState, hasCreds, onReconnect, lastError }: InputBarProps) {
+export default function InputBar({ onSend, onStop, onSketch, onImage, onFile, connected, isProcessing }: InputBarProps) {
   const [text, setText] = useState('');
   const inputRef = useRef<TextInput>(null);
   const router = useRouter();
@@ -108,14 +104,55 @@ export default function InputBar({ onSend, onStop, onSketch, onImage, onFile, co
     }
   };
 
-  // Unpaired — show connect link
-  if (!hasCreds) {
-    return (
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={90}
-      >
-        <View style={[styles.container, isDark ? styles.containerDark : styles.containerLight]}>
+  return (
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={90}
+    >
+      <View style={[styles.container, isDark ? styles.containerDark : styles.containerLight]}>
+        {connected ? (
+          <>
+            <View style={[styles.dot, styles.dotConnected]} />
+            <TouchableOpacity
+              style={styles.attachBtn}
+              onPress={handleAttach}
+              activeOpacity={0.6}
+            >
+              <Text style={styles.attachIcon}>+</Text>
+            </TouchableOpacity>
+            <TextInput
+              ref={inputRef}
+              style={[styles.input, isDark ? styles.inputDark : styles.inputLight]}
+              value={text}
+              onChangeText={setText}
+              placeholder="Message Claude Code..."
+              placeholderTextColor={isDark ? '#555' : '#999'}
+              multiline
+              maxLength={10000}
+              returnKeyType="send"
+              onSubmitEditing={handleSend}
+              blurOnSubmit={false}
+            />
+            {isProcessing ? (
+              <TouchableOpacity
+                style={styles.stopBtn}
+                onPress={onStop}
+                activeOpacity={0.7}
+              >
+                <View style={styles.stopSquare} />
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={[styles.sendBtn, !text.trim() && styles.sendBtnDisabled]}
+                onPress={handleSend}
+                disabled={!text.trim()}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.sendText, !text.trim() && styles.sendTextDisabled]}>{'↑'}</Text>
+              </TouchableOpacity>
+            )}
+          </>
+        ) : (
           <TouchableOpacity
             style={styles.connectBar}
             onPress={() => router.push('/connect')}
@@ -124,75 +161,6 @@ export default function InputBar({ onSend, onStop, onSketch, onImage, onFile, co
             <View style={[styles.dot, styles.dotDisconnected]} />
             <Text style={styles.connectText}>Connect to Claude Code</Text>
             <Text style={styles.connectChevron}>{'>'}</Text>
-          </TouchableOpacity>
-        </View>
-      </KeyboardAvoidingView>
-    );
-  }
-
-  // Paired — always show full input bar, dot color reflects state
-  const dotColor = connected ? '#30d158'
-    : connectionState === 'connecting' ? '#ffaa00'
-    : '#ff3b30';
-
-  const canSend = connected && !!text.trim();
-
-  return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={90}
-    >
-      <View style={[styles.container, isDark ? styles.containerDark : styles.containerLight]}>
-        <TouchableOpacity
-          style={[styles.dotTouch]}
-          onPress={() => {
-            if (!connected && connectionState !== 'connecting' && onReconnect) {
-              onReconnect();
-            }
-          }}
-          activeOpacity={connected ? 1 : 0.6}
-        >
-          <View style={[styles.dot, { backgroundColor: dotColor }]} />
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.attachBtn}
-          onPress={handleAttach}
-          disabled={!connected}
-          activeOpacity={0.6}
-        >
-          <Text style={[styles.attachIcon, !connected && { opacity: 0.3 }]}>+</Text>
-        </TouchableOpacity>
-        <TextInput
-          ref={inputRef}
-          style={[styles.input, isDark ? styles.inputDark : styles.inputLight]}
-          value={text}
-          onChangeText={setText}
-          placeholder={connected ? 'Message Claude Code...' :
-            connectionState === 'connecting' ? 'Connecting...' : 'Tap dot to reconnect'}
-          placeholderTextColor={isDark ? '#555' : '#999'}
-          multiline
-          maxLength={10000}
-          returnKeyType="send"
-          onSubmitEditing={handleSend}
-          blurOnSubmit={false}
-          editable={connected}
-        />
-        {isProcessing ? (
-          <TouchableOpacity
-            style={styles.stopBtn}
-            onPress={onStop}
-            activeOpacity={0.7}
-          >
-            <View style={styles.stopSquare} />
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity
-            style={[styles.sendBtn, !canSend && styles.sendBtnDisabled]}
-            onPress={handleSend}
-            disabled={!canSend}
-            activeOpacity={0.7}
-          >
-            <Text style={[styles.sendText, !canSend && styles.sendTextDisabled]}>{'↑'}</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -216,16 +184,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8f8f8',
     borderTopColor: 'rgba(0,0,0,0.08)',
   },
-  dotTouch: {
-    paddingHorizontal: 2,
-    paddingVertical: 10,
-    justifyContent: 'center',
-  },
   dot: {
     width: 7,
     height: 7,
     borderRadius: 3.5,
-    marginRight: 4,
+    marginRight: 6,
+    marginBottom: 14,
   },
   dotConnected: { backgroundColor: '#30d158' },
   dotDisconnected: { backgroundColor: '#636366' },
