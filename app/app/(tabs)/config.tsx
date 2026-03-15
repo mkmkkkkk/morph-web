@@ -44,6 +44,7 @@ export default function ConfigScreen() {
     connectionState,
     connected,
     credentials,
+    lastError,
     sendMessage,
     sendInterrupt,
     connect: reconnect,
@@ -454,6 +455,10 @@ export default function ConfigScreen() {
         onStop={handleChatStop}
         connected={connected}
         isProcessing={isProcessing}
+        connectionState={connectionState}
+        hasCreds={!!credentials}
+        onReconnect={() => reconnect().catch(() => {})}
+        lastError={lastError}
       />
     </View>
   );

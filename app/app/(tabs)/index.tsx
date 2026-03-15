@@ -15,10 +15,14 @@ export default function CanvasScreen() {
 
   const {
     connected,
+    connectionState,
+    credentials,
+    lastError,
     sessionId,
     sendMessage: rawSendMessage,
     sendInterrupt,
     onSessionMessage,
+    connect: reconnect,
   } = useConnection();
 
   const [isProcessing, setIsProcessing] = useState(false);
@@ -153,6 +157,10 @@ export default function CanvasScreen() {
         onFile={handleFile}
         connected={connected}
         isProcessing={isProcessing}
+        connectionState={connectionState}
+        hasCreds={!!credentials}
+        onReconnect={() => reconnect().catch(() => {})}
+        lastError={lastError}
       />
     </View>
   );
