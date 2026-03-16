@@ -9,10 +9,19 @@
  * - Modern: { token, encryption: { publicKey, machineKey } } → AES-256-GCM
  */
 
-import * as SecureStore from 'expo-secure-store';
+import { Platform } from 'react-native';
 import { fromBase64, toBase64 } from './crypto';
 
 const CRED_KEY = 'happy_credentials';
+
+// expo-secure-store is not available on web — use localStorage fallback
+const SecureStore = Platform.OS === 'web'
+  ? {
+      setItemAsync: async (key: string, value: string) => { localStorage.setItem(key, value); },
+      getItemAsync: async (key: string) => localStorage.getItem(key),
+      deleteItemAsync: async (key: string) => { localStorage.removeItem(key); },
+    }
+  : require('expo-secure-store');
 
 export type EncryptionVariant = 'legacy' | 'dataKey';
 

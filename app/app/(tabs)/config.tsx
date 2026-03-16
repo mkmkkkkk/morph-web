@@ -15,14 +15,13 @@ interface QuickAction {
   id: string;
   label: string;
   prompt: string;
-  icon: string;
 }
 
 const DEFAULT_ACTIONS: QuickAction[] = [
-  { id: 'snapshot', label: 'Save Canvas', prompt: '[System] Save a snapshot of the current canvas state.', icon: '◆' },
-  { id: 'status', label: 'Status Check', prompt: '[System] Report: connection status, canvas component count, storage usage.', icon: '◇' },
-  { id: 'clear', label: 'Clear Canvas', prompt: '[System] Remove all draft components from the canvas.', icon: '×' },
-  { id: 'dashboard', label: 'Build Dashboard', prompt: 'Build me a dashboard component with: connection status, component count, last snapshot time, and storage usage.', icon: '▦' },
+  { id: 'snapshot', label: 'Save Canvas', prompt: '[System] Save a snapshot of the current canvas state.' },
+  { id: 'status', label: 'Status Check', prompt: '[System] Report: connection status, canvas component count, storage usage.' },
+  { id: 'clear', label: 'Clear Canvas', prompt: '[System] Remove all draft components from the canvas.' },
+  { id: 'dashboard', label: 'Build Dashboard', prompt: 'Build me a dashboard component with: connection status, component count, last snapshot time, and storage usage.' },
 ];
 
 // Interval presets for scheduled tasks
@@ -251,13 +250,13 @@ export default function ConfigScreen() {
   const toggle = (key: string) => setExpanded(prev => ({ ...prev, [key]: !prev[key] }));
 
   const menuItems = [
-    { key: 'actions', label: 'Quick Actions', detail: `${DEFAULT_ACTIONS.length} actions`, icon: '◆' },
-    { key: 'tasks', label: 'Scheduled Tasks', detail: `${tasks.filter(t => t.enabled).length}/${tasks.length} active`, icon: '⏱' },
-    { key: 'history', label: 'Canvas History', detail: `${snapshots.length} saved`, icon: '◷' },
-    { key: 'library', label: 'Component Library', detail: `${library.length} components`, icon: '❖' },
-    { key: 'connection', label: 'Connection', detail: displayStatus.charAt(0).toUpperCase() + displayStatus.slice(1), icon: '●' },
-    { key: 'server', label: 'Server', detail: serverUrl.replace('https://', '').replace('http://', ''), icon: '⬡' },
-    { key: 'about', label: 'About', detail: 'v0.1.0', icon: 'ℹ' },
+    { key: 'actions', label: 'Quick Actions', detail: `${DEFAULT_ACTIONS.length} actions` },
+    { key: 'tasks', label: 'Scheduled Tasks', detail: `${tasks.filter(t => t.enabled).length}/${tasks.length} active` },
+    { key: 'history', label: 'Canvas History', detail: `${snapshots.length} saved` },
+    { key: 'library', label: 'Component Library', detail: `${library.length} components` },
+    { key: 'connection', label: 'Connection', detail: displayStatus.charAt(0).toUpperCase() + displayStatus.slice(1) },
+    { key: 'server', label: 'Server', detail: serverUrl.replace('https://', '').replace('http://', '') },
+    { key: 'about', label: 'About', detail: 'v1.0' },
   ];
 
   return (
@@ -275,7 +274,6 @@ export default function ConfigScreen() {
                   onPress={() => toggle(item.key)}
                   activeOpacity={0.6}
                 >
-                  <Text style={[styles.menuIcon, { color: item.key === 'connection' ? statusColor : colors.purple }]}>{item.icon}</Text>
                   <Text style={[styles.label, { color: colors.text, flex: 1 }]}>{item.label}</Text>
                   <Text style={[styles.detail, { color: colors.secondary }]}>{item.detail}</Text>
                   <Text style={[styles.chevron, { color: colors.secondary, transform: [{ rotate: expanded[item.key] ? '90deg' : '0deg' }] }]}>{'>'}</Text>
@@ -291,7 +289,6 @@ export default function ConfigScreen() {
                         onPress={() => handleQuickAction(action)}
                         activeOpacity={0.7}
                       >
-                        <Text style={[styles.subIcon, { color: colors.purple }]}>{action.icon}</Text>
                         <Text style={[styles.label, { color: colors.text }]}>{action.label}</Text>
                       </TouchableOpacity>
                     ))}
@@ -470,19 +467,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center',
     paddingVertical: 13, paddingHorizontal: 16, minHeight: 48,
   },
-  menuIcon: { fontSize: 16, width: 28 },
   label: { fontSize: 16 },
   detail: { fontSize: 14, marginRight: 8 },
   meta: { fontSize: 13, marginTop: 2 },
   chevron: { fontSize: 16, fontWeight: '300' },
-  separator: { height: StyleSheet.hairlineWidth, marginLeft: 44 },
+  separator: { height: StyleSheet.hairlineWidth, marginLeft: 16 },
 
-  expandedContent: { paddingLeft: 28, paddingBottom: 4 },
+  expandedContent: { paddingLeft: 16, paddingBottom: 4 },
   subRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingVertical: 10, paddingHorizontal: 16, minHeight: 40,
   },
-  subIcon: { fontSize: 14, width: 24 },
   emptyText: { paddingHorizontal: 16, paddingVertical: 10, fontSize: 14 },
 
   toggleBtn: {

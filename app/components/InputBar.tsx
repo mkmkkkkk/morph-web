@@ -17,15 +17,16 @@ interface InputBarProps {
   onFile?: (file: { name: string; mime: string; base64: string; size: number }) => void;
   connected: boolean;
   isProcessing?: boolean;
+  forceDark?: boolean;
 }
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB limit for happy-wire
 
-export default function InputBar({ onSend, onStop, onSketch, onImage, onFile, connected, isProcessing }: InputBarProps) {
+export default function InputBar({ onSend, onStop, onSketch, onImage, onFile, connected, isProcessing, forceDark }: InputBarProps) {
   const [text, setText] = useState('');
   const inputRef = useRef<TextInput>(null);
   const router = useRouter();
-  const isDark = useColorScheme() !== 'light';
+  const isDark = forceDark || useColorScheme() !== 'light';
 
   const handleSend = () => {
     const trimmed = text.trim();

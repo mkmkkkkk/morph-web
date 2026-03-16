@@ -137,7 +137,7 @@ export default function CanvasScreen() {
   }, []);
 
   return (
-    <View style={[styles.container, { backgroundColor: colorScheme === 'dark' ? '#0a0a0a' : '#fff' }]}>
+    <View style={[styles.container, { backgroundColor: '#0a0a0a' }]}>
       <Canvas
         onSendMessage={handleSend}
         onAdopt={handleAdopt}
@@ -153,6 +153,7 @@ export default function CanvasScreen() {
         onFile={handleFile}
         connected={connected}
         isProcessing={isProcessing}
+        forceDark
       />
     </View>
   );

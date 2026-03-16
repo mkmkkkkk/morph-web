@@ -1,11 +1,17 @@
-import { File, Directory, Paths } from 'expo-file-system';
+import { Platform } from 'react-native';
 
-const MORPH_DIR = new Directory(Paths.document, 'morph-data');
-const COMPONENTS_DIR = new Directory(MORPH_DIR, 'components');
-const MANIFEST_FILE = new File(MORPH_DIR, 'manifest.json');
-const SNAPSHOTS_DIR = new Directory(MORPH_DIR, 'snapshots');
-const LIBRARY_DIR = new Directory(MORPH_DIR, 'library');
-const LIBRARY_INDEX = new File(MORPH_DIR, 'library-index.json');
+// expo-file-system is not supported on web — lazy-init only on native
+let MORPH_DIR: any, COMPONENTS_DIR: any, MANIFEST_FILE: any, SNAPSHOTS_DIR: any, LIBRARY_DIR: any, LIBRARY_INDEX: any;
+
+if (Platform.OS !== 'web') {
+  const { File, Directory, Paths } = require('expo-file-system');
+  MORPH_DIR = new Directory(Paths.document, 'morph-data');
+  COMPONENTS_DIR = new Directory(MORPH_DIR, 'components');
+  MANIFEST_FILE = new File(MORPH_DIR, 'manifest.json');
+  SNAPSHOTS_DIR = new Directory(MORPH_DIR, 'snapshots');
+  LIBRARY_DIR = new Directory(MORPH_DIR, 'library');
+  LIBRARY_INDEX = new File(MORPH_DIR, 'library-index.json');
+}
 
 export interface ComponentMeta {
   id: string;
@@ -21,9 +27,11 @@ export interface Manifest {
 
 export class ComponentStore {
   private manifest: Manifest = { components: [], order: [] };
+  private isWeb = Platform.OS === 'web';
 
   /** Initialize directories and load manifest */
   async init(): Promise<void> {
+    if (this.isWeb) return;
     if (!MORPH_DIR.exists) {
       MORPH_DIR.create({ intermediates: true });
     }
@@ -45,6 +53,7 @@ export class ComponentStore {
 
   /** Save a component's HTML and update the manifest */
   async saveComponent(id: string, html: string, description?: string): Promise<void> {
+    if (this.isWeb) return;
     const file = new File(COMPONENTS_DIR, id + '.html');
     if (!file.exists) {
       file.create();
@@ -71,6 +80,7 @@ export class ComponentStore {
 
   /** Load a single component's HTML */
   async loadComponent(id: string): Promise<string | null> {
+    if (this.isWeb) return null;
     const file = new File(COMPONENTS_DIR, id + '.html');
     if (!file.exists) return null;
     try {
@@ -82,6 +92,7 @@ export class ComponentStore {
 
   /** Remove a component and update manifest */
   async removeComponent(id: string): Promise<void> {
+    if (this.isWeb) return;
     const file = new File(COMPONENTS_DIR, id + '.html');
     if (file.exists) {
       file.delete();
@@ -108,6 +119,7 @@ export class ComponentStore {
 
   /** Persist manifest to disk */
   async saveManifest(): Promise<void> {
+    if (this.isWeb) return;
     if (!MANIFEST_FILE.exists) {
       MANIFEST_FILE.create();
     }
@@ -123,6 +135,7 @@ export class ComponentStore {
 
   /** Save a snapshot of the current canvas state */
   async saveSnapshot(name?: string): Promise<CanvasSnapshot> {
+    if (this.isWeb) return { id: '', name: '', createdAt: 0, componentCount: 0, componentIds: [] };
     if (!SNAPSHOTS_DIR.exists) {
       SNAPSHOTS_DIR.create({ intermediates: true });
     }
@@ -153,6 +166,7 @@ export class ComponentStore {
 
   /** List all saved snapshots */
   async listSnapshots(): Promise<CanvasSnapshot[]> {
+    if (this.isWeb) return [];
     if (!SNAPSHOTS_DIR.exists) return [];
     const entries = SNAPSHOTS_DIR.list();
     const snapshots: CanvasSnapshot[] = [];
@@ -172,6 +186,7 @@ export class ComponentStore {
 
   /** Restore a snapshot — replaces current canvas */
   async restoreSnapshot(snapshotId: string): Promise<boolean> {
+    if (this.isWeb) return false;
     const file = new File(SNAPSHOTS_DIR, snapshotId + '.json');
     if (!file.exists) return false;
 
@@ -204,6 +219,7 @@ export class ComponentStore {
 
   /** Save a component to the reusable library */
   async saveToLibrary(id: string, name: string, description: string, tags: string[] = []): Promise<void> {
+    if (this.isWeb) return;
     if (!LIBRARY_DIR.exists) {
       LIBRARY_DIR.create({ intermediates: true });
     }
@@ -239,6 +255,7 @@ export class ComponentStore {
 
   /** Load a library component's HTML */
   async loadLibraryComponent(libId: string): Promise<string | null> {
+    if (this.isWeb) return null;
     const file = new File(LIBRARY_DIR, libId + '.html');
     if (!file.exists) return null;
     try {
@@ -275,6 +292,7 @@ export class ComponentStore {
 
   /** Import a component from a shared JSON string */
   async importLibraryComponent(json: string): Promise<LibraryEntry | null> {
+    if (this.isWeb) return null;
     try {
       const data = JSON.parse(json);
       if (!data.morph_component?.html) return null;
@@ -308,7 +326,7 @@ export class ComponentStore {
   }
 
   private async loadLibraryIndex(): Promise<LibraryEntry[]> {
-    if (!LIBRARY_INDEX.exists) return [];
+    if (this.isWeb || !LIBRARY_INDEX.exists) return [];
     try {
       const data = await LIBRARY_INDEX.text();
       return JSON.parse(data);
@@ -318,6 +336,7 @@ export class ComponentStore {
   }
 
   private async saveLibraryIndex(index: LibraryEntry[]): Promise<void> {
+    if (this.isWeb) return;
     if (!LIBRARY_INDEX.exists) LIBRARY_INDEX.create();
     LIBRARY_INDEX.write(JSON.stringify(index, null, 2));
   }
