@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { MorphBridge, BridgeHandlers } from '../lib/bridge';
@@ -15,6 +15,7 @@ interface CanvasProps {
 
 export default function Canvas({ onSendMessage, onAdopt, onDismiss, onSketch, bridgeRef }: CanvasProps) {
   const webViewRef = useRef<WebView>(null);
+  const [sketchActive, setSketchActive] = useState(false);
 
   useEffect(() => {
     const handlers: BridgeHandlers = {
@@ -22,7 +23,12 @@ export default function Canvas({ onSendMessage, onAdopt, onDismiss, onSketch, br
       onAdopt: onAdopt,
       onDismiss: onDismiss,
       onStoreSet: () => {},
-      onSketch: onSketch,
+      onSketch: (img: string) => {
+        setSketchActive(false);
+        onSketch?.(img);
+      },
+      onSketchOpen: () => setSketchActive(true),
+      onSketchClose: () => setSketchActive(false),
     };
     bridgeRef.current = new MorphBridge(webViewRef, handlers);
   }, [onSendMessage, onAdopt, onDismiss, onSketch, bridgeRef]);
@@ -37,7 +43,7 @@ export default function Canvas({ onSendMessage, onAdopt, onDismiss, onSketch, br
         javaScriptEnabled={true}
         domStorageEnabled={true}
         onMessage={(event) => bridgeRef.current?.handleMessage(event)}
-        scrollEnabled={true}
+        scrollEnabled={!sketchActive}
         bounces={false}
         overScrollMode="never"
         showsVerticalScrollIndicator={false}

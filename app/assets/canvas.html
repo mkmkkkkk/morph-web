@@ -199,6 +199,7 @@
     var _sketchColor = '#fff';
     var _sketchHistory = []; // array of ImageData for undo
     var _sketchLineWidth = 3;
+    var _sketchInitialized = false;
 
     // === BRIDGE ===
     function _postToNative(action, payload) {
@@ -377,20 +378,46 @@
       _sketchCtx.lineWidth = _sketchLineWidth;
       _sketchCtx.strokeStyle = _sketchColor;
 
-      // Touch handlers
-      c.addEventListener('touchstart', _sketchTouchStart, { passive: false });
-      c.addEventListener('touchmove', _sketchTouchMove, { passive: false });
-      c.addEventListener('touchend', _sketchTouchEnd);
+      // Only add listeners once
+      if (!_sketchInitialized) {
+        _sketchInitialized = true;
+        c.addEventListener('touchstart', _sketchTouchStart, { passive: false });
+        c.addEventListener('touchmove', _sketchTouchMove, { passive: false });
+        c.addEventListener('touchend', _sketchTouchEnd);
+        // Also support mouse for web testing
+        c.addEventListener('mousedown', _sketchMouseDown);
+        c.addEventListener('mousemove', _sketchMouseMove);
+        c.addEventListener('mouseup', _sketchMouseUp);
 
-      // Color picker
-      document.querySelectorAll('.sketch-color').forEach(function(el) {
-        el.addEventListener('click', function() {
-          document.querySelectorAll('.sketch-color').forEach(function(e) { e.classList.remove('active'); });
-          el.classList.add('active');
-          _sketchColor = el.dataset.color;
-          if (_sketchCtx) _sketchCtx.strokeStyle = _sketchColor;
+        // Color picker
+        document.querySelectorAll('.sketch-color').forEach(function(el) {
+          el.addEventListener('click', function() {
+            document.querySelectorAll('.sketch-color').forEach(function(e) { e.classList.remove('active'); });
+            el.classList.add('active');
+            _sketchColor = el.dataset.color;
+            if (_sketchCtx) _sketchCtx.strokeStyle = _sketchColor;
+          });
         });
-      });
+      }
+    }
+
+    // Mouse handlers for web/desktop testing
+    function _sketchMouseDown(e) {
+      _sketchDrawing = true;
+      var c = document.getElementById('sketch-canvas');
+      _sketchHistory.push(_sketchCtx.getImageData(0, 0, c.width, c.height));
+      if (_sketchHistory.length > 30) _sketchHistory.shift();
+      _sketchCtx.beginPath();
+      _sketchCtx.moveTo(e.offsetX, e.offsetY);
+    }
+    function _sketchMouseMove(e) {
+      if (!_sketchDrawing) return;
+      _sketchCtx.lineTo(e.offsetX, e.offsetY);
+      _sketchCtx.stroke();
+    }
+    function _sketchMouseUp() {
+      _sketchDrawing = false;
+      _sketchCtx.closePath();
     }
 
     function _sketchTouchStart(e) {
@@ -423,14 +450,21 @@
       _sketchActive = true;
       var overlay = document.getElementById('sketch-overlay');
       overlay.classList.add('active');
+      // Prevent body scroll while sketching
+      document.body.style.overflow = 'hidden';
+      document.body.style.touchAction = 'none';
       _sketchInit();
       _sketchClear();
+      _postToNative('sketch.opened', {});
     }
 
     function _sketchClose() {
       _sketchActive = false;
       document.getElementById('sketch-overlay').classList.remove('active');
+      document.body.style.overflow = '';
+      document.body.style.touchAction = '';
       _sketchHistory = [];
+      _postToNative('sketch.closed', {});
     }
 
     function _sketchClear() {

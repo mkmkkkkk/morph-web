@@ -18,6 +18,8 @@ export interface BridgeHandlers {
   onDismiss: DismissHandler;
   onStoreSet: StoreSetHandler;
   onSketch?: SketchHandler;
+  onSketchOpen?: () => void;
+  onSketchClose?: () => void;
 }
 
 export class MorphBridge {
@@ -53,6 +55,12 @@ export class MorphBridge {
         break;
       case 'sketch':
         this.handlers.onSketch?.(msg.image);
+        break;
+      case 'sketch.opened':
+        this.handlers.onSketchOpen?.();
+        break;
+      case 'sketch.closed':
+        this.handlers.onSketchClose?.();
         break;
       case 'canvas.ready':
         // Canvas loaded and ready — no-op on native side for now
