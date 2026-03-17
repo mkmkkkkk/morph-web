@@ -165,7 +165,9 @@ export default function InputBar({ onSend, onStop, onSketch, onImage, onFile, co
 
   return (
     <View style={[styles.container, isDark ? styles.containerDark : styles.containerLight]}>
-      <Animated.View style={[styles.dot, { backgroundColor: dotColor, opacity: pulseAnim }]} />
+      <Animated.View style={[styles.dotWrap, { opacity: pulseAnim }]}>
+        <View style={[styles.dot, { backgroundColor: dotColor }]} />
+      </Animated.View>
         <TouchableOpacity
           style={styles.attachBtn}
           onPress={handleAttach}
@@ -241,12 +243,16 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8f8f8',
     borderTopColor: 'rgba(0,0,0,0.08)',
   },
+  dotWrap: {
+    width: 20,
+    height: 34,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   dot: {
     width: 7,
     height: 7,
     borderRadius: 3.5,
-    marginRight: 6,
-    marginBottom: 13.5, // center at 17px = same axis as 34px buttons
   },
   attachBtn: {
     width: 34,
@@ -269,7 +275,7 @@ const styles = StyleSheet.create({
     minHeight: 34,
     borderRadius: 20,
     paddingHorizontal: 16,
-    paddingVertical: 9, // 9+9+16=34px base height, matches 34px buttons
+    paddingVertical: 7, // 7+~20(lineHeight)+7=34px, matches 34px buttons
     fontSize: 16,
     maxHeight: 120,
   },
