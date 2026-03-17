@@ -36,8 +36,9 @@ const EXPANDED_HEIGHT = SCREEN_HEIGHT * 0.55;
 // ---------------------------------------------------------------
 // CollapsibleBlock — tap header to expand/collapse content
 // ---------------------------------------------------------------
-function CollapsibleBlock({ header, headerStyle, content, contentStyle, defaultOpen = false }: {
-  header: string;
+function CollapsibleBlock({ label, preview, headerStyle, content, contentStyle, defaultOpen = false }: {
+  label: string;
+  preview?: string;
   headerStyle: any;
   content: string;
   contentStyle: any;
@@ -48,7 +49,7 @@ function CollapsibleBlock({ header, headerStyle, content, contentStyle, defaultO
     <View style={styles.termLine}>
       <TouchableOpacity onPress={() => setOpen(prev => !prev)} activeOpacity={0.5}>
         <Text selectable style={headerStyle}>
-          {open ? '▾ ' : '▸ '}{header}
+          {open ? '▾ ' : '▸ '}{label}{!open && preview ? `: ${preview}` : ''}
         </Text>
       </TouchableOpacity>
       {open && content ? (
@@ -107,11 +108,12 @@ export default function ChatPanel({
 
           // Thinking: collapsed by default, tap to expand
           if (isThinking) {
-            const preview = text.length > 60 ? text.slice(0, 60) + '...' : text;
+            const prev = text.length > 60 ? text.slice(0, 60) + '...' : text;
             return (
               <CollapsibleBlock
                 key={msg.id}
-                header={`thinking: ${preview}`}
+                label="thinking"
+                preview={prev}
                 headerStyle={[mono, styles.termThinking]}
                 content={text}
                 contentStyle={[mono, styles.termThinkingBody]}
@@ -137,10 +139,12 @@ export default function ChatPanel({
             : '';
           // Tool call: header always visible, params collapsed
           if (paramStr && paramStr.length > 80) {
+            const prev = paramStr.length > 60 ? paramStr.slice(0, 60).replace(/\n/g, ' ') + '...' : paramStr.replace(/\n/g, ' ');
             return (
               <CollapsibleBlock
                 key={msg.id}
-                header={msg.content.name}
+                label={msg.content.name}
+                preview={prev}
                 headerStyle={[mono, styles.termToolName]}
                 content={paramStr}
                 contentStyle={[mono, styles.termToolParam]}
@@ -165,11 +169,12 @@ export default function ChatPanel({
           const result = msg.content.result;
           const resultStr = typeof result === 'string' ? result : JSON.stringify(result);
           // Tool result: collapsed by default
-          const preview = resultStr.length > 60 ? resultStr.slice(0, 60).replace(/\n/g, ' ') + '...' : resultStr.replace(/\n/g, ' ');
+          const prev = resultStr.length > 60 ? resultStr.slice(0, 60).replace(/\n/g, ' ') + '...' : resultStr.replace(/\n/g, ' ');
           return (
             <CollapsibleBlock
               key={msg.id}
-              header={`result: ${preview}`}
+              label="result"
+              preview={prev}
               headerStyle={[mono, styles.termToolResultHeader]}
               content={resultStr.length > 2000 ? resultStr.slice(0, 2000) + '\n...' : resultStr}
               contentStyle={[mono, styles.termToolResult]}
