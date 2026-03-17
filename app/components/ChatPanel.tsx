@@ -1,16 +1,16 @@
 /**
- * ChatPanel — full terminal mirror of Claude Code session.
+ * ChatPanel — InputBar at bottom + toggle terminal overlay.
  *
- * Collapsed: handle bar + InputBar
- * Expanded: 100% terminal view — every CC event rendered
+ * Tap the terminal button (left of input) → terminal pops up.
+ * Tap again → hides. Simple toggle, no sliding.
  *
- * Thinking & tool results are collapsed by default (tap to expand).
+ * Thinking & tool results collapsed by default (tap to expand).
  */
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  LayoutAnimation, Platform, UIManager, Dimensions, KeyboardAvoidingView,
+  Platform, UIManager, Dimensions, KeyboardAvoidingView,
 } from 'react-native';
 import InputBar from './InputBar';
 import { type SessionMessage } from '../lib/protocol';
@@ -31,7 +31,7 @@ interface ChatPanelProps {
 }
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
-const EXPANDED_HEIGHT = SCREEN_HEIGHT * 0.55;
+const TERMINAL_HEIGHT = SCREEN_HEIGHT * 0.5;
 
 // ---------------------------------------------------------------
 // CollapsibleBlock — tap header to expand/collapse content
@@ -61,35 +61,31 @@ function CollapsibleBlock({ label, preview, headerStyle, content, contentStyle, 
   );
 }
 
-console.log('[ChatPanel] module loaded');
-
 export default function ChatPanel({
   messages, onSend, onStop, onSketch, onImage, onFile,
   connected, isProcessing,
 }: ChatPanelProps) {
-  console.log('[ChatPanel] render: messages=', messages.length, 'connected=', connected, 'isProcessing=', isProcessing);
-  const [expanded, setExpanded] = useState(false);
+  const [terminalVisible, setTerminalVisible] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
-
-  const toggle = useCallback(() => {
-    console.log('[ChatPanel] HANDLE BAR TAPPED, toggling expanded');
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setExpanded(prev => !prev);
-  }, []);
-
-  // Auto-expand when messages arrive
   const prevMsgCount = useRef(0);
-  useEffect(() => {
-    const currentCount = messages.length;
-    if (currentCount > prevMsgCount.current && !expanded) {
-      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-      setExpanded(true);
-    }
-    prevMsgCount.current = currentCount;
-  }, [messages.length]);
 
+  // Auto-scroll when new messages arrive
   const scrollToBottom = useCallback(() => {
     scrollRef.current?.scrollToEnd({ animated: true });
+  }, []);
+
+  // Flash the terminal button when new messages arrive while hidden
+  const [hasNew, setHasNew] = useState(false);
+  useEffect(() => {
+    if (messages.length > prevMsgCount.current) {
+      if (!terminalVisible) setHasNew(true);
+    }
+    prevMsgCount.current = messages.length;
+  }, [messages.length, terminalVisible]);
+
+  const toggleTerminal = useCallback(() => {
+    setTerminalVisible(prev => !prev);
+    setHasNew(false);
   }, []);
 
   // ---------------------------------------------------------------
@@ -105,11 +101,9 @@ export default function ChatPanel({
       if (msg.content.type === 'service_message' || msg.content.type === 'session_start') {
         return null;
       }
-      // Hide: noisy tool calls (Read, Glob, Grep)
       if (msg.content.type === 'tool_call_start' && HIDDEN_TOOLS.has(msg.content.name)) {
         return null;
       }
-      // Hide: results from hidden tools (tool_call_end with no name or hidden name)
       if (msg.content.type === 'tool_call_end' && (!msg.content.name || HIDDEN_TOOLS.has(msg.content.name))) {
         return null;
       }
@@ -122,7 +116,6 @@ export default function ChatPanel({
 
           const isThinking = (msg.content as any).thinking;
 
-          // Thinking: collapsed by default, tap to expand
           if (isThinking) {
             const prev = text.length > 60 ? text.slice(0, 60) + '...' : text;
             return (
@@ -153,7 +146,6 @@ export default function ChatPanel({
               ? params
               : JSON.stringify(params)
             : '';
-          // Tool call: header always visible, params collapsed
           if (paramStr && paramStr.length > 80) {
             const prev = paramStr.length > 60 ? paramStr.slice(0, 60).replace(/\n/g, ' ') + '...' : paramStr.replace(/\n/g, ' ');
             return (
@@ -184,7 +176,6 @@ export default function ChatPanel({
         case 'tool_call_end': {
           const result = msg.content.result;
           const resultStr = typeof result === 'string' ? result : JSON.stringify(result);
-          // Tool result: collapsed by default
           const prev = resultStr.length > 60 ? resultStr.slice(0, 60).replace(/\n/g, ' ') + '...' : resultStr.replace(/\n/g, ' ');
           return (
             <CollapsibleBlock
@@ -198,13 +189,6 @@ export default function ChatPanel({
           );
         }
 
-        case 'turn_start':
-          return (
-            <View key={msg.id} style={styles.termDivider}>
-              <View style={styles.dividerLine} />
-            </View>
-          );
-
         case 'turn_end':
           return (
             <View key={msg.id} style={styles.termDivider}>
@@ -214,49 +198,10 @@ export default function ChatPanel({
             </View>
           );
 
-        case 'file':
-          return (
-            <View key={msg.id} style={styles.termLine}>
-              <Text selectable style={[mono, styles.termToolName]}>
-                file: {msg.content.name} ({(msg.content.size / 1024).toFixed(1)}KB)
-              </Text>
-            </View>
-          );
-
-        case 'service_message':
-          return (
-            <View key={msg.id} style={styles.termLine}>
-              <Text selectable style={[mono, styles.termSystem]}>
-                {msg.content.text}
-              </Text>
-            </View>
-          );
-
-        case 'session_start':
-          return (
-            <View key={msg.id} style={styles.termDivider}>
-              <Text selectable style={[mono, styles.termSystem]}>session connected</Text>
-            </View>
-          );
-
-        case 'session_stop':
-          return (
-            <View key={msg.id} style={styles.termDivider}>
-              <Text selectable style={[mono, styles.termSystem]}>session ended</Text>
-            </View>
-          );
-
         default:
-          return (
-            <View key={msg.id} style={styles.termLine}>
-              <Text selectable style={[mono, styles.termSystem]}>
-                [{(msg.content as any).type}] {JSON.stringify(msg.content).slice(0, 300)}
-              </Text>
-            </View>
-          );
+          return null;
       }
     } catch (err: any) {
-      console.error('[ChatPanel] renderMessage THREW:', err?.message, 'msg=', JSON.stringify(msg).slice(0, 200));
       return (
         <View key={msg.id || `err_${Date.now()}`} style={styles.termLine}>
           <Text selectable style={[styles.mono, styles.termError]}>render error: {err?.message}</Text>
@@ -265,50 +210,55 @@ export default function ChatPanel({
     }
   };
 
-  const msgCount = messages.length;
-
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={0}
     >
-      <View style={[styles.container, expanded && { height: EXPANDED_HEIGHT }]}>
-        {/* Handle bar */}
-        <TouchableOpacity style={styles.handle} onPress={toggle} activeOpacity={0.6}>
-          <View style={styles.handleBar} />
-          {!expanded && msgCount > 0 && (
-            <Text selectable style={styles.handleHint}>{msgCount}</Text>
-          )}
-        </TouchableOpacity>
-
-        {/* Terminal output */}
-        {expanded && (
-          <ScrollView
-            ref={scrollRef}
-            style={styles.messageList}
-            contentContainerStyle={styles.messageListContent}
-            onContentSizeChange={scrollToBottom}
-            keyboardShouldPersistTaps="handled"
-          >
-            {msgCount === 0 ? (
-              <Text selectable style={styles.emptyText}>waiting for session...</Text>
-            ) : (
-              messages.map(renderMessage)
-            )}
-          </ScrollView>
+      <View style={styles.container}>
+        {/* Terminal overlay — appears above InputBar */}
+        {terminalVisible && (
+          <View style={styles.terminal}>
+            <ScrollView
+              ref={scrollRef}
+              style={styles.terminalScroll}
+              contentContainerStyle={styles.terminalContent}
+              onContentSizeChange={scrollToBottom}
+              keyboardShouldPersistTaps="handled"
+            >
+              {messages.length === 0 ? (
+                <Text selectable style={styles.emptyText}>waiting for session...</Text>
+              ) : (
+                messages.map(renderMessage)
+              )}
+            </ScrollView>
+          </View>
         )}
 
-        {/* InputBar */}
-        <InputBar
-          onSend={onSend}
-          onStop={onStop}
-          onSketch={onSketch}
-          onImage={onImage}
-          onFile={onFile}
-          connected={connected}
-          isProcessing={isProcessing}
-          forceDark
-        />
+        {/* Input row: terminal toggle + InputBar */}
+        <View style={styles.inputRow}>
+          <TouchableOpacity
+            style={[styles.termToggle, terminalVisible && styles.termToggleActive]}
+            onPress={toggleTerminal}
+            activeOpacity={0.6}
+          >
+            <Text style={[styles.termToggleIcon, hasNew && styles.termToggleNew]}>
+              {terminalVisible ? '▾' : '▸'}
+            </Text>
+          </TouchableOpacity>
+          <View style={styles.inputBarWrap}>
+            <InputBar
+              onSend={onSend}
+              onStop={onStop}
+              onSketch={onSketch}
+              onImage={onImage}
+              onFile={onFile}
+              connected={connected}
+              isProcessing={isProcessing}
+              forceDark
+            />
+          </View>
+        </View>
       </View>
     </KeyboardAvoidingView>
   );
@@ -317,30 +267,17 @@ export default function ChatPanel({
 const styles = StyleSheet.create({
   container: {},
 
-  handle: {
-    alignItems: 'center',
-    paddingVertical: 6,
+  // Terminal overlay
+  terminal: {
+    height: TERMINAL_HEIGHT,
     backgroundColor: '#0a0a0a',
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(255,255,255,0.06)',
+    borderTopColor: 'rgba(255,255,255,0.08)',
   },
-  handleBar: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#333',
-  },
-  handleHint: {
-    color: '#444',
-    fontSize: 11,
-    marginTop: 2,
-  },
-
-  messageList: {
+  terminalScroll: {
     flex: 1,
-    backgroundColor: '#0a0a0a',
   },
-  messageListContent: {
+  terminalContent: {
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
@@ -350,6 +287,35 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingVertical: 16,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+
+  // Input row
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    backgroundColor: '#0a0a0a',
+  },
+  termToggle: {
+    width: 32,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 4,
+  },
+  termToggleActive: {
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 6,
+  },
+  termToggleIcon: {
+    color: '#555',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  termToggleNew: {
+    color: '#30d158',
+  },
+  inputBarWrap: {
+    flex: 1,
   },
 
   // Terminal styles
@@ -365,11 +331,6 @@ const styles = StyleSheet.create({
     marginVertical: 4,
     alignItems: 'center',
   },
-  dividerLine: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: '#222',
-    width: '100%',
-  },
 
   // User input — green
   termUser: {
@@ -379,12 +340,11 @@ const styles = StyleSheet.create({
   termAgent: {
     color: '#ccc',
   },
-  // Thinking header — dim purple, tap to expand
+  // Thinking header — dim purple
   termThinking: {
     color: '#8e8ea0',
     fontStyle: 'italic',
   },
-  // Thinking body — when expanded
   termThinkingBody: {
     color: '#6e6e80',
     fontStyle: 'italic',
@@ -397,7 +357,6 @@ const styles = StyleSheet.create({
   termToolName: {
     color: '#b0903a',
   },
-  // Tool params — dim
   termToolParam: {
     color: '#555',
     fontSize: 11,
@@ -405,12 +364,10 @@ const styles = StyleSheet.create({
     marginTop: 2,
     paddingLeft: 12,
   },
-  // Tool result header — dim, tappable
   termToolResultHeader: {
     color: '#555',
     fontSize: 11,
   },
-  // Tool result body — when expanded
   termToolResult: {
     color: '#666',
     fontSize: 11,
@@ -418,11 +375,10 @@ const styles = StyleSheet.create({
     marginTop: 2,
     paddingLeft: 12,
   },
-  // System/service — very dim
+  // System — very dim
   termSystem: {
     color: '#3a3a3a',
   },
-  // Error — red
   termError: {
     color: '#ff4444',
   },
