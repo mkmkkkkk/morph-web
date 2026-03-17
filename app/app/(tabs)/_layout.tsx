@@ -1,18 +1,27 @@
 import { Tabs } from 'expo-router';
 import { Text } from 'react-native';
+import { TabProvider, useActiveTab, type TabName } from '../../lib/TabContext';
 
 console.log('[TabLayout] module loaded');
 
+// Map expo-router screen names to user-facing tab names
+const SCREEN_TO_TAB: Record<string, TabName> = {
+  index: 'Canvas',
+  config: 'Config',
+};
+
 function TabIcon({ label, focused }: { label: string; focused: boolean }) {
   return (
-    <Text style={{ fontSize: 20, opacity: focused ? 1 : 0.4 }}>
+    <Text style={{ fontSize: 20, opacity: focused ? 1 : 0.4, color: '#fff' }}>
       {label}
     </Text>
   );
 }
 
-export default function TabLayout() {
+function TabLayoutInner() {
   console.log('[TabLayout] render');
+  const { setActiveTab } = useActiveTab();
+
   return (
     <Tabs
       screenListeners={{
@@ -21,6 +30,12 @@ export default function TabLayout() {
         },
         focus: (e) => {
           console.log('[TabLayout] TAB FOCUSED:', e.target);
+          // e.target looks like "index-XXXX" or "config-XXXX"
+          const screenName = (e.target || '').split('-')[0];
+          const tabName = SCREEN_TO_TAB[screenName];
+          if (tabName) {
+            setActiveTab(tabName);
+          }
         },
       }}
       screenOptions={{
@@ -55,5 +70,13 @@ export default function TabLayout() {
         }}
       />
     </Tabs>
+  );
+}
+
+export default function TabLayout() {
+  return (
+    <TabProvider>
+      <TabLayoutInner />
+    </TabProvider>
   );
 }

@@ -9,7 +9,7 @@ interface CanvasProps {
   onSendMessage: (message: string) => void;
   onAdopt: (componentId: string) => void;
   onDismiss: (componentId: string) => void;
-  onSketch?: (imageDataUrl: string) => void;
+  onSketch?: (imageDataUrl: string, width?: number, height?: number, viewportWidth?: number, viewportHeight?: number) => void;
   bridgeRef: React.MutableRefObject<MorphBridge | null>;
 }
 
@@ -23,9 +23,9 @@ export default function Canvas({ onSendMessage, onAdopt, onDismiss, onSketch, br
       onAdopt: onAdopt,
       onDismiss: onDismiss,
       onStoreSet: () => {},
-      onSketch: (img: string) => {
+      onSketch: (img: string, w?: number, h?: number, vw?: number, vh?: number) => {
         setSketchActive(false);
-        onSketch?.(img);
+        onSketch?.(img, w, h, vw, vh);
       },
       onSketchOpen: () => setSketchActive(true),
       onSketchClose: () => setSketchActive(false),

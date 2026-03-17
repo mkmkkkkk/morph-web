@@ -102,51 +102,92 @@
     /* === SKETCH MODE === */
     #sketch-overlay {
       position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-      z-index: 500; display: none;
-      background:
-        linear-gradient(rgba(100,149,237,0.06) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(100,149,237,0.06) 1px, transparent 1px);
-      background-color: rgba(10,10,10,0.92);
-      background-size: 24px 24px;
+      z-index: 500; display: none; opacity: 0;
+      background-color: rgba(0,0,0,0.3);
+      transition: opacity 0.25s ease;
     }
-    #sketch-overlay.active { display: block; }
+    /* display/opacity controlled by JS for smooth transitions */
+
+    /* Full-screen transparent drawing surface */
     #sketch-canvas {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
       width: 100%; height: 100%;
       touch-action: none;
+      background: transparent;
     }
+
+    /* Toolbar — floating pill at bottom */
     #sketch-toolbar {
-      position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
-      display: flex; gap: 8px; z-index: 501;
-      background: #2c2c2e; border-radius: 16px; padding: 8px 12px;
-      border: 1px solid rgba(255,255,255,0.1);
-      box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+      display: flex; gap: 4px; align-items: center; z-index: 501;
+      background: #111; border-radius: 20px; padding: 6px 10px;
+      border: 1px solid rgba(255,255,255,0.08);
+      box-shadow:
+        0 12px 40px rgba(0,0,0,0.7),
+        0 0 0 1px rgba(255,255,255,0.03);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
     }
+
     .sketch-btn {
-      padding: 8px 16px; border: none; border-radius: 10px;
-      font-size: 14px; cursor: pointer; color: #fff;
-      background: transparent; font-weight: 500;
+      padding: 7px 14px; border: none; border-radius: 12px;
+      font-size: 13px; cursor: pointer; color: #888;
+      background: transparent; font-weight: 600;
+      font-family: 'Menlo', 'SF Mono', monospace;
+      letter-spacing: -0.3px;
+      transition: background 0.15s ease, color 0.15s ease;
     }
-    .sketch-btn:active { background: rgba(255,255,255,0.08); }
-    .sketch-btn.send { color: #30d158; }
-    .sketch-btn.clear { color: #ff9f0a; }
-    .sketch-btn.close { color: #ff453a; }
-    .sketch-btn.undo { color: #5e5ce6; }
+    .sketch-btn:active { background: rgba(255,255,255,0.06); }
+
+    .sketch-btn.send {
+      color: #0a0a0a; background: #30d158;
+      border-radius: 14px; padding: 7px 18px;
+      font-weight: 700; letter-spacing: 0;
+    }
+    .sketch-btn.send:active { background: #28b84c; }
+
+    .sketch-btn.clear { color: #b0903a; }
+    .sketch-btn.clear:active { color: #d4ac4a; }
+
+    .sketch-btn.close { color: #555; }
+    .sketch-btn.close:active { color: #888; }
+
+    .sketch-btn.undo { color: #666; }
+    .sketch-btn.undo:active { color: #999; }
 
     /* Color picker dots */
-    .sketch-colors { display: flex; gap: 6px; align-items: center; padding: 0 4px; }
+    .sketch-colors { display: flex; gap: 5px; align-items: center; padding: 0 4px; }
     .sketch-color {
-      width: 22px; height: 22px; border-radius: 11px; border: 2px solid transparent;
+      width: 20px; height: 20px; border-radius: 10px;
+      border: 2px solid rgba(255,255,255,0.06);
       cursor: pointer;
+      transition: border-color 0.15s ease, transform 0.15s ease;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.3);
     }
-    .sketch-color.active { border-color: #fff; }
-    .sketch-sep { width: 1px; height: 24px; background: rgba(255,255,255,0.1); }
+    .sketch-color:active { transform: scale(0.9); }
+    .sketch-color.active {
+      border-color: rgba(255,255,255,0.5);
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.15), 0 1px 3px rgba(0,0,0,0.3);
+    }
 
-    /* Sketch mode indicator */
+    .sketch-sep {
+      width: 1px; height: 20px;
+      background: rgba(255,255,255,0.06);
+      margin: 0 2px;
+    }
+
+    /* Sketch mode indicator — top label */
     #sketch-label {
-      position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
-      z-index: 501; background: rgba(94,92,230,0.2); color: #818cf8;
-      padding: 4px 14px; border-radius: 20px; font-size: 12px;
-      font-weight: 600; letter-spacing: 0.5px;
+      position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+      z-index: 501;
+      background: rgba(255,255,255,0.04);
+      color: #444;
+      padding: 5px 16px; border-radius: 20px;
+      font-size: 10px; font-weight: 700;
+      font-family: 'Menlo', 'SF Mono', monospace;
+      letter-spacing: 2px; text-transform: uppercase;
+      border: 1px solid rgba(255,255,255,0.06);
     }
   </style>
 </head>
@@ -167,21 +208,22 @@
   <!-- Sketch overlay -->
   <div id="sketch-overlay">
     <canvas id="sketch-canvas"></canvas>
-    <div id="sketch-label">SKETCH MODE</div>
+    <div id="sketch-label">SKETCH</div>
     <div id="sketch-toolbar">
+      <button class="sketch-btn close" onclick="_sketchClose()">&times;</button>
+      <div class="sketch-sep"></div>
       <div class="sketch-colors">
-        <div class="sketch-color active" data-color="#fff" style="background:#fff"></div>
+        <div class="sketch-color active" data-color="#ffffff" style="background:#ffffff"></div>
         <div class="sketch-color" data-color="#ff453a" style="background:#ff453a"></div>
         <div class="sketch-color" data-color="#30d158" style="background:#30d158"></div>
-        <div class="sketch-color" data-color="#5e5ce6" style="background:#5e5ce6"></div>
-        <div class="sketch-color" data-color="#ff9f0a" style="background:#ff9f0a"></div>
+        <div class="sketch-color" data-color="#007aff" style="background:#007aff"></div>
+        <div class="sketch-color" data-color="#ffcc00" style="background:#ffcc00"></div>
       </div>
       <div class="sketch-sep"></div>
-      <button class="sketch-btn undo" onclick="_sketchUndo()">Undo</button>
-      <button class="sketch-btn clear" onclick="_sketchClear()">Clear</button>
+      <button class="sketch-btn undo" onclick="_sketchUndo()">undo</button>
+      <button class="sketch-btn clear" onclick="_sketchClear()">clear</button>
       <div class="sketch-sep"></div>
       <button class="sketch-btn send" onclick="_sketchSend()">Send</button>
-      <button class="sketch-btn close" onclick="_sketchClose()">X</button>
     </div>
   </div>
 
@@ -196,7 +238,7 @@
     var _sketchActive = false;
     var _sketchCtx = null;
     var _sketchDrawing = false;
-    var _sketchColor = '#fff';
+    var _sketchColor = '#ffffff';
     var _sketchHistory = []; // array of ImageData for undo
     var _sketchLineWidth = 3;
     var _sketchInitialized = false;
@@ -367,10 +409,10 @@
     function _sketchInit() {
       var c = document.getElementById('sketch-canvas');
       var dpr = window.devicePixelRatio || 1;
-      c.width = window.innerWidth * dpr;
-      c.height = window.innerHeight * dpr;
-      c.style.width = window.innerWidth + 'px';
-      c.style.height = window.innerHeight + 'px';
+      // Use the element's rendered size (CSS-positioned, not full screen)
+      var rect = c.getBoundingClientRect();
+      c.width = rect.width * dpr;
+      c.height = rect.height * dpr;
       _sketchCtx = c.getContext('2d');
       _sketchCtx.scale(dpr, dpr);
       _sketchCtx.lineCap = 'round';
@@ -401,6 +443,13 @@
       }
     }
 
+    // Get coordinates relative to the canvas element
+    function _sketchCoords(clientX, clientY) {
+      var c = document.getElementById('sketch-canvas');
+      var rect = c.getBoundingClientRect();
+      return { x: clientX - rect.left, y: clientY - rect.top };
+    }
+
     // Mouse handlers for web/desktop testing
     function _sketchMouseDown(e) {
       _sketchDrawing = true;
@@ -429,15 +478,17 @@
       if (_sketchHistory.length > 30) _sketchHistory.shift();
 
       var t = e.touches[0];
+      var pos = _sketchCoords(t.clientX, t.clientY);
       _sketchCtx.beginPath();
-      _sketchCtx.moveTo(t.clientX, t.clientY);
+      _sketchCtx.moveTo(pos.x, pos.y);
     }
 
     function _sketchTouchMove(e) {
       e.preventDefault();
       if (!_sketchDrawing) return;
       var t = e.touches[0];
-      _sketchCtx.lineTo(t.clientX, t.clientY);
+      var pos = _sketchCoords(t.clientX, t.clientY);
+      _sketchCtx.lineTo(pos.x, pos.y);
       _sketchCtx.stroke();
     }
 
@@ -449,7 +500,10 @@
     function _sketchOpen() {
       _sketchActive = true;
       var overlay = document.getElementById('sketch-overlay');
-      overlay.classList.add('active');
+      overlay.style.display = 'block';
+      // Force reflow then animate in
+      overlay.offsetHeight;
+      overlay.style.opacity = '1';
       // Prevent body scroll while sketching
       document.body.style.overflow = 'hidden';
       document.body.style.touchAction = 'none';
@@ -460,7 +514,11 @@
 
     function _sketchClose() {
       _sketchActive = false;
-      document.getElementById('sketch-overlay').classList.remove('active');
+      var overlay = document.getElementById('sketch-overlay');
+      overlay.style.opacity = '0';
+      setTimeout(function() {
+        overlay.style.display = 'none';
+      }, 250);
       document.body.style.overflow = '';
       document.body.style.touchAction = '';
       _sketchHistory = [];
@@ -470,7 +528,8 @@
     function _sketchClear() {
       if (!_sketchCtx) return;
       var c = document.getElementById('sketch-canvas');
-      _sketchCtx.clearRect(0, 0, c.width / (window.devicePixelRatio || 1), c.height / (window.devicePixelRatio || 1));
+      var dpr = window.devicePixelRatio || 1;
+      _sketchCtx.clearRect(0, 0, c.width / dpr, c.height / dpr);
       _sketchHistory = [];
     }
 
@@ -491,17 +550,16 @@
       var tmp = document.createElement('canvas');
       tmp.width = outW; tmp.height = outH;
       var tCtx = tmp.getContext('2d');
-      tCtx.fillStyle = '#0a0a0a';
-      tCtx.fillRect(0, 0, outW, outH);
-      // Draw grid on the compressed version for spatial reference
-      tCtx.strokeStyle = 'rgba(100,149,237,0.1)';
-      tCtx.lineWidth = 0.5;
-      var gridSize = 24 * scale;
-      for (var gx = 0; gx < outW; gx += gridSize) { tCtx.beginPath(); tCtx.moveTo(gx, 0); tCtx.lineTo(gx, outH); tCtx.stroke(); }
-      for (var gy = 0; gy < outH; gy += gridSize) { tCtx.beginPath(); tCtx.moveTo(0, gy); tCtx.lineTo(outW, gy); tCtx.stroke(); }
+      // Transparent background — only strokes are exported (PNG with alpha)
       tCtx.drawImage(c, 0, 0, c.width, c.height, 0, 0, outW, outH);
       var dataUrl = tmp.toDataURL('image/png');
-      _postToNative('sketch', { image: dataUrl });
+      _postToNative('sketch', {
+        image: dataUrl,
+        width: outW,
+        height: outH,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+      });
       _sketchClose();
     }
 

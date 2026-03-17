@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import Constants from 'expo-constants';
+import { useActiveTab } from '../../lib/TabContext';
 
 // Safe-load heavy modules — catch import errors instead of crashing
 let Canvas: any = null;
@@ -67,6 +68,8 @@ export default function CanvasScreen() {
   const storeRef = useRef(ComponentStore ? new ComponentStore() : null);
   const componentHtmlCache = useRef(new Map<string, string>());
 
+  const { activeTab } = useActiveTab();
+
   const {
     connected,
     connectionState,
@@ -81,6 +84,7 @@ export default function CanvasScreen() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [messages, setMessages] = useState<any[]>([]);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingMessagesRef = useRef<{ localId: string; wrappedText: string }[]>([]);
 
   // Initialize component store
   useEffect(() => {
@@ -91,6 +95,10 @@ export default function CanvasScreen() {
         await storeRef.current.init();
         const components = await storeRef.current.loadAllComponents();
         console.log('[CanvasScreen] store init OK, components=', components.length);
+        // Populate HTML cache so draft-persist dedup works after refresh
+        for (const comp of components) {
+          componentHtmlCache.current.set(comp.id, comp.html);
+        }
         if (components.length > 0 && bridgeRef.current) {
           (bridgeRef.current as any).loadComponents(components);
         }
@@ -132,8 +140,15 @@ export default function CanvasScreen() {
               const compId = match[1];
               const compHtml = match[2].trim();
               console.log('[CanvasScreen] found morph-component:', compId);
+              const prevHtml = componentHtmlCache.current.get(compId);
               componentHtmlCache.current.set(compId, compHtml);
               bridge.addComponent(compId, compHtml, 'draft');
+              // Auto-persist draft so it survives app refresh
+              if (storeRef.current && compHtml !== prevHtml) {
+                storeRef.current.saveComponent(compId, compHtml).catch((e: any) =>
+                  console.warn('[CanvasScreen] draft persist failed:', compId, e?.message)
+                );
+              }
             }
 
             const cleanText = text.replace(componentRegex, '').trim();
@@ -168,30 +183,63 @@ export default function CanvasScreen() {
     });
   }, [onSessionMessage]);
 
+  // Flush pending message queue when connection is established
+  useEffect(() => {
+    if (connected && pendingMessagesRef.current.length > 0) {
+      console.log('[CanvasScreen] connected — flushing', pendingMessagesRef.current.length, 'pending messages');
+      const queue = [...pendingMessagesRef.current];
+      const sentIds = new Set(queue.map(q => q.localId));
+      pendingMessagesRef.current = [];
+
+      // Clear pending flag on queued messages
+      setMessages(prev => prev.map(msg =>
+        sentIds.has(msg.id) ? { ...msg, pending: false } : msg
+      ));
+
+      // Send each queued message in order
+      for (const item of queue) {
+        rawSendMessage(item.wrappedText);
+        console.log('[CanvasScreen] sent queued message:', item.localId);
+      }
+      setIsProcessing(true);
+    }
+  }, [connected, rawSendMessage]);
+
   const handleSend = useCallback((text: string) => {
     console.log('[CanvasScreen] handleSend: connected=', connected, 'text=', JSON.stringify(text).slice(0, 100));
-    if (!connected) {
-      console.warn('[CanvasScreen] handleSend: NOT connected, ignoring');
-      return;
-    }
     try {
-      setMessages(prev => [...prev, {
-        id: `local_${Date.now()}`,
-        timestamp: Date.now(),
-        role: 'user',
-        content: { type: 'text', text },
-      }]);
-      console.log('[CanvasScreen] local message added');
+      const localId = `local_${Date.now()}`;
       const manifest = storeRef.current?.getManifest() || { components: [], order: [] };
-      const wrappedText = promptLib?.wrapUserMessage(text, manifest) || text;
-      console.log('[CanvasScreen] wrappedText length=', wrappedText.length);
-      setIsProcessing(true);
-      rawSendMessage(wrappedText);
-      console.log('[CanvasScreen] rawSendMessage called OK');
+      const wrappedText = promptLib?.wrapUserMessage(text, manifest, activeTab) || text;
+
+      if (connected) {
+        setMessages(prev => [...prev, {
+          id: localId,
+          timestamp: Date.now(),
+          role: 'user',
+          content: { type: 'text', text },
+        }]);
+        console.log('[CanvasScreen] local message added');
+        console.log('[CanvasScreen] wrappedText length=', wrappedText.length);
+        setIsProcessing(true);
+        rawSendMessage(wrappedText);
+        console.log('[CanvasScreen] rawSendMessage called OK');
+      } else {
+        // Queue message for sending when connected
+        setMessages(prev => [...prev, {
+          id: localId,
+          timestamp: Date.now(),
+          role: 'user',
+          content: { type: 'text', text },
+          pending: true,
+        }]);
+        pendingMessagesRef.current.push({ localId, wrappedText });
+        console.log('[CanvasScreen] message queued (disconnected), queue size=', pendingMessagesRef.current.length);
+      }
     } catch (err: any) {
       console.error('[CanvasScreen] handleSend THREW:', err?.message, err?.stack);
     }
-  }, [connected, rawSendMessage]);
+  }, [connected, rawSendMessage, activeTab]);
 
   const handleStop = useCallback(() => {
     if (!connected) return;
@@ -214,23 +262,26 @@ export default function CanvasScreen() {
     await storeRef.current?.removeComponent(componentId);
   }, []);
 
-  const handleSketch = useCallback((imageDataUrl: string) => {
+  const handleSketch = useCallback((imageDataUrl: string, width?: number, height?: number, viewportWidth?: number, viewportHeight?: number) => {
     if (!connected || !promptLib) return;
     const manifest = storeRef.current?.getManifest() || { components: [], order: [] };
-    rawSendMessage(promptLib.wrapUserMessage(promptLib.buildSketchMessage(imageDataUrl), manifest));
-  }, [connected, rawSendMessage]);
+    const dimensions = (viewportWidth && viewportHeight && width && height)
+      ? { width, height, viewportWidth, viewportHeight }
+      : undefined;
+    rawSendMessage(promptLib.wrapUserMessage(promptLib.buildSketchMessage(imageDataUrl, dimensions), manifest, activeTab));
+  }, [connected, rawSendMessage, activeTab]);
 
   const handleImage = useCallback((imageDataUrl: string) => {
     if (!connected || !promptLib) return;
     const manifest = storeRef.current?.getManifest() || { components: [], order: [] };
-    rawSendMessage(promptLib.wrapUserMessage(promptLib.buildImageMessage(imageDataUrl), manifest));
-  }, [connected, rawSendMessage]);
+    rawSendMessage(promptLib.wrapUserMessage(promptLib.buildImageMessage(imageDataUrl), manifest, activeTab));
+  }, [connected, rawSendMessage, activeTab]);
 
   const handleFile = useCallback((file: { name: string; mime: string; base64: string; size: number }) => {
     if (!connected || !promptLib) return;
     const manifest = storeRef.current?.getManifest() || { components: [], order: [] };
-    rawSendMessage(promptLib.wrapUserMessage(promptLib.buildFileMessage(file), manifest));
-  }, [connected, rawSendMessage]);
+    rawSendMessage(promptLib.wrapUserMessage(promptLib.buildFileMessage(file), manifest, activeTab));
+  }, [connected, rawSendMessage, activeTab]);
 
   const handleOpenSketch = useCallback(() => {
     (bridgeRef.current as any)?.openSketch();
@@ -254,13 +305,6 @@ export default function CanvasScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: '#0a0a0a', paddingTop: Constants.statusBarHeight }]}>
-      {!connected && (
-        <View style={{ backgroundColor: '#1a1a1a', padding: 8, paddingHorizontal: 12 }}>
-          <Text selectable style={{ color: connectionState === 'connecting' ? '#ffaa00' : '#ff4444', fontSize: 13 }}>
-            {connectionState}{lastError ? `\n${lastError}` : ''}
-          </Text>
-        </View>
-      )}
       {Canvas && (
         <Canvas
           onSendMessage={handleSend}
@@ -279,6 +323,7 @@ export default function CanvasScreen() {
           onImage={handleImage}
           onFile={handleFile}
           connected={connected}
+          connectionState={connectionState}
           isProcessing={isProcessing}
         />
       )}

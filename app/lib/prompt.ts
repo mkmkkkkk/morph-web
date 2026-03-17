@@ -6,15 +6,17 @@ import { Manifest } from './store';
  *
  * Kept compact to minimize token cost per message.
  */
-export function buildMorphContext(manifest: Manifest): string {
+export function buildMorphContext(manifest: Manifest, activeTab?: string): string {
   const componentList = manifest.components.length > 0
     ? manifest.components
         .map(c => `- ${c.id}${c.description ? ': ' + c.description : ''}`)
         .join('\n')
     : '(empty canvas)';
 
+  const viewingLine = activeTab ? `\nUser is currently viewing: ${activeTab}` : '';
+
   return `[Morph Canvas]
-You control a mobile canvas app. User is on phone.
+You control a mobile canvas app. User is on phone.${viewingLine}
 
 Canvas components:
 ${componentList}
@@ -41,16 +43,20 @@ Same ID = update existing component. Plain text = message bubble.`;
 /**
  * Wrap a user message with Morph context for sending to CC.
  */
-export function wrapUserMessage(text: string, manifest: Manifest): string {
-  return buildMorphContext(manifest) + '\n\n' + text;
+export function wrapUserMessage(text: string, manifest: Manifest, activeTab?: string): string {
+  return buildMorphContext(manifest, activeTab) + '\n\n' + text;
 }
 
 /**
  * Build the sketch message that wraps a sketch image for CC.
  * Includes instructions for interpreting hand-drawn UI sketches.
+ * Optionally includes dimension info so CC can position components accurately.
  */
-export function buildSketchMessage(imageDataUrl: string): string {
-  return `[Sketch from canvas — interpret the drawing and generate/modify components accordingly.
+export function buildSketchMessage(imageDataUrl: string, dimensions?: { width: number; height: number; viewportWidth: number; viewportHeight: number }): string {
+  const dimInfo = dimensions
+    ? `\nCanvas size: ${dimensions.viewportWidth}x${dimensions.viewportHeight}px. Sketch drawn at this exact scale.`
+    : '';
+  return `[Sketch from canvas — interpret the drawing and generate/modify components accordingly.${dimInfo}
 Boxes→buttons/cards, lines→layout, text→labels, position→approximate layout on the grid.]
 ![sketch](${imageDataUrl})`;
 }

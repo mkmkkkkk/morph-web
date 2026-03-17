@@ -1,7 +1,7 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View, TextInput, TouchableOpacity, Text, StyleSheet,
-  Platform, useColorScheme, ActionSheetIOS, Alert,
+  Platform, useColorScheme, ActionSheetIOS, Alert, Animated, Easing,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
@@ -16,20 +16,65 @@ interface InputBarProps {
   onImage?: (base64DataUrl: string) => void;
   onFile?: (file: { name: string; mime: string; base64: string; size: number }) => void;
   connected: boolean;
+  connectionState?: 'disconnected' | 'connecting' | 'connected' | 'error';
   isProcessing?: boolean;
   forceDark?: boolean;
+  onToggleTerminal?: () => void;
+  terminalVisible?: boolean;
+  hasNewTerminal?: boolean;
 }
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB limit for happy-wire
 
 console.log('[InputBar] module loaded');
 
-export default function InputBar({ onSend, onStop, onSketch, onImage, onFile, connected, isProcessing, forceDark }: InputBarProps) {
-  console.log('[InputBar] render: connected=', connected, 'isProcessing=', isProcessing);
+export default function InputBar({ onSend, onStop, onSketch, onImage, onFile, connected, connectionState, isProcessing, forceDark, onToggleTerminal, terminalVisible, hasNewTerminal }: InputBarProps) {
+  console.log('[InputBar] render: connected=', connected, 'connectionState=', connectionState, 'isProcessing=', isProcessing);
   const [text, setText] = useState('');
   const inputRef = useRef<TextInput>(null);
   const router = useRouter();
   const isDark = forceDark || useColorScheme() !== 'light';
+
+  // Dot color based on connectionState
+  const isConnecting = connectionState === 'connecting';
+  const dotColor = connectionState === 'connected' ? '#30d158'
+    : connectionState === 'connecting' ? '#ffcc00'
+    : connectionState === 'error' ? '#ff4444'
+    : '#636366'; // disconnected / undefined
+
+  // Pulse animation for connecting state
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (isConnecting) {
+      const loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, { toValue: 0.3, duration: 600, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+          Animated.timing(pulseAnim, { toValue: 1, duration: 600, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        ])
+      );
+      loop.start();
+      return () => loop.stop();
+    } else {
+      pulseAnim.setValue(1);
+    }
+  }, [isConnecting]);
+
+  // Pulse animation for terminal toggle when processing
+  const termPulseAnim = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    if (isProcessing) {
+      const loop = Animated.loop(
+        Animated.sequence([
+          Animated.timing(termPulseAnim, { toValue: 0.2, duration: 400, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+          Animated.timing(termPulseAnim, { toValue: 1, duration: 400, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        ])
+      );
+      loop.start();
+      return () => loop.stop();
+    } else {
+      termPulseAnim.setValue(1);
+    }
+  }, [isProcessing]);
 
   const handleSend = () => {
     const trimmed = text.trim();
@@ -120,7 +165,7 @@ export default function InputBar({ onSend, onStop, onSketch, onImage, onFile, co
 
   return (
     <View style={[styles.container, isDark ? styles.containerDark : styles.containerLight]}>
-      <View style={[styles.dot, connected ? styles.dotConnected : styles.dotDisconnected]} />
+      <Animated.View style={[styles.dot, { backgroundColor: dotColor, opacity: pulseAnim }]} />
         <TouchableOpacity
           style={styles.attachBtn}
           onPress={handleAttach}
@@ -128,6 +173,23 @@ export default function InputBar({ onSend, onStop, onSketch, onImage, onFile, co
         >
           <Text style={styles.attachIcon}>+</Text>
         </TouchableOpacity>
+        {onToggleTerminal && (
+          <TouchableOpacity
+            style={styles.termToggle}
+            onPress={onToggleTerminal}
+            activeOpacity={0.6}
+          >
+            {isProcessing ? (
+              <Animated.Text style={[styles.termToggleIcon, hasNewTerminal && styles.termToggleNew, { opacity: termPulseAnim }]}>
+                {'›'}
+              </Animated.Text>
+            ) : (
+              <Text style={[styles.termToggleIcon, hasNewTerminal && styles.termToggleNew]}>
+                {terminalVisible ? '⌄' : '›'}
+              </Text>
+            )}
+          </TouchableOpacity>
+        )}
         <TextInput
           ref={inputRef}
           style={[styles.input, isDark ? styles.inputDark : styles.inputLight]}
@@ -184,10 +246,8 @@ const styles = StyleSheet.create({
     height: 7,
     borderRadius: 3.5,
     marginRight: 6,
-    marginBottom: 14,
+    marginBottom: 13.5, // center at 17px = same axis as 34px buttons
   },
-  dotConnected: { backgroundColor: '#30d158' },
-  dotDisconnected: { backgroundColor: '#636366' },
   attachBtn: {
     width: 34,
     height: 34,
@@ -206,9 +266,10 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
+    minHeight: 34,
     borderRadius: 20,
     paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingVertical: 9, // 9+9+16=34px base height, matches 34px buttons
     fontSize: 16,
     maxHeight: 120,
   },
@@ -246,6 +307,23 @@ const styles = StyleSheet.create({
     height: 12,
     borderRadius: 2,
     backgroundColor: '#fff',
+  },
+  termToggle: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 6,
+  },
+  termToggleIcon: {
+    color: '#555',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  termToggleNew: {
+    color: '#30d158',
   },
   connectBar: {
     flex: 1,

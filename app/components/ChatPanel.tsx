@@ -27,6 +27,7 @@ interface ChatPanelProps {
   onImage?: (base64DataUrl: string) => void;
   onFile?: (file: { name: string; mime: string; base64: string; size: number }) => void;
   connected: boolean;
+  connectionState?: 'disconnected' | 'connecting' | 'connected' | 'error';
   isProcessing?: boolean;
 }
 
@@ -63,7 +64,7 @@ function CollapsibleBlock({ label, preview, headerStyle, content, contentStyle, 
 
 export default function ChatPanel({
   messages, onSend, onStop, onSketch, onImage, onFile,
-  connected, isProcessing,
+  connected, connectionState, isProcessing,
 }: ChatPanelProps) {
   const [terminalVisible, setTerminalVisible] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
@@ -130,10 +131,11 @@ export default function ChatPanel({
             );
           }
 
+          const isPending = isUser && (msg as any).pending;
           return (
             <View key={msg.id} style={styles.termLine}>
-              <Text selectable style={[mono, isUser ? styles.termUser : styles.termAgent]}>
-                {isUser ? `> ${text}` : text}
+              <Text selectable style={[mono, isUser ? styles.termUser : styles.termAgent, isPending && styles.termPending]}>
+                {isUser ? `> ${isPending ? '[queued] ' : ''}${text}` : text}
               </Text>
             </View>
           );
@@ -235,30 +237,21 @@ export default function ChatPanel({
           </View>
         )}
 
-        {/* Input row: terminal toggle + InputBar */}
-        <View style={styles.inputRow}>
-          <TouchableOpacity
-            style={[styles.termToggle, terminalVisible && styles.termToggleActive]}
-            onPress={toggleTerminal}
-            activeOpacity={0.6}
-          >
-            <Text style={[styles.termToggleIcon, hasNew && styles.termToggleNew]}>
-              {terminalVisible ? '▾' : '▸'}
-            </Text>
-          </TouchableOpacity>
-          <View style={styles.inputBarWrap}>
-            <InputBar
-              onSend={onSend}
-              onStop={onStop}
-              onSketch={onSketch}
-              onImage={onImage}
-              onFile={onFile}
-              connected={connected}
-              isProcessing={isProcessing}
-              forceDark
-            />
-          </View>
-        </View>
+        {/* InputBar with embedded terminal toggle */}
+        <InputBar
+          onSend={onSend}
+          onStop={onStop}
+          onSketch={onSketch}
+          onImage={onImage}
+          onFile={onFile}
+          connected={connected}
+          connectionState={connectionState}
+          isProcessing={isProcessing}
+          forceDark
+          onToggleTerminal={toggleTerminal}
+          terminalVisible={terminalVisible}
+          hasNewTerminal={hasNew}
+        />
       </View>
     </KeyboardAvoidingView>
   );
@@ -289,34 +282,6 @@ const styles = StyleSheet.create({
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
 
-  // Input row
-  inputRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    backgroundColor: '#0a0a0a',
-  },
-  termToggle: {
-    width: 32,
-    height: 44,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginLeft: 4,
-  },
-  termToggleActive: {
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 6,
-  },
-  termToggleIcon: {
-    color: '#555',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  termToggleNew: {
-    color: '#30d158',
-  },
-  inputBarWrap: {
-    flex: 1,
-  },
 
   // Terminal styles
   mono: {
@@ -335,6 +300,11 @@ const styles = StyleSheet.create({
   // User input — green
   termUser: {
     color: '#30d158',
+  },
+  // Pending (queued while disconnected) — dim italic
+  termPending: {
+    color: '#6b8f6b',
+    fontStyle: 'italic',
   },
   // Agent text — light grey
   termAgent: {
