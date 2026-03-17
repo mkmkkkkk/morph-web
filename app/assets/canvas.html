@@ -550,7 +550,9 @@
       var tmp = document.createElement('canvas');
       tmp.width = outW; tmp.height = outH;
       var tCtx = tmp.getContext('2d');
-      // Transparent background — only strokes are exported (PNG with alpha)
+      // Dark background so strokes are visible to AI vision (transparent → white = invisible)
+      tCtx.fillStyle = '#0a0a0a';
+      tCtx.fillRect(0, 0, outW, outH);
       tCtx.drawImage(c, 0, 0, c.width, c.height, 0, 0, outW, outH);
       var dataUrl = tmp.toDataURL('image/png');
       _postToNative('sketch', {
