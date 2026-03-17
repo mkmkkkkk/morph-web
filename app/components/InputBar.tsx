@@ -1,7 +1,7 @@
 import React, { useState, useRef } from 'react';
 import {
   View, TextInput, TouchableOpacity, Text, StyleSheet,
-  KeyboardAvoidingView, Platform, useColorScheme, ActionSheetIOS, Alert,
+  Platform, useColorScheme, ActionSheetIOS, Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
@@ -106,66 +106,47 @@ export default function InputBar({ onSend, onStop, onSketch, onImage, onFile, co
   };
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={90}
-    >
-      <View style={[styles.container, isDark ? styles.containerDark : styles.containerLight]}>
-        {connected ? (
-          <>
-            <View style={[styles.dot, styles.dotConnected]} />
-            <TouchableOpacity
-              style={styles.attachBtn}
-              onPress={handleAttach}
-              activeOpacity={0.6}
-            >
-              <Text style={styles.attachIcon}>+</Text>
-            </TouchableOpacity>
-            <TextInput
-              ref={inputRef}
-              style={[styles.input, isDark ? styles.inputDark : styles.inputLight]}
-              value={text}
-              onChangeText={setText}
-              placeholder="Message Claude Code..."
-              placeholderTextColor={isDark ? '#555' : '#999'}
-              multiline
-              maxLength={10000}
-              returnKeyType="send"
-              onSubmitEditing={handleSend}
-              blurOnSubmit={false}
-            />
-            {isProcessing ? (
-              <TouchableOpacity
-                style={styles.stopBtn}
-                onPress={onStop}
-                activeOpacity={0.7}
-              >
-                <View style={styles.stopSquare} />
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity
-                style={[styles.sendBtn, !text.trim() && styles.sendBtnDisabled]}
-                onPress={handleSend}
-                disabled={!text.trim()}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.sendText, !text.trim() && styles.sendTextDisabled]}>{'↑'}</Text>
-              </TouchableOpacity>
-            )}
-          </>
-        ) : (
+    <View style={[styles.container, isDark ? styles.containerDark : styles.containerLight]}>
+      <View style={[styles.dot, connected ? styles.dotConnected : styles.dotDisconnected]} />
+        <TouchableOpacity
+          style={styles.attachBtn}
+          onPress={handleAttach}
+          activeOpacity={0.6}
+        >
+          <Text style={styles.attachIcon}>+</Text>
+        </TouchableOpacity>
+        <TextInput
+          ref={inputRef}
+          style={[styles.input, isDark ? styles.inputDark : styles.inputLight]}
+          value={text}
+          onChangeText={setText}
+          placeholder="Message Claude Code..."
+          placeholderTextColor={isDark ? '#555' : '#999'}
+          multiline
+          maxLength={10000}
+          returnKeyType="send"
+          onSubmitEditing={handleSend}
+          blurOnSubmit={false}
+        />
+        {isProcessing ? (
           <TouchableOpacity
-            style={styles.connectBar}
-            onPress={() => router.push('/connect')}
+            style={styles.stopBtn}
+            onPress={onStop}
             activeOpacity={0.7}
           >
-            <View style={[styles.dot, styles.dotDisconnected]} />
-            <Text style={styles.connectText}>Connect to Claude Code</Text>
-            <Text style={styles.connectChevron}>{'>'}</Text>
+            <View style={styles.stopSquare} />
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={[styles.sendBtn, !text.trim() && styles.sendBtnDisabled]}
+            onPress={handleSend}
+            disabled={!text.trim()}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.sendText, !text.trim() && styles.sendTextDisabled]}>{'↑'}</Text>
           </TouchableOpacity>
         )}
-      </View>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 
@@ -198,16 +179,17 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: 'rgba(94,92,230,0.15)',
+    backgroundColor: 'rgba(255,255,255,0.08)',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 6,
   },
   attachIcon: {
-    color: '#818cf8',
+    color: '#666',
     fontSize: 22,
     fontWeight: '400',
-    marginTop: -1,
+    lineHeight: 22,
+    textAlign: 'center',
   },
   input: {
     flex: 1,
@@ -229,7 +211,7 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: '#30d158',
+    backgroundColor: '#333',
     justifyContent: 'center',
     alignItems: 'center',
     marginLeft: 6,

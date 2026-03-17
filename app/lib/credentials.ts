@@ -30,7 +30,8 @@ export interface HappyCredentials {
   encryption: {
     type: EncryptionVariant;
     key: Uint8Array;        // 32-byte secret (legacy) or derived key
-    publicKey?: Uint8Array; // Only for dataKey variant
+    publicKey?: Uint8Array; // Only for dataKey variant — the public key in daemon's access.key
+    secretKey?: Uint8Array; // X25519 private key matching publicKey — for decrypting dataEncryptionKey
     machineKey?: Uint8Array;
   };
   serverUrl?: string;
@@ -72,29 +73,30 @@ export async function saveCredentials(creds: HappyCredentials): Promise<void> {
   await SecureStore.setItemAsync(CRED_KEY, JSON.stringify(stored));
 }
 
+// DEV: hardcoded credentials for testing — remove before production
+// publicKey must match the publicKey in ~/.happy/access.key on the daemon machine
+// secretKey is OUR X25519 private key — CC encrypts session keys with our publicKey,
+// and we decrypt dataEncryptionKey from the API with secretKey to recover the session key.
+const DEV_CREDENTIALS: HappyCredentials = {
+  token: 'eyJhbGciOiJFZERTQSJ9.eyJzdWIiOiJjbWxmbzRkYWtxYWozMXcxNGswY2V3NXJ1Iiwic2Vzc2lvbiI6ImNtbGgzb2p3Nm9xYzgxdzE0NjFobTF2NzgiLCJpYXQiOjE3NzA3NTgxNjEsIm5iZiI6MTc3MDc1ODE2MSwiaXNzIjoiaGFuZHkiLCJqdGkiOiJiOTI3ZmU5NC1hMjc5LTQyN2YtOTQ2OC04ODkxYjcxNmQyMWEifQ.YcQ-YDxhYNs_92SFydcErw4xbwdqw5VR_n4tW59op33q4GN4B5onpKQ5eNPdbPkPsqXfoc91fCgyflLd6HYxAw',
+  encryption: {
+    type: 'dataKey',
+    key: fromBase64('3knBWEXcZdaFwBbTBCvYN4NDPWCFRLVlGKhke/bBkqM='),
+    publicKey: fromBase64('dPPl+YR9HlhCD1FVCZ5Q0PBtTL69iE5lhLlQq4kkKww='),
+    secretKey: fromBase64('ZqDWuB0F0sw6+N2sFQHRd+cKgfVzh3Dvt4wayVQZQA8='),
+    machineKey: fromBase64('3knBWEXcZdaFwBbTBCvYN4NDPWCFRLVlGKhke/bBkqM='),
+  },
+};
+
 /**
  * Load credentials from secure storage. Returns null if not paired.
+ * Falls back to DEV_CREDENTIALS for testing.
  */
 export async function loadCredentials(): Promise<HappyCredentials | null> {
-  const raw = await SecureStore.getItemAsync(CRED_KEY);
-  if (!raw) return null;
-
-  try {
-    const stored: StoredCredentials = JSON.parse(raw);
-    return {
-      token: stored.token,
-      encryption: {
-        type: stored.variant,
-        key: fromBase64(stored.key),
-        publicKey: stored.publicKey ? fromBase64(stored.publicKey) : undefined,
-        machineKey: stored.machineKey ? fromBase64(stored.machineKey) : undefined,
-      },
-      serverUrl: stored.serverUrl,
-      machineId: stored.machineId,
-    };
-  } catch {
-    return null;
-  }
+  // DEV: always use hardcoded credentials during development
+  // The secretKey is required for spawn-first flow (decrypt CC's dataEncryptionKey)
+  // TODO: production — restore SecureStore loading + store secretKey during pairing
+  return DEV_CREDENTIALS;
 }
 
 /**

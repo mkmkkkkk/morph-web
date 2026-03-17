@@ -313,6 +313,7 @@ export function buildUserMessage(text: string): MessageEnvelope {
     },
     meta: {
       sentFrom: 'morph',
+      permissionMode: 'default',
     },
   };
 }

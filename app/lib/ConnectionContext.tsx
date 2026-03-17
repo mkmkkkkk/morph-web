@@ -12,6 +12,7 @@ import { HappyApi } from './api';
 import { loadCredentials, type HappyCredentials } from './credentials';
 import { getSetting, setSetting } from './settings';
 import { parseUpdate, encryptUserMessage, type SessionMessage } from './protocol';
+import { fromBase64, boxDecrypt } from './crypto';
 
 export interface ConnectionContextValue {
   // State
@@ -44,6 +45,7 @@ export function useConnection() {
 
 export function ConnectionProvider({ children }: { children: React.ReactNode }) {
   const connectionRef = useRef(new HappyConnection());
+  const apiRef = useRef<HappyApi | null>(null);
   const keepAliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const messageHandlersRef = useRef(new Set<(msg: SessionMessage) => void>());
 
@@ -73,6 +75,14 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
   }, []);
 
   // Connect to HappyCoder server
+  //
+  // Flow:
+  // 1. Spawn CC worker via morph-bridge → daemon spawns CC
+  // 2. CC creates its own session with a random encryption key
+  // 3. CC encrypts the session key with our publicKey → stored as dataEncryptionKey on server
+  // 4. We fetch dataEncryptionKey from the API
+  // 5. We decrypt it with our secretKey → recover CC's session key
+  // 6. We connect session-scoped to CC's session → same encryption key → messages flow
   const doConnect = useCallback(async () => {
     setLastError(null);
     setConnectionState('connecting');
@@ -80,31 +90,79 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
     const creds = await loadCredentials();
     if (!creds) throw new Error('No credentials found. Scan a QR code first.');
     setCredentials(creds);
+    console.log('[Morph] credentials loaded, variant:', creds.encryption.type);
 
     const serverUrl = getSetting('serverUrl');
     const api = new HappyApi(creds.token, serverUrl);
+    apiRef.current = api;
 
-    let encKey = creds.encryption.key;
-    let variant = creds.encryption.type;
+    // Step 1: Spawn CC worker via morph-bridge
+    const bridgeUrl = getSetting('bridgeUrl') || 'https://morph.mkyang.ai';
+    console.log('[Morph] spawning CC worker...');
+    const spawnRes = await fetch(`${bridgeUrl}/api/spawn`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ directory: '/workspace' }),
+    });
+    const spawnData = await spawnRes.json();
+    console.log('[Morph] spawn result:', JSON.stringify(spawnData));
 
-    // Create a fresh session
-    const session = await api.createSession(
-      'morph-' + Date.now(),
-      { title: 'Morph Canvas', device: 'mobile' },
-      null,
-      encKey,
-      variant,
-      creds.encryption.publicKey,
-    );
-    const sid = session.id;
-    encKey = session.encryptionKey;
-    variant = session.encryptionVariant;
+    if (!spawnData.success || !spawnData.sessionId) {
+      throw new Error(`CC spawn failed: ${spawnData.error || 'no sessionId returned'}`);
+    }
+
+    const sid = spawnData.sessionId;
+    console.log('[Morph] CC session ID:', sid);
+
+    // Step 2: Fetch dataEncryptionKey via bridge (avoids 920KB payload on phone)
+    let dataEncKeyB64: string | null = null;
+    for (let attempt = 1; attempt <= 5; attempt++) {
+      await new Promise(r => setTimeout(r, attempt === 1 ? 1500 : 2000));
+      console.log('[Morph] fetching dataEncryptionKey via bridge, attempt', attempt);
+      try {
+        const keyRes = await fetch(
+          `${bridgeUrl}/api/session-key?sid=${encodeURIComponent(sid)}&token=${encodeURIComponent(creds.token)}`
+        );
+        const keyData = await keyRes.json();
+        if (keyData.dataEncryptionKey) {
+          dataEncKeyB64 = keyData.dataEncryptionKey;
+          break;
+        }
+      } catch (e: any) {
+        console.log('[Morph] session-key fetch error:', e?.message);
+      }
+    }
+    if (!dataEncKeyB64) {
+      throw new Error('Could not retrieve dataEncryptionKey after 5 attempts');
+    }
+    console.log('[Morph] got dataEncryptionKey, length:', dataEncKeyB64.length);
+
+    // Step 3: Decrypt dataEncryptionKey with our X25519 secretKey
+    const secretKey = creds.encryption.secretKey;
+    if (!secretKey) {
+      throw new Error('No secretKey in credentials — cannot decrypt CC session key');
+    }
+
+    const dataEncKeyBundle = fromBase64(dataEncKeyB64);
+    // First byte is version (0x00), rest is the box-encrypted session key
+    if (dataEncKeyBundle[0] !== 0x00) {
+      throw new Error(`Unexpected dataEncryptionKey version: ${dataEncKeyBundle[0]}`);
+    }
+    const boxedKey = dataEncKeyBundle.slice(1);
+    const encKey = boxDecrypt(boxedKey, secretKey);
+    if (!encKey) {
+      throw new Error('Failed to decrypt CC session key — publicKey/secretKey mismatch?');
+    }
+    console.log('[Morph] decrypted CC session key, length:', encKey.length);
+
+    const variant: 'legacy' | 'dataKey' = 'dataKey';
 
     setSessionId(sid);
     setSessionKey(encKey);
     setSessionVariant(variant);
     setSetting('lastSessionId', sid);
 
+    // Step 4: Connect to CC's session
     const conn = connectionRef.current;
 
     // Clean up ALL old listeners before adding new ones
@@ -126,8 +184,8 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
 
       let settled = false;
 
-      // Register state listener — persists after promise settles
       const unsubState = conn.onStateChange((state: ConnectionState) => {
+        console.log('[Morph] socket state:', state);
         setConnectionState(state);
 
         if (!settled) {
@@ -144,12 +202,13 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
       });
 
       const unsubUpdate = conn.onUpdate((data: any) => {
+        console.log('[Morph] received update:', JSON.stringify(data).slice(0, 200));
         if (!encKey) return;
         const msg = parseUpdate(data, encKey, variant);
+        console.log('[Morph] parsed message:', msg ? msg.content.type : 'null');
         if (msg) dispatchMessage(msg);
       });
 
-      // Track for cleanup on next connect
       cleanupRef.current.push(unsubState, unsubUpdate);
 
       conn.connect(serverUrl, creds.token, 'session-scoped', sid);
@@ -170,6 +229,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
     } catch (err: any) {
       const msg = err?.message || 'Unknown error';
       setLastError(msg);
+      setConnectionState('error');
       throw err; // Re-throw so callers can catch too
     }
   }, [doConnect]);
@@ -189,11 +249,21 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
     setConnectionState('disconnected');
   }, []);
 
-  // Send message
+  // Send message via Socket.IO
   const sendMessage = useCallback((text: string) => {
     if (!sessionId || !sessionKey || !connected) return;
-    const encrypted = encryptUserMessage(text, sessionKey, sessionVariant);
-    connectionRef.current.sendMessage(sessionId, encrypted).catch(console.warn);
+    try {
+      console.log('[Morph] sendMessage: sid=', sessionId, 'keyLen=', sessionKey.length, 'variant=', sessionVariant);
+      const encrypted = encryptUserMessage(text, sessionKey, sessionVariant);
+      console.log('[Morph] encrypted msg length:', encrypted.length);
+      connectionRef.current.sendMessage(sessionId, encrypted).catch((err) => {
+        console.warn('[Morph] sendMessage error:', err);
+        Alert.alert('Send Error', String(err?.message || err));
+      });
+    } catch (err: any) {
+      console.error('[Morph] sendMessage sync error:', err);
+      Alert.alert('Send Error (sync)', String(err?.message || err) + '\n' + (err?.stack || ''));
+    }
   }, [sessionId, sessionKey, sessionVariant, connected]);
 
   // Send interrupt
@@ -202,10 +272,17 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
     connectionRef.current.sendInterrupt(sessionId);
   }, [sessionId, connected]);
 
-  // Auto-connect on mount (best-effort)
+  // Auto-connect on mount (best-effort, delayed to let app stabilize)
   useEffect(() => {
-    safeConnect().catch(() => {});
-    return () => doDisconnect();
+    const timer = setTimeout(() => {
+      safeConnect().catch((err) => {
+        console.warn('[Morph] auto-connect failed:', err?.message);
+      });
+    }, 500);
+    return () => {
+      clearTimeout(timer);
+      doDisconnect();
+    };
   }, []);
 
   return (

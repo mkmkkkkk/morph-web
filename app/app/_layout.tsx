@@ -1,41 +1,69 @@
-// Polyfill crypto.getRandomValues for React Native (must be first import)
-import 'react-native-get-random-values';
+// Polyfill crypto.getRandomValues for React Native (must be before crypto imports)
+try { require('react-native-get-random-values'); } catch {}
 
+import React from 'react';
+import { View, Text, ScrollView, LogBox, Alert } from 'react-native';
 import { Stack } from 'expo-router';
-import { useColorScheme } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
-import { loadSettings } from '../lib/settings';
-import { ConnectionProvider } from '../lib/ConnectionContext';
+
+LogBox.ignoreLogs(['Using an insecure random number generator']);
+
+// Catch unhandled promise rejections — show as alert instead of crashing
+if (typeof global !== 'undefined') {
+  const origHandler = (global as any).HermesInternal?.hasPromise?.()
+    ? undefined
+    : (global as any).onunhandledrejection;
+  (global as any).onunhandledrejection = (e: any) => {
+    const reason = e?.reason || e;
+    const msg = reason?.message || String(reason);
+    console.error('[Morph] Unhandled rejection:', msg);
+    Alert.alert('Unhandled Error', msg + '\n' + (reason?.stack || ''));
+    if (origHandler) origHandler(e);
+  };
+}
+
+let ConnectionProvider: React.ComponentType<{ children: React.ReactNode }> | null = null;
+let _err: string | null = null;
+
+try {
+  ConnectionProvider = require('../lib/ConnectionContext').ConnectionProvider;
+} catch (e: any) {
+  _err = (_err || '') + '\nConnectionContext: ' + e?.message;
+}
+
+try {
+  const { loadSettings } = require('../lib/settings');
+  loadSettings().catch(() => {});
+} catch (e: any) {
+  _err = (_err || '') + '\nSettings: ' + e?.message;
+}
 
 export default function RootLayout() {
-  const isDark = useColorScheme() !== 'light';
+  if (_err && !ConnectionProvider) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#0a0a0a', padding: 20, paddingTop: 60 }}>
+        <Text selectable style={{ color: '#ff4444', fontSize: 16, fontWeight: 'bold' }}>Load Error</Text>
+        <ScrollView>
+          <Text selectable style={{ color: '#aaa', fontSize: 13, fontFamily: 'Menlo', marginTop: 12 }}>{_err}</Text>
+        </ScrollView>
+      </View>
+    );
+  }
 
-  useEffect(() => {
-    loadSettings();
-  }, []);
-
-  return (
-    <ConnectionProvider>
-      <StatusBar style={isDark ? 'light' : 'dark'} />
-      <Stack
-        screenOptions={{
-          headerStyle: { backgroundColor: isDark ? '#000' : '#f8f8f8' },
-          headerTintColor: isDark ? '#fff' : '#000',
-          headerShadowVisible: false,
-          contentStyle: { backgroundColor: isDark ? '#000' : '#f2f2f7' },
-        }}
-      >
+  const shell = (
+    <>
+      <StatusBar style="light" />
+      <Stack screenOptions={{
+        headerStyle: { backgroundColor: '#000' },
+        headerTintColor: '#fff',
+        headerShadowVisible: false,
+        contentStyle: { backgroundColor: '#000' },
+      }}>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen
-          name="connect"
-          options={{
-            presentation: 'modal',
-            title: 'Connect',
-            headerStyle: { backgroundColor: isDark ? '#1c1c1e' : '#fff' },
-          }}
-        />
+        <Stack.Screen name="connect" options={{ presentation: 'modal', title: 'Connect', headerStyle: { backgroundColor: '#1c1c1e' } }} />
       </Stack>
-    </ConnectionProvider>
+    </>
   );
+
+  return ConnectionProvider ? <ConnectionProvider>{shell}</ConnectionProvider> : shell;
 }

@@ -79,18 +79,22 @@ export class HappyConnection {
     // --- Socket events ---
 
     this.socket.on('connect', () => {
+      console.log('[HappyConn] socket connected, id:', this.socket?.id);
       this.setState('connected');
     });
 
-    this.socket.on('disconnect', (_reason: string) => {
+    this.socket.on('disconnect', (reason: string) => {
+      console.log('[HappyConn] socket disconnected:', reason);
       this.setState('disconnected');
     });
 
-    this.socket.on('connect_error', (_error: Error) => {
+    this.socket.on('connect_error', (error: Error) => {
+      console.log('[HappyConn] connect_error:', error.message);
       this.setState('error');
     });
 
     this.socket.on('update', (data: any) => {
+      console.log('[HappyConn] received "update" event');
       for (const cb of this.updateListeners) {
         try {
           cb(data);
@@ -100,7 +104,8 @@ export class HappyConnection {
       }
     });
 
-    this.socket.on('error', (_error: Error) => {
+    this.socket.on('error', (error: Error) => {
+      console.log('[HappyConn] socket error:', error.message);
       this.setState('error');
     });
 

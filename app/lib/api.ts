@@ -162,9 +162,7 @@ export class HappyApi {
   }
 
   /**
-   * List sessions (not directly in HappyCoder source REST endpoints,
-   * but sessions can be listed from the web app).
-   * This is a best-effort API — may need adjustment based on server.
+   * List sessions from the API.
    */
   async listSessions(limit?: number): Promise<SessionListItem[]> {
     const url = new URL(`${this.baseUrl}/v1/sessions`);
@@ -181,6 +179,25 @@ export class HappyApi {
 
     const data = await response.json();
     return data.sessions || [];
+  }
+
+  /**
+   * Fetch a session's dataEncryptionKey from the session list.
+   * The server returns dataEncryptionKey for each session — this is the
+   * session key encrypted with the account's publicKey via X25519 box.
+   */
+  async getSessionDataEncryptionKey(sessionId: string): Promise<string | null> {
+    const response = await fetch(`${this.baseUrl}/v1/sessions`, {
+      method: 'GET',
+      headers: this.headers(),
+    });
+
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    const sessions = data.sessions || [];
+    const session = sessions.find((s: any) => s.id === sessionId);
+    return session?.dataEncryptionKey || null;
   }
 
   /**

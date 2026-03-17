@@ -11,6 +11,7 @@ const STORAGE_KEY = 'morph-settings';
 
 export interface AppSettings {
   serverUrl: string;
+  bridgeUrl: string;
   theme: 'light' | 'dark' | 'system';
   lastMachineId: string | null;
   lastSessionId: string | null;
@@ -21,6 +22,7 @@ export interface AppSettings {
 
 const DEFAULTS: AppSettings = {
   serverUrl: 'https://api.cluster-fluster.com',
+  bridgeUrl: 'https://morph.mkyang.ai',
   theme: 'system',
   lastMachineId: null,
   lastSessionId: null,
@@ -48,7 +50,11 @@ export async function loadSettings(): Promise<void> {
 
 /** Persist current cache to disk */
 async function persist(): Promise<void> {
-  await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(cache));
+  try {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(cache));
+  } catch {
+    // AsyncStorage native module may not be available — in-memory cache still works
+  }
 }
 
 export function getSetting<K extends keyof AppSettings>(key: K): AppSettings[K] {
@@ -74,7 +80,9 @@ export function getAllSettings(): AppSettings {
 
 export async function resetSettings(): Promise<void> {
   cache = { ...DEFAULTS };
-  await AsyncStorage.removeItem(STORAGE_KEY);
+  try {
+    await AsyncStorage.removeItem(STORAGE_KEY);
+  } catch { /* native module may not be available */ }
 }
 
 export const Settings = {
@@ -114,7 +122,9 @@ export async function loadScheduledTasks(): Promise<ScheduledTask[]> {
 
 export async function saveScheduledTasks(tasks: ScheduledTask[]): Promise<void> {
   tasksCache = tasks;
-  await AsyncStorage.setItem(TASKS_STORAGE_KEY, JSON.stringify(tasks));
+  try {
+    await AsyncStorage.setItem(TASKS_STORAGE_KEY, JSON.stringify(tasks));
+  } catch { /* native module may not be available */ }
 }
 
 export async function addScheduledTask(task: Omit<ScheduledTask, 'id' | 'lastRun'>): Promise<ScheduledTask> {

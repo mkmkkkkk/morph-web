@@ -7,41 +7,84 @@ import {
   TextInput,
   Alert,
   ActivityIndicator,
-  useColorScheme,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { CameraView, useCameraPermissions } from 'expo-camera';
-import { pairFromQR, pairFromJson, type PairResult } from '../lib/auth';
-import { useConnection } from '../lib/ConnectionContext';
+
+// Safe-load native modules — expo-camera can crash in some Expo Go versions
+let CameraView: any = null;
+let useCameraPermissions: any = null;
+let pairFromQR: any = null;
+let pairFromJson: any = null;
+let useConnection: any = null;
+let _connectLoadError: string | null = null;
+
+try {
+  const cam = require('expo-camera');
+  CameraView = cam.CameraView;
+  useCameraPermissions = cam.useCameraPermissions;
+} catch (e: any) {
+  _connectLoadError = (_connectLoadError || '') + '\nexpo-camera: ' + e?.message;
+}
+try {
+  const auth = require('../lib/auth');
+  pairFromQR = auth.pairFromQR;
+  pairFromJson = auth.pairFromJson;
+} catch (e: any) {
+  _connectLoadError = (_connectLoadError || '') + '\nauth: ' + e?.message;
+}
+try {
+  useConnection = require('../lib/ConnectionContext').useConnection;
+} catch (e: any) {
+  _connectLoadError = (_connectLoadError || '') + '\nConnectionContext: ' + e?.message;
+}
 
 type Mode = 'scan' | 'manual';
 
 export default function ConnectScreen() {
+  // Show load errors
+  if (_connectLoadError && !useConnection) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#000', padding: 20, paddingTop: 60 }}>
+        <Text selectable style={{ color: '#ff4444', fontSize: 16, fontWeight: 'bold', marginBottom: 12 }}>
+          Connect module error
+        </Text>
+        <ScrollView>
+          <Text selectable style={{ color: '#aaa', fontSize: 13, fontFamily: 'Menlo' }}>
+            {_connectLoadError}
+          </Text>
+        </ScrollView>
+      </View>
+    );
+  }
+
   const router = useRouter();
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
-  const { connect } = useConnection();
+  let connect = async () => {};
+  try {
+    const conn = useConnection?.();
+    if (conn) connect = conn.connect;
+  } catch { /* ignore */ }
 
   const [mode, setMode] = useState<Mode>('scan');
   const [pairing, setPairing] = useState(false);
   const [pairStatus, setPairStatus] = useState<'idle' | 'pairing' | 'connecting' | 'done' | 'error'>('idle');
   const [statusText, setStatusText] = useState('');
   const [manualInput, setManualInput] = useState('');
-  const [permission, requestPermission] = useCameraPermissions();
+  const [permission, requestPermission] = useCameraPermissions ? useCameraPermissions() : [{ granted: false }, () => {}];
   const scannedRef = useRef(false);
 
   const colors = {
-    bg: isDark ? '#000' : '#f2f2f7',
-    card: isDark ? '#1c1c1e' : '#fff',
-    text: isDark ? '#fff' : '#000',
-    secondary: isDark ? '#8e8e93' : '#6e6e73',
+    bg: '#000',
+    card: '#1c1c1e',
+    text: '#fff',
+    secondary: '#8e8e93',
     accent: '#007aff',
     green: '#30d158',
   };
 
-  const handlePairResult = async (result: PairResult) => {
+  const handlePairResult = async (result: any) => {
     if (result.success) {
       setPairStatus('connecting');
       setStatusText('Credentials saved. Connecting to server...');
@@ -161,7 +204,7 @@ export default function ConnectScreen() {
               ) : pairStatus === 'error' ? (
                 <>
                   <Text style={styles.checkmark}>❌</Text>
-                  <Text style={[styles.loadingText, { color: colors.text }]}>{statusText}</Text>
+                  <Text selectable style={[styles.loadingText, { color: colors.text }]}>{statusText}</Text>
                   <TouchableOpacity
                     style={[styles.button, { backgroundColor: colors.accent, marginTop: 16, paddingHorizontal: 32 }]}
                     onPress={() => {
@@ -177,7 +220,7 @@ export default function ConnectScreen() {
                 <ActivityIndicator size="large" color={colors.accent} />
               )}
               {pairStatus !== 'error' && (
-                <Text style={[styles.loadingText, { color: colors.text }]}>{statusText}</Text>
+                <Text selectable style={[styles.loadingText, { color: colors.text }]}>{statusText}</Text>
               )}
             </View>
           ) : (
@@ -186,7 +229,7 @@ export default function ConnectScreen() {
                 style={styles.camera}
                 facing="back"
                 barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
-                onBarcodeScanned={(result) => handleQRScanned(result.data)}
+                onBarcodeScanned={(result: any) => handleQRScanned(result.data)}
               />
               <View style={styles.scanOverlay}>
                 <View style={styles.scanFrame} />

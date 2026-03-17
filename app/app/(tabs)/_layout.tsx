@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router';
-import { Text, useColorScheme } from 'react-native';
+import { Text } from 'react-native';
 
 function TabIcon({ label, focused }: { label: string; focused: boolean }) {
   return (
@@ -10,23 +10,21 @@ function TabIcon({ label, focused }: { label: string; focused: boolean }) {
 }
 
 export default function TabLayout() {
-  const isDark = useColorScheme() !== 'light';
-
   return (
     <Tabs
       screenOptions={{
         tabBarStyle: {
-          backgroundColor: isDark ? '#000' : '#f8f8f8',
-          borderTopColor: isDark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)',
+          backgroundColor: '#000',
+          borderTopColor: 'rgba(255,255,255,0.08)',
           borderTopWidth: 0.5,
         },
-        tabBarActiveTintColor: isDark ? '#fff' : '#000',
-        tabBarInactiveTintColor: isDark ? '#555' : '#999',
+        tabBarActiveTintColor: '#fff',
+        tabBarInactiveTintColor: '#555',
         tabBarLabelStyle: { fontSize: 11, fontWeight: '500' },
         headerStyle: {
-          backgroundColor: isDark ? '#000' : '#f8f8f8',
+          backgroundColor: '#000',
         },
-        headerTintColor: isDark ? '#fff' : '#000',
+        headerTintColor: '#fff',
         headerShadowVisible: false,
       }}
     >

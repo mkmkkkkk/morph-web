@@ -1,14 +1,33 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  TextInput, Alert, useColorScheme,
+  TextInput, Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import InputBar from '../../components/InputBar';
-import { deleteCredentials } from '../../lib/credentials';
-import { useConnection } from '../../lib/ConnectionContext';
-import { getSetting, setSetting, loadScheduledTasks, saveScheduledTasks, addScheduledTask, updateScheduledTask, removeScheduledTask, type ScheduledTask } from '../../lib/settings';
-import { ComponentStore, type CanvasSnapshot, type LibraryEntry } from '../../lib/store';
+
+// Safe-load heavy modules
+let InputBar: any = null;
+let deleteCredentials: any = null;
+let useConnection: any = null;
+let settingsLib: any = null;
+let ComponentStore: any = null;
+let _configLoadError: string | null = null;
+
+try { InputBar = require('../../components/InputBar').default; } catch (e: any) {
+  _configLoadError = (_configLoadError || '') + '\nInputBar: ' + e?.message;
+}
+try { deleteCredentials = require('../../lib/credentials').deleteCredentials; } catch (e: any) {
+  _configLoadError = (_configLoadError || '') + '\ncredentials: ' + e?.message;
+}
+try { useConnection = require('../../lib/ConnectionContext').useConnection; } catch (e: any) {
+  _configLoadError = (_configLoadError || '') + '\nConnectionContext: ' + e?.message;
+}
+try { settingsLib = require('../../lib/settings'); } catch (e: any) {
+  _configLoadError = (_configLoadError || '') + '\nsettings: ' + e?.message;
+}
+try { ComponentStore = require('../../lib/store').ComponentStore; } catch (e: any) {
+  _configLoadError = (_configLoadError || '') + '\nstore: ' + e?.message;
+}
 
 // ===== Quick Actions — programmable one-tap prompts =====
 interface QuickAction {
@@ -34,31 +53,63 @@ const INTERVAL_OPTIONS = [
   { label: '24 hr', ms: 24 * 60 * 60 * 1000 },
 ];
 
-export default function ConfigScreen() {
+// Fallback hook when ConnectionContext fails
+function useNoopConnection() {
+  return {
+    connectionState: 'error' as const,
+    connected: false,
+    credentials: null,
+    lastError: 'ConnectionContext not loaded',
+    sendMessage: () => {},
+    sendInterrupt: () => {},
+    connect: async () => {},
+    disconnect: () => {},
+  };
+}
+
+// Stable hook reference for Rules of Hooks compliance
+const _useConnection = useConnection || useNoopConnection;
+
+// If critical modules failed, export a simple error screen (avoids hooks issues)
+function ConfigErrorScreen() {
+  return (
+    <View style={{ flex: 1, backgroundColor: '#000', padding: 20, paddingTop: 60 }}>
+      <Text selectable style={{ color: '#ff4444', fontSize: 16, fontWeight: 'bold', marginBottom: 12 }}>
+        Config module error
+      </Text>
+      <ScrollView>
+        <Text selectable style={{ color: '#aaa', fontSize: 13, fontFamily: 'Menlo' }}>
+          {_configLoadError}
+        </Text>
+      </ScrollView>
+    </View>
+  );
+}
+
+function ConfigScreenImpl() {
   const router = useRouter();
-  const isDark = useColorScheme() !== 'light';
-  const storeRef = useRef(new ComponentStore());
+  const isDark = true;
+  const storeRef = useRef(ComponentStore ? new ComponentStore() : null);
 
   const {
     connectionState,
     connected,
     credentials,
+    lastError,
     sendMessage,
     sendInterrupt,
     connect: reconnect,
     disconnect,
-  } = useConnection();
+  } = _useConnection();
+
+  const getSetting = settingsLib?.getSetting || (() => 'https://api.cluster-fluster.com');
+  const setSetting_ = settingsLib?.setSetting || (() => {});
 
   const [serverUrl, setServerUrl] = useState(getSetting('serverUrl'));
   const [editingServer, setEditingServer] = useState(false);
-
-  // Canvas History
-  const [snapshots, setSnapshots] = useState<CanvasSnapshot[]>([]);
-  // Component Library
-  const [library, setLibrary] = useState<LibraryEntry[]>([]);
-  // Scheduled Tasks
-  const [tasks, setTasks] = useState<ScheduledTask[]>([]);
-  // Processing state for system chat bar
+  const [snapshots, setSnapshots] = useState<any[]>([]);
+  const [library, setLibrary] = useState<any[]>([]);
+  const [tasks, setTasks] = useState<any[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
 
   const colors = {
@@ -67,26 +118,30 @@ export default function ConfigScreen() {
     text: isDark ? '#fff' : '#000',
     secondary: isDark ? '#8e8e93' : '#6e6e73',
     border: isDark ? '#38383a' : '#c6c6c8',
-    accent: '#007aff',
-    danger: '#ff3b30',
-    green: '#30d158',
-    purple: '#5e5ce6',
-    orange: '#ff9f0a',
+    accent: '#6e6e73',
+    danger: '#8b3a3a',
+    green: '#4a6a4a',
+    purple: '#5a5a6e',
+    orange: '#8a7a4a',
   };
 
   const loadState = useCallback(async () => {
+    if (!storeRef.current) return;
     await storeRef.current.init();
     setSnapshots(await storeRef.current.listSnapshots());
     setLibrary(await storeRef.current.listLibrary());
-    setTasks(await loadScheduledTasks());
+    if (settingsLib?.loadScheduledTasks) {
+      setTasks(await settingsLib.loadScheduledTasks());
+    }
   }, []);
 
   useEffect(() => { loadState(); }, [loadState]);
 
-  // ===== Task Scheduler — fires enabled tasks when due =====
+  // Task Scheduler
   useEffect(() => {
+    if (!settingsLib?.loadScheduledTasks) return;
     const interval = setInterval(async () => {
-      const currentTasks = await loadScheduledTasks();
+      const currentTasks = await settingsLib.loadScheduledTasks();
       const now = Date.now();
       let updated = false;
 
@@ -101,7 +156,7 @@ export default function ConfigScreen() {
       }
 
       if (updated) {
-        await saveScheduledTasks(currentTasks);
+        await settingsLib.saveScheduledTasks(currentTasks);
         setTasks([...currentTasks]);
       }
     }, 30_000);
@@ -117,7 +172,7 @@ export default function ConfigScreen() {
         text: 'Unpair', style: 'destructive',
         onPress: async () => {
           disconnect();
-          await deleteCredentials();
+          if (deleteCredentials) await deleteCredentials();
         },
       },
     ]);
@@ -129,7 +184,7 @@ export default function ConfigScreen() {
       Alert.alert('Invalid URL', 'Must start with http:// or https://');
       return;
     }
-    setSetting('serverUrl', trimmed);
+    setSetting_('serverUrl', trimmed);
     setEditingServer(false);
   };
 
@@ -137,13 +192,13 @@ export default function ConfigScreen() {
     Alert.alert(action.label, `Prompt: "${action.prompt}"`, [{ text: 'OK' }]);
   };
 
-  const handleRestoreSnapshot = (snap: CanvasSnapshot) => {
+  const handleRestoreSnapshot = (snap: any) => {
     Alert.alert('Restore Canvas', `Restore "${snap.name}"? Current canvas will be replaced.`, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Restore',
         onPress: async () => {
-          const ok = await storeRef.current.restoreSnapshot(snap.id);
+          const ok = await storeRef.current?.restoreSnapshot(snap.id);
           if (ok) Alert.alert('Restored', 'Switch to Canvas tab to see the result.');
           else Alert.alert('Error', 'Failed to restore snapshot.');
         },
@@ -151,21 +206,22 @@ export default function ConfigScreen() {
     ]);
   };
 
-  const handleUseLibraryComponent = async (entry: LibraryEntry) => {
-    const componentId = await storeRef.current.useFromLibrary(entry.id);
+  const handleUseLibraryComponent = async (entry: any) => {
+    const componentId = await storeRef.current?.useFromLibrary(entry.id);
     if (componentId) {
       Alert.alert('Added', `"${entry.name}" added to canvas as ${componentId}.`);
     }
   };
 
-  const handleExportComponent = async (entry: LibraryEntry) => {
-    const json = await storeRef.current.exportLibraryComponent(entry.id);
+  const handleExportComponent = async (entry: any) => {
+    const json = await storeRef.current?.exportLibraryComponent(entry.id);
     if (json) {
       Alert.alert('Export', `Share this JSON to import on another device:\n\n${json.substring(0, 200)}...`);
     }
   };
 
   const handleAddTask = async () => {
+    if (!settingsLib?.addScheduledTask) return;
     const existingCount = tasks.length;
     const templates = [
       { name: 'Auto-Save Canvas', prompt: '[System] Save a snapshot of the current canvas state.', intervalMs: 30 * 60 * 1000 },
@@ -173,35 +229,36 @@ export default function ConfigScreen() {
       { name: 'Daily Summary', prompt: '[System] Generate a daily summary: what changed on the canvas today, key metrics, and suggestions.', intervalMs: 24 * 60 * 60 * 1000 },
     ];
     const template = templates[existingCount % templates.length];
-    const task = await addScheduledTask({ ...template, enabled: false });
+    const task = await settingsLib.addScheduledTask({ ...template, enabled: false });
     setTasks(prev => [...prev, task]);
-    Alert.alert('Task Added', `"${template.name}" added (disabled). Toggle to enable, tap to change interval, long-press to delete.`);
+    Alert.alert('Task Added', `"${template.name}" added (disabled).`);
   };
 
-  const handleToggleTask = async (task: ScheduledTask) => {
-    await updateScheduledTask(task.id, { enabled: !task.enabled });
-    setTasks(prev => prev.map(t => t.id === task.id ? { ...t, enabled: !t.enabled } : t));
+  const handleToggleTask = async (task: any) => {
+    if (!settingsLib?.updateScheduledTask) return;
+    await settingsLib.updateScheduledTask(task.id, { enabled: !task.enabled });
+    setTasks(prev => prev.map((t: any) => t.id === task.id ? { ...t, enabled: !t.enabled } : t));
   };
 
-  const handleDeleteTask = (task: ScheduledTask) => {
+  const handleDeleteTask = (task: any) => {
     Alert.alert('Delete Task', `Remove "${task.name}"?`, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete', style: 'destructive',
         onPress: async () => {
-          await removeScheduledTask(task.id);
-          setTasks(prev => prev.filter(t => t.id !== task.id));
+          if (settingsLib?.removeScheduledTask) await settingsLib.removeScheduledTask(task.id);
+          setTasks(prev => prev.filter((t: any) => t.id !== task.id));
         },
       },
     ]);
   };
 
-  const handleChangeInterval = (task: ScheduledTask) => {
+  const handleChangeInterval = (task: any) => {
     const buttons = INTERVAL_OPTIONS.map(opt => ({
       text: opt.label + (task.intervalMs === opt.ms ? ' ✓' : ''),
       onPress: async () => {
-        await updateScheduledTask(task.id, { intervalMs: opt.ms });
-        setTasks(prev => prev.map(t => t.id === task.id ? { ...t, intervalMs: opt.ms } : t));
+        if (settingsLib?.updateScheduledTask) await settingsLib.updateScheduledTask(task.id, { intervalMs: opt.ms });
+        setTasks(prev => prev.map((t: any) => t.id === task.id ? { ...t, intervalMs: opt.ms } : t));
       },
     }));
     buttons.push({ text: 'Cancel', onPress: async () => {} });
@@ -218,8 +275,7 @@ export default function ConfigScreen() {
     if (!connected) return;
     setIsProcessing(true);
     sendMessage(text);
-    // Processing will be cleared when user sends stop or next message
-    setTimeout(() => setIsProcessing(false), 30_000); // timeout fallback
+    setTimeout(() => setIsProcessing(false), 30_000);
   }, [connected, sendMessage]);
 
   const handleChatStop = useCallback(() => {
@@ -235,7 +291,6 @@ export default function ConfigScreen() {
     connected: '#44cc44',
     error: '#ff4444',
   };
-  const statusColor = statusColorMap[displayStatus] || '#888';
 
   const timeAgo = (ts: number) => {
     const diff = Date.now() - ts;
@@ -245,13 +300,12 @@ export default function ConfigScreen() {
     return `${Math.floor(diff / 86400000)}d ago`;
   };
 
-  // ===== Directory expand/collapse =====
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const toggle = (key: string) => setExpanded(prev => ({ ...prev, [key]: !prev[key] }));
 
   const menuItems = [
     { key: 'actions', label: 'Quick Actions', detail: `${DEFAULT_ACTIONS.length} actions` },
-    { key: 'tasks', label: 'Scheduled Tasks', detail: `${tasks.filter(t => t.enabled).length}/${tasks.length} active` },
+    { key: 'tasks', label: 'Scheduled Tasks', detail: `${tasks.filter((t: any) => t.enabled).length}/${tasks.length} active` },
     { key: 'history', label: 'Canvas History', detail: `${snapshots.length} saved` },
     { key: 'library', label: 'Component Library', detail: `${library.length} components` },
     { key: 'connection', label: 'Connection', detail: displayStatus.charAt(0).toUpperCase() + displayStatus.slice(1) },
@@ -268,18 +322,16 @@ export default function ConfigScreen() {
               <View key={item.key}>
                 {i > 0 && <View style={[styles.separator, { backgroundColor: colors.border }]} />}
 
-                {/* Directory row */}
                 <TouchableOpacity
                   style={styles.row}
                   onPress={() => toggle(item.key)}
                   activeOpacity={0.6}
                 >
-                  <Text style={[styles.label, { color: colors.text, flex: 1 }]}>{item.label}</Text>
-                  <Text style={[styles.detail, { color: colors.secondary }]}>{item.detail}</Text>
+                  <Text selectable style={[styles.label, { color: colors.text, flex: 1 }]}>{item.label}</Text>
+                  <Text selectable style={[styles.detail, { color: colors.secondary }]}>{item.detail}</Text>
                   <Text style={[styles.chevron, { color: colors.secondary, transform: [{ rotate: expanded[item.key] ? '90deg' : '0deg' }] }]}>{'>'}</Text>
                 </TouchableOpacity>
 
-                {/* Expanded: Quick Actions */}
                 {expanded[item.key] && item.key === 'actions' && (
                   <View style={styles.expandedContent}>
                     {DEFAULT_ACTIONS.map((action) => (
@@ -289,19 +341,18 @@ export default function ConfigScreen() {
                         onPress={() => handleQuickAction(action)}
                         activeOpacity={0.7}
                       >
-                        <Text style={[styles.label, { color: colors.text }]}>{action.label}</Text>
+                        <Text selectable style={[styles.label, { color: colors.text }]}>{action.label}</Text>
                       </TouchableOpacity>
                     ))}
                   </View>
                 )}
 
-                {/* Expanded: Scheduled Tasks */}
                 {expanded[item.key] && item.key === 'tasks' && (
                   <View style={styles.expandedContent}>
                     {tasks.length === 0 ? (
-                      <Text style={[styles.emptyText, { color: colors.secondary }]}>No scheduled tasks</Text>
+                      <Text selectable style={[styles.emptyText, { color: colors.secondary }]}>No scheduled tasks</Text>
                     ) : (
-                      tasks.map((task) => (
+                      tasks.map((task: any) => (
                         <TouchableOpacity
                           key={task.id}
                           style={styles.subRow}
@@ -310,8 +361,8 @@ export default function ConfigScreen() {
                           activeOpacity={0.7}
                         >
                           <View style={{ flex: 1, opacity: task.enabled ? 1 : 0.4 }}>
-                            <Text style={[styles.label, { color: colors.text }]}>{task.name}</Text>
-                            <Text style={[styles.meta, { color: colors.secondary }]}>
+                            <Text selectable style={[styles.label, { color: colors.text }]}>{task.name}</Text>
+                            <Text selectable style={[styles.meta, { color: colors.secondary }]}>
                               Every {formatInterval(task.intervalMs)}
                               {task.lastRun ? ` · ${timeAgo(task.lastRun)}` : ''}
                             </Text>
@@ -327,22 +378,21 @@ export default function ConfigScreen() {
                       ))
                     )}
                     <TouchableOpacity style={styles.subRow} onPress={handleAddTask} activeOpacity={0.6}>
-                      <Text style={{ color: colors.purple, fontSize: 15, fontWeight: '600' }}>+ Add Task</Text>
+                      <Text selectable style={{ color: colors.purple, fontSize: 15, fontWeight: '600' }}>+ Add Task</Text>
                     </TouchableOpacity>
                   </View>
                 )}
 
-                {/* Expanded: Canvas History */}
                 {expanded[item.key] && item.key === 'history' && (
                   <View style={styles.expandedContent}>
                     {snapshots.length === 0 ? (
-                      <Text style={[styles.emptyText, { color: colors.secondary }]}>No saved canvases yet</Text>
+                      <Text selectable style={[styles.emptyText, { color: colors.secondary }]}>No saved canvases yet</Text>
                     ) : (
-                      snapshots.map((snap) => (
+                      snapshots.map((snap: any) => (
                         <TouchableOpacity key={snap.id} style={styles.subRow} onPress={() => handleRestoreSnapshot(snap)}>
                           <View style={{ flex: 1 }}>
-                            <Text style={[styles.label, { color: colors.text }]}>{snap.name}</Text>
-                            <Text style={[styles.meta, { color: colors.secondary }]}>{snap.componentCount} components · {timeAgo(snap.createdAt)}</Text>
+                            <Text selectable style={[styles.label, { color: colors.text }]}>{snap.name}</Text>
+                            <Text selectable style={[styles.meta, { color: colors.secondary }]}>{snap.componentCount} components · {timeAgo(snap.createdAt)}</Text>
                           </View>
                         </TouchableOpacity>
                       ))
@@ -350,13 +400,12 @@ export default function ConfigScreen() {
                   </View>
                 )}
 
-                {/* Expanded: Component Library */}
                 {expanded[item.key] && item.key === 'library' && (
                   <View style={styles.expandedContent}>
                     {library.length === 0 ? (
-                      <Text style={[styles.emptyText, { color: colors.secondary }]}>No saved components</Text>
+                      <Text selectable style={[styles.emptyText, { color: colors.secondary }]}>No saved components</Text>
                     ) : (
-                      library.map((entry) => (
+                      library.map((entry: any) => (
                         <TouchableOpacity
                           key={entry.id}
                           style={styles.subRow}
@@ -364,41 +413,50 @@ export default function ConfigScreen() {
                           onLongPress={() => handleExportComponent(entry)}
                         >
                           <View style={{ flex: 1 }}>
-                            <Text style={[styles.label, { color: colors.text }]}>{entry.name}</Text>
-                            <Text style={[styles.meta, { color: colors.secondary }]} numberOfLines={1}>
-                              {entry.description || entry.tags.join(', ') || 'No description'}
+                            <Text selectable style={[styles.label, { color: colors.text }]}>{entry.name}</Text>
+                            <Text selectable style={[styles.meta, { color: colors.secondary }]} numberOfLines={1}>
+                              {entry.description || entry.tags?.join(', ') || 'No description'}
                             </Text>
                           </View>
-                          <Text style={{ color: colors.green, fontSize: 18 }}>+</Text>
+                          <Text selectable style={{ color: colors.green, fontSize: 18 }}>+</Text>
                         </TouchableOpacity>
                       ))
                     )}
                   </View>
                 )}
 
-                {/* Expanded: Connection */}
                 {expanded[item.key] && item.key === 'connection' && (
                   <View style={styles.expandedContent}>
                     <View style={styles.subRow}>
-                      <Text style={[styles.label, { color: colors.text }]}>Encryption</Text>
-                      <Text style={[styles.detail, { color: colors.secondary }]}>
+                      <Text selectable style={[styles.label, { color: colors.text }]}>Encryption</Text>
+                      <Text selectable style={[styles.detail, { color: colors.secondary }]}>
                         {credentials?.encryption.type === 'legacy' ? 'TweetNaCl' :
                          credentials?.encryption.type === 'dataKey' ? 'AES-256-GCM' : 'N/A'}
                       </Text>
                     </View>
+                    {lastError && (
+                      <View style={[styles.subRow, { flexDirection: 'column', alignItems: 'flex-start' }]}>
+                        <Text selectable style={[styles.label, { color: colors.danger }]}>Error</Text>
+                        <Text selectable style={[styles.meta, { color: colors.danger }]} numberOfLines={3}>{lastError}</Text>
+                      </View>
+                    )}
+                    {credentials && connectionState !== 'connected' && (
+                      <TouchableOpacity style={styles.subRow} onPress={() => reconnect().catch(() => {})}>
+                        <Text selectable style={[styles.label, { color: colors.accent }]}>Reconnect</Text>
+                      </TouchableOpacity>
+                    )}
                     {credentials ? (
                       <TouchableOpacity style={styles.subRow} onPress={handleUnpair}>
-                        <Text style={[styles.label, { color: colors.danger }]}>Unpair Device</Text>
+                        <Text selectable style={[styles.label, { color: colors.danger }]}>Unpair Device</Text>
                       </TouchableOpacity>
                     ) : (
                       <TouchableOpacity style={styles.subRow} onPress={() => router.push('/connect')}>
-                        <Text style={[styles.label, { color: colors.accent }]}>Connect to Claude Code</Text>
+                        <Text selectable style={[styles.label, { color: colors.accent }]}>Connect to Claude Code</Text>
                       </TouchableOpacity>
                     )}
                   </View>
                 )}
 
-                {/* Expanded: Server */}
                 {expanded[item.key] && item.key === 'server' && (
                   <View style={styles.expandedContent}>
                     {editingServer ? (
@@ -415,27 +473,26 @@ export default function ConfigScreen() {
                         />
                         <View style={styles.editButtons}>
                           <TouchableOpacity onPress={() => { setEditingServer(false); setServerUrl(getSetting('serverUrl')); }}>
-                            <Text style={{ color: colors.secondary, fontSize: 16 }}>Cancel</Text>
+                            <Text selectable style={{ color: colors.secondary, fontSize: 16 }}>Cancel</Text>
                           </TouchableOpacity>
                           <TouchableOpacity onPress={handleSaveServer}>
-                            <Text style={{ color: colors.accent, fontSize: 16, fontWeight: '600' }}>Save</Text>
+                            <Text selectable style={{ color: colors.accent, fontSize: 16, fontWeight: '600' }}>Save</Text>
                           </TouchableOpacity>
                         </View>
                       </View>
                     ) : (
                       <TouchableOpacity style={styles.subRow} onPress={() => setEditingServer(true)}>
-                        <Text style={[styles.label, { color: colors.accent }]}>Edit Server URL</Text>
+                        <Text selectable style={[styles.label, { color: colors.accent }]}>Edit Server URL</Text>
                       </TouchableOpacity>
                     )}
                   </View>
                 )}
 
-                {/* Expanded: About */}
                 {expanded[item.key] && item.key === 'about' && (
                   <View style={styles.expandedContent}>
                     <View style={styles.subRow}>
-                      <Text style={[styles.label, { color: colors.text }]}>Build</Text>
-                      <Text style={[styles.detail, { color: colors.secondary }]}>Expo SDK 54</Text>
+                      <Text selectable style={[styles.label, { color: colors.text }]}>Build</Text>
+                      <Text selectable style={[styles.detail, { color: colors.secondary }]}>Expo SDK 54</Text>
                     </View>
                   </View>
                 )}
@@ -445,13 +502,15 @@ export default function ConfigScreen() {
         </View>
       </ScrollView>
 
-      {/* System Session — identical InputBar as Canvas */}
-      <InputBar
-        onSend={handleChatSend}
-        onStop={handleChatStop}
-        connected={connected}
-        isProcessing={isProcessing}
-      />
+      {InputBar && (
+        <InputBar
+          onSend={handleChatSend}
+          onStop={handleChatStop}
+          connected={connected}
+          isProcessing={isProcessing}
+          forceDark
+        />
+      )}
     </View>
   );
 }
@@ -493,3 +552,6 @@ const styles = StyleSheet.create({
   },
   editButtons: { flexDirection: 'row', justifyContent: 'flex-end', gap: 20 },
 });
+
+// Export error screen if critical modules failed, otherwise the real screen
+export default (_configLoadError && !useConnection) ? ConfigErrorScreen : ConfigScreenImpl;
