@@ -10,7 +10,12 @@ export type SendMessageHandler = (message: string) => void;
 export type AdoptHandler = (componentId: string) => void;
 export type DismissHandler = (componentId: string) => void;
 export type StoreSetHandler = (key: string, value: any) => void;
-export type SketchHandler = (imageDataUrl: string, width?: number, height?: number, viewportWidth?: number, viewportHeight?: number) => void;
+export type SketchStroke = {
+  color: string;
+  bbox: { x: number; y: number; w: number; h: number };
+  points: Array<{ x: number; y: number }>;
+};
+export type SketchHandler = (imageDataUrl: string, width?: number, height?: number, viewportWidth?: number, viewportHeight?: number, strokes?: SketchStroke[]) => void;
 
 export interface BridgeHandlers {
   onSend: SendMessageHandler;
@@ -54,7 +59,7 @@ export class MorphBridge {
         this.handlers.onStoreSet(msg.key, msg.value);
         break;
       case 'sketch':
-        this.handlers.onSketch?.(msg.image, msg.width, msg.height, msg.viewportWidth, msg.viewportHeight);
+        this.handlers.onSketch?.(msg.image, msg.width, msg.height, msg.viewportWidth, msg.viewportHeight, msg.strokes);
         break;
       case 'sketch.opened':
         this.handlers.onSketchOpen?.();

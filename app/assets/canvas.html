@@ -240,6 +240,8 @@
     var _sketchDrawing = false;
     var _sketchColor = '#ffffff';
     var _sketchHistory = []; // array of ImageData for undo
+    var _sketchStrokes = []; // array of { color, points: [{x,y}] } for AI
+    var _sketchCurrentStroke = null;
     var _sketchLineWidth = 3;
     var _sketchInitialized = false;
 
@@ -450,52 +452,54 @@
       return { x: clientX - rect.left, y: clientY - rect.top };
     }
 
-    // Mouse handlers for web/desktop testing
-    function _sketchMouseDown(e) {
+    // Start a new stroke (shared by mouse & touch)
+    function _sketchBeginStroke(x, y) {
       _sketchDrawing = true;
       var c = document.getElementById('sketch-canvas');
       _sketchHistory.push(_sketchCtx.getImageData(0, 0, c.width, c.height));
       if (_sketchHistory.length > 30) _sketchHistory.shift();
+      _sketchCurrentStroke = { color: _sketchColor, points: [{ x: Math.round(x), y: Math.round(y) }] };
       _sketchCtx.beginPath();
-      _sketchCtx.moveTo(e.offsetX, e.offsetY);
+      _sketchCtx.moveTo(x, y);
     }
-    function _sketchMouseMove(e) {
+    function _sketchContinueStroke(x, y) {
       if (!_sketchDrawing) return;
-      _sketchCtx.lineTo(e.offsetX, e.offsetY);
+      // Sample every ~4px to keep data small
+      var pts = _sketchCurrentStroke.points;
+      var last = pts[pts.length - 1];
+      if (Math.abs(x - last.x) > 3 || Math.abs(y - last.y) > 3) {
+        pts.push({ x: Math.round(x), y: Math.round(y) });
+      }
+      _sketchCtx.lineTo(x, y);
       _sketchCtx.stroke();
     }
-    function _sketchMouseUp() {
+    function _sketchEndStroke() {
       _sketchDrawing = false;
       _sketchCtx.closePath();
+      if (_sketchCurrentStroke && _sketchCurrentStroke.points.length > 1) {
+        _sketchStrokes.push(_sketchCurrentStroke);
+      }
+      _sketchCurrentStroke = null;
     }
+
+    // Mouse handlers for web/desktop testing
+    function _sketchMouseDown(e) { _sketchBeginStroke(e.offsetX, e.offsetY); }
+    function _sketchMouseMove(e) { _sketchContinueStroke(e.offsetX, e.offsetY); }
+    function _sketchMouseUp() { _sketchEndStroke(); }
 
     function _sketchTouchStart(e) {
       e.preventDefault();
-      _sketchDrawing = true;
-      // Save state for undo
-      var c = document.getElementById('sketch-canvas');
-      _sketchHistory.push(_sketchCtx.getImageData(0, 0, c.width, c.height));
-      if (_sketchHistory.length > 30) _sketchHistory.shift();
-
       var t = e.touches[0];
       var pos = _sketchCoords(t.clientX, t.clientY);
-      _sketchCtx.beginPath();
-      _sketchCtx.moveTo(pos.x, pos.y);
+      _sketchBeginStroke(pos.x, pos.y);
     }
-
     function _sketchTouchMove(e) {
       e.preventDefault();
-      if (!_sketchDrawing) return;
       var t = e.touches[0];
       var pos = _sketchCoords(t.clientX, t.clientY);
-      _sketchCtx.lineTo(pos.x, pos.y);
-      _sketchCtx.stroke();
+      _sketchContinueStroke(pos.x, pos.y);
     }
-
-    function _sketchTouchEnd() {
-      _sketchDrawing = false;
-      _sketchCtx.closePath();
-    }
+    function _sketchTouchEnd() { _sketchEndStroke(); }
 
     function _sketchOpen() {
       _sketchActive = true;
@@ -531,12 +535,14 @@
       var dpr = window.devicePixelRatio || 1;
       _sketchCtx.clearRect(0, 0, c.width / dpr, c.height / dpr);
       _sketchHistory = [];
+      _sketchStrokes = [];
     }
 
     function _sketchUndo() {
       if (!_sketchCtx || _sketchHistory.length === 0) return;
       var prev = _sketchHistory.pop();
       _sketchCtx.putImageData(prev, 0, 0);
+      _sketchStrokes.pop();
     }
 
     function _sketchSend() {
@@ -555,13 +561,36 @@
       tCtx.fillRect(0, 0, outW, outH);
       tCtx.drawImage(c, 0, 0, c.width, c.height, 0, 0, outW, outH);
       var dataUrl = tmp.toDataURL('image/png');
+      // Build compact stroke summary: bounding box + simplified points
+      var strokeSummary = _sketchStrokes.map(function(s) {
+        var pts = s.points;
+        var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        pts.forEach(function(p) {
+          if (p.x < minX) minX = p.x; if (p.y < minY) minY = p.y;
+          if (p.x > maxX) maxX = p.x; if (p.y > maxY) maxY = p.y;
+        });
+        // Simplify: keep start, end, and key intermediate points (max 10 per stroke)
+        var simplified = [pts[0]];
+        if (pts.length > 2) {
+          var step = Math.max(1, Math.floor(pts.length / 8));
+          for (var i = step; i < pts.length - 1; i += step) simplified.push(pts[i]);
+        }
+        simplified.push(pts[pts.length - 1]);
+        return {
+          color: s.color,
+          bbox: { x: minX, y: minY, w: maxX - minX, h: maxY - minY },
+          points: simplified,
+        };
+      });
       _postToNative('sketch', {
         image: dataUrl,
         width: outW,
         height: outH,
         viewportWidth: window.innerWidth,
         viewportHeight: window.innerHeight,
+        strokes: strokeSummary,
       });
+      _sketchStrokes = [];
       _sketchClose();
     }
 

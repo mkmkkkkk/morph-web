@@ -262,13 +262,13 @@ export default function CanvasScreen() {
     await storeRef.current?.removeComponent(componentId);
   }, []);
 
-  const handleSketch = useCallback((imageDataUrl: string, width?: number, height?: number, viewportWidth?: number, viewportHeight?: number) => {
+  const handleSketch = useCallback((imageDataUrl: string, width?: number, height?: number, viewportWidth?: number, viewportHeight?: number, strokes?: any[]) => {
     if (!connected || !promptLib) return;
     const manifest = storeRef.current?.getManifest() || { components: [], order: [] };
     const dimensions = (viewportWidth && viewportHeight && width && height)
       ? { width, height, viewportWidth, viewportHeight }
       : undefined;
-    rawSendMessage(promptLib.wrapUserMessage(promptLib.buildSketchMessage(imageDataUrl, dimensions), manifest, activeTab));
+    rawSendMessage(promptLib.wrapUserMessage(promptLib.buildSketchMessage(imageDataUrl, dimensions, strokes), manifest, activeTab));
   }, [connected, rawSendMessage, activeTab]);
 
   const handleImage = useCallback((imageDataUrl: string) => {

@@ -52,12 +52,49 @@ export function wrapUserMessage(text: string, manifest: Manifest, activeTab?: st
  * Includes instructions for interpreting hand-drawn UI sketches.
  * Optionally includes dimension info so CC can position components accurately.
  */
-export function buildSketchMessage(imageDataUrl: string, dimensions?: { width: number; height: number; viewportWidth: number; viewportHeight: number }): string {
+export function buildSketchMessage(
+  imageDataUrl: string,
+  dimensions?: { width: number; height: number; viewportWidth: number; viewportHeight: number },
+  strokes?: Array<{ color: string; bbox: { x: number; y: number; w: number; h: number }; points: Array<{ x: number; y: number }> }>,
+): string {
   const dimInfo = dimensions
-    ? `\nCanvas size: ${dimensions.viewportWidth}x${dimensions.viewportHeight}px. Sketch drawn at this exact scale.`
+    ? `\nViewport: ${dimensions.viewportWidth}x${dimensions.viewportHeight}px.`
     : '';
-  return `[Sketch from canvas — interpret the drawing and generate/modify components accordingly.${dimInfo}
-Boxes→buttons/cards, lines→layout, text→labels, position→approximate layout on the grid.]
+
+  // Build precise stroke coordinate data
+  let strokeInfo = '';
+  if (strokes && strokes.length > 0) {
+    const vw = dimensions?.viewportWidth || 0;
+    const vh = dimensions?.viewportHeight || 0;
+    const strokeLines = strokes.map((s, i) => {
+      const b = s.bbox;
+      const pctX = vw ? `${Math.round(b.x / vw * 100)}%` : `${b.x}px`;
+      const pctY = vh ? `${Math.round(b.y / vh * 100)}%` : `${b.y}px`;
+      const pctW = vw ? `${Math.round(b.w / vw * 100)}%` : `${b.w}px`;
+      const pctH = vh ? `${Math.round(b.h / vh * 100)}%` : `${b.h}px`;
+      return `  Stroke ${i + 1} (${s.color}): bbox(${pctX}, ${pctY}, ${pctW}x${pctH}) from (${s.points[0].x},${s.points[0].y}) to (${s.points[s.points.length - 1].x},${s.points[s.points.length - 1].y})`;
+    });
+
+    // Overall bounding box of all strokes
+    let allMinX = Infinity, allMinY = Infinity, allMaxX = -Infinity, allMaxY = -Infinity;
+    strokes.forEach(s => {
+      if (s.bbox.x < allMinX) allMinX = s.bbox.x;
+      if (s.bbox.y < allMinY) allMinY = s.bbox.y;
+      if (s.bbox.x + s.bbox.w > allMaxX) allMaxX = s.bbox.x + s.bbox.w;
+      if (s.bbox.y + s.bbox.h > allMaxY) allMaxY = s.bbox.y + s.bbox.h;
+    });
+    const regionX = vw ? `${Math.round(allMinX / vw * 100)}%` : `${allMinX}px`;
+    const regionY = vh ? `${Math.round(allMinY / vh * 100)}%` : `${allMinY}px`;
+    const regionW = vw ? `${Math.round((allMaxX - allMinX) / vw * 100)}%` : `${allMaxX - allMinX}px`;
+    const regionH = vh ? `${Math.round((allMaxY - allMinY) / vh * 100)}%` : `${allMaxY - allMinY}px`;
+
+    strokeInfo = `\nDrawing region: top-left(${regionX}, ${regionY}), size(${regionW}x${regionH})
+Strokes (${strokes.length} total, coordinates in CSS px relative to viewport):
+${strokeLines.join('\n')}`;
+  }
+
+  return `[Sketch from canvas — interpret the drawing and generate/modify components accordingly.${dimInfo}${strokeInfo}
+Boxes→buttons/cards, lines→layout, text→labels. Use the EXACT coordinates above for positioning.]
 ![sketch](${imageDataUrl})`;
 }
 
