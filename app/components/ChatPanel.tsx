@@ -93,11 +93,27 @@ export default function ChatPanel({
   }, []);
 
   // ---------------------------------------------------------------
-  // Render every message type — full terminal mirror, nothing skipped
+  // Visibility filter — hide noise, show what matters
   // ---------------------------------------------------------------
+  const HIDDEN_TOOLS = new Set(['Read', 'Glob', 'Grep', 'Task', 'TodoWrite', 'Agent']);
+
   const renderMessage = (msg: SessionMessage) => {
     try {
       const mono = styles.mono;
+
+      // Hide: service_message, session_start
+      if (msg.content.type === 'service_message' || msg.content.type === 'session_start') {
+        return null;
+      }
+      // Hide: noisy tool calls (Read, Glob, Grep)
+      if (msg.content.type === 'tool_call_start' && HIDDEN_TOOLS.has(msg.content.name)) {
+        return null;
+      }
+      // Hide: results from hidden tools (tool_call_end with no name or hidden name)
+      if (msg.content.type === 'tool_call_end' && (!msg.content.name || HIDDEN_TOOLS.has(msg.content.name))) {
+        return null;
+      }
+
       switch (msg.content.type) {
         case 'text': {
           const isUser = msg.role === 'user';

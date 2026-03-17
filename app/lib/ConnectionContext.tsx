@@ -218,10 +218,10 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
             console.warn('[Morph] onUpdate: encKey is null, cannot decrypt');
             return;
           }
-          const msg = parseUpdate(data, encKey, variant);
-          console.log('[Morph] parsed message:', msg ? `type=${msg.content.type} role=${msg.role} id=${msg.id}` : 'null');
-          if (msg) {
-            console.log('[Morph] dispatching to', messageHandlersRef.current.size, 'handler(s)');
+          const msgs = parseUpdate(data, encKey, variant);
+          console.log('[Morph] parsed', msgs.length, 'messages');
+          for (const msg of msgs) {
+            console.log('[Morph] dispatching:', msg.content.type, msg.role, msg.id);
             dispatchMessage(msg);
           }
         } catch (err: any) {

@@ -135,21 +135,21 @@ export function parseUpdate(
   data: { body?: UpdateBody },
   encKey: Uint8Array,
   variant: 'legacy' | 'dataKey',
-): SessionMessage | null {
+): SessionMessage[] {
   if (!data?.body) {
     console.log('[Protocol] parseUpdate: no body');
-    return null;
+    return [];
   }
   const body = data.body;
 
   // Only handle new-message updates for now
   if (body.t !== 'new-message') {
     console.log('[Protocol] parseUpdate: skipping t=', body.t);
-    return null;
+    return [];
   }
   if (!body.message?.content || body.message.content.t !== 'encrypted') {
     console.log('[Protocol] parseUpdate: not encrypted, content.t=', body.message?.content?.t);
-    return null;
+    return [];
   }
 
   try {
@@ -159,15 +159,15 @@ export function parseUpdate(
     const envelope = decryptJson<MessageEnvelope>(encKey, variant, ciphertext);
     if (!envelope) {
       console.warn('[Protocol] parseUpdate: decryptJson returned null');
-      return null;
+      return [];
     }
     console.log('[Protocol] parseUpdate: decrypted envelope role=', envelope.role, 'content.type=', envelope.content?.type);
-    const result = envelopeToSessionMessage(envelope);
-    console.log('[Protocol] parseUpdate: result type=', result?.content?.type, 'id=', result?.id);
-    return result;
+    const results = envelopeToSessionMessages(envelope);
+    console.log('[Protocol] parseUpdate: produced', results.length, 'messages');
+    return results;
   } catch (err: any) {
     console.error('[Protocol] parseUpdate THREW:', err?.message, err?.stack);
-    return null;
+    return [];
   }
 }
 
@@ -200,80 +200,65 @@ export function parseSessionUpdate(
 // Convert decrypted envelope -> SessionMessage
 // ---------------------------------------------------------------------------
 
-function envelopeToSessionMessage(env: MessageEnvelope): SessionMessage | null {
+function envelopeToSessionMessages(env: MessageEnvelope): SessionMessage[] {
   const id = env.content.id || `msg_${Date.now()}_${messageCounter++}`;
   const timestamp = Date.now();
   const role = env.role === 'user' ? 'user' : 'agent';
 
-  console.log('[Protocol] envelopeToSessionMessage: role=', env.role, 'content.type=', env.content.type, 'hasData=', !!env.content.data);
+  console.log('[Protocol] envelopeToSessionMessages: role=', env.role, 'content.type=', env.content.type, 'hasData=', !!env.content.data);
 
   // User text message
   if (env.role === 'user' && env.content.type === 'text') {
-    console.log('[Protocol] → user text, length=', env.content.text?.length);
-    return {
+    return [{
       id,
       timestamp,
       role: 'user',
       content: { type: 'text', text: env.content.text || '' },
-    };
+    }];
   }
 
   // Agent output — wraps Claude JSONL
-  if (env.role === 'agent' && env.content.type === 'output') {
+  if (env.role === 'agent' && (env.content.type === 'output' || env.content.type === 'codex' || env.content.data)) {
     console.log('[Protocol] → agent output, data.type=', env.content.data?.type);
-    return parseAgentOutput(env.content.data, id, timestamp);
-  }
-
-  // Agent codex message
-  if (env.role === 'agent' && env.content.type === 'codex') {
-    console.log('[Protocol] → agent codex, data.type=', env.content.data?.type);
-    return parseAgentOutput(env.content.data, id, timestamp);
-  }
-
-  // Agent generic typed message (gemini, etc.)
-  if (env.role === 'agent' && env.content.data) {
-    console.log('[Protocol] → agent generic w/ data, data.type=', env.content.data?.type);
     return parseAgentOutput(env.content.data, id, timestamp);
   }
 
   // Agent event
   if (env.role === 'agent' && env.content.type === 'event') {
-    console.log('[Protocol] → agent event');
-    return {
+    return [{
       id,
       timestamp,
       role: 'system',
       content: { type: 'service_message', text: JSON.stringify(env.content.data) },
-    };
+    }];
   }
 
   // Fallback
   console.log('[Protocol] → FALLBACK, content keys=', Object.keys(env.content));
-  return {
+  return [{
     id,
     timestamp,
     role,
     content: { type: 'service_message', text: JSON.stringify(env.content) },
-  };
+  }];
 }
 
 // ---------------------------------------------------------------------------
 // Parse Claude JSONL data wrapped inside agent output
 // ---------------------------------------------------------------------------
 
-function parseAgentOutput(data: any, id: string, timestamp: number): SessionMessage | null {
+function parseAgentOutput(data: any, id: string, timestamp: number): SessionMessage[] {
   if (!data) {
     console.log('[Protocol] parseAgentOutput: data is null');
-    return null;
+    return [];
   }
 
   console.log('[Protocol] parseAgentOutput: data.type=', data.type, 'keys=', Object.keys(data).join(','));
-  const msg: Partial<SessionMessage> = { id, timestamp, role: 'agent' };
 
   switch (data.type) {
     case 'user':
-      return {
-        ...msg as any,
+      return [{
+        id, timestamp,
         role: 'user',
         content: {
           type: 'text',
@@ -281,52 +266,77 @@ function parseAgentOutput(data: any, id: string, timestamp: number): SessionMess
             ? data.message.content
             : JSON.stringify(data.message?.content),
         },
-      };
+      }];
 
     case 'assistant': {
-      // Extract text from assistant message content blocks
+      // Extract text, thinking, AND tool_use from content blocks
       const blocks = data.message?.content;
-      let text = '';
-      let isThinking = false;
+      const results: SessionMessage[] = [];
       if (Array.isArray(blocks)) {
-        for (const block of blocks) {
-          if (block.type === 'text') {
-            text += block.text || '';
-          } else if (block.type === 'thinking') {
-            text += block.thinking || '';
-            isThinking = true;
+        for (let i = 0; i < blocks.length; i++) {
+          const block = blocks[i];
+          const blockId = `${id}_b${i}`;
+          if (block.type === 'text' && block.text) {
+            results.push({
+              id: blockId, timestamp, role: 'agent',
+              content: { type: 'text', text: block.text },
+            });
+          } else if (block.type === 'thinking' && block.thinking) {
+            results.push({
+              id: blockId, timestamp, role: 'agent',
+              content: { type: 'text', text: block.thinking, thinking: true } as any,
+            });
+          } else if (block.type === 'tool_use') {
+            results.push({
+              id: blockId, timestamp, role: 'agent',
+              content: { type: 'tool_call_start', name: block.name, params: block.input },
+            });
           }
         }
       }
-      return {
-        ...msg as any,
-        content: { type: 'text', text, thinking: isThinking || undefined },
-      };
+      return results.length > 0 ? results : [{
+        id, timestamp, role: 'agent',
+        content: { type: 'text', text: '' },
+      }];
+    }
+
+    case 'tool_result': {
+      // Tool execution result
+      const content = data.content;
+      let resultText = '';
+      if (Array.isArray(content)) {
+        resultText = content.map((b: any) => b.text || b.content || '').join('\n');
+      } else if (typeof content === 'string') {
+        resultText = content;
+      } else {
+        resultText = JSON.stringify(content);
+      }
+      return [{
+        id, timestamp, role: 'agent',
+        content: { type: 'tool_call_end', name: data.tool_name || '', result: resultText },
+      }];
     }
 
     case 'summary':
-      return {
-        ...msg as any,
-        role: 'system',
+      return [{
+        id, timestamp, role: 'system',
         content: { type: 'service_message', text: `Summary: ${data.summary}` },
-      };
+      }];
 
     case 'system':
-      return {
-        ...msg as any,
-        role: 'system',
+      return [{
+        id, timestamp, role: 'system',
         content: { type: 'session_start' },
-      };
+      }];
 
     default:
-      // Raw object — try to make sense of it
       if (typeof data === 'string') {
-        return { ...msg as any, content: { type: 'text', text: data } };
+        return [{ id, timestamp, role: 'agent', content: { type: 'text', text: data } }];
       }
-      return {
-        ...msg as any,
+      return [{
+        id, timestamp, role: 'system',
         content: { type: 'service_message', text: JSON.stringify(data) },
-      };
+      }];
   }
 }
 
