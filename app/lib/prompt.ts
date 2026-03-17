@@ -1,5 +1,19 @@
 import { Manifest } from './store';
 
+/** Color name lookup for common sketch colors. */
+function colorName(hex: string): string {
+  const map: Record<string, string> = {
+    '#ffffff': 'white', '#ff0000': 'red', '#ff453a': 'red',
+    '#00ff00': 'green', '#30d158': 'green', '#0000ff': 'blue',
+    '#5e5ce6': 'purple', '#ff9f0a': 'orange', '#ffff00': 'yellow',
+    '#ff00ff': 'magenta', '#00ffff': 'cyan', '#ff6b6b': 'red',
+    '#4ecdc4': 'teal', '#45b7d1': 'blue', '#96ceb4': 'green',
+    '#ffd93d': 'yellow', '#6c5ce7': 'purple', '#a8e6cf': 'green',
+    '#ff8a5c': 'orange', '#ea5455': 'red',
+  };
+  return map[hex.toLowerCase()] || hex;
+}
+
 /**
  * Build the Morph Context that gets prepended to every user message sent to CC.
  * This tells CC about the canvas state and available APIs.
@@ -61,21 +75,33 @@ export function buildSketchMessage(
     ? `\nViewport: ${dimensions.viewportWidth}x${dimensions.viewportHeight}px.`
     : '';
 
-  // Build precise stroke coordinate data
+  // Build stroke coordinate data — exact positions + color grouping.
+  // Shape recognition and spatial intent are left to AI vision on the image.
   let strokeInfo = '';
   if (strokes && strokes.length > 0) {
     const vw = dimensions?.viewportWidth || 0;
     const vh = dimensions?.viewportHeight || 0;
-    const strokeLines = strokes.map((s, i) => {
-      const b = s.bbox;
-      const pctX = vw ? `${Math.round(b.x / vw * 100)}%` : `${b.x}px`;
-      const pctY = vh ? `${Math.round(b.y / vh * 100)}%` : `${b.y}px`;
-      const pctW = vw ? `${Math.round(b.w / vw * 100)}%` : `${b.w}px`;
-      const pctH = vh ? `${Math.round(b.h / vh * 100)}%` : `${b.h}px`;
-      return `  Stroke ${i + 1} (${s.color}): bbox(${pctX}, ${pctY}, ${pctW}x${pctH}) from (${s.points[0].x},${s.points[0].y}) to (${s.points[s.points.length - 1].x},${s.points[s.points.length - 1].y})`;
+
+    const fmtPos = (x: number, y: number) => {
+      const px = vw ? `${Math.round(x / vw * 100)}%` : `${x}px`;
+      const py = vh ? `${Math.round(y / vh * 100)}%` : `${y}px`;
+      return `(${px}, ${py})`;
+    };
+    const fmtSize = (w: number, h: number) => {
+      const pw = vw ? `${Math.round(w / vw * 100)}%` : `${w}px`;
+      const ph = vh ? `${Math.round(h / vh * 100)}%` : `${h}px`;
+      return `${pw}x${ph}`;
+    };
+
+    // Group strokes by color
+    const colorGroups = new Map<string, Array<{ index: number; bbox: { x: number; y: number; w: number; h: number } }>>();
+    strokes.forEach((s, i) => {
+      const key = s.color.toLowerCase();
+      if (!colorGroups.has(key)) colorGroups.set(key, []);
+      colorGroups.get(key)!.push({ index: i, bbox: s.bbox });
     });
 
-    // Overall bounding box of all strokes
+    // Overall bounding box
     let allMinX = Infinity, allMinY = Infinity, allMaxX = -Infinity, allMaxY = -Infinity;
     strokes.forEach(s => {
       if (s.bbox.x < allMinX) allMinX = s.bbox.x;
@@ -83,18 +109,30 @@ export function buildSketchMessage(
       if (s.bbox.x + s.bbox.w > allMaxX) allMaxX = s.bbox.x + s.bbox.w;
       if (s.bbox.y + s.bbox.h > allMaxY) allMaxY = s.bbox.y + s.bbox.h;
     });
-    const regionX = vw ? `${Math.round(allMinX / vw * 100)}%` : `${allMinX}px`;
-    const regionY = vh ? `${Math.round(allMinY / vh * 100)}%` : `${allMinY}px`;
-    const regionW = vw ? `${Math.round((allMaxX - allMinX) / vw * 100)}%` : `${allMaxX - allMinX}px`;
-    const regionH = vh ? `${Math.round((allMaxY - allMinY) / vh * 100)}%` : `${allMaxY - allMinY}px`;
 
-    strokeInfo = `\nDrawing region: top-left(${regionX}, ${regionY}), size(${regionW}x${regionH})
-Strokes (${strokes.length} total, coordinates in CSS px relative to viewport):
-${strokeLines.join('\n')}`;
+    // Build output grouped by color
+    const groupLines: string[] = [];
+    colorGroups.forEach((groupStrokes, hex) => {
+      const name = colorName(hex);
+      const label = name !== hex ? `${name} (${hex})` : hex;
+      if (colorGroups.size > 1) {
+        groupLines.push(`  [${label}]`);
+      }
+      groupStrokes.forEach(s => {
+        const b = s.bbox;
+        const pos = fmtPos(b.x, b.y);
+        const size = fmtSize(b.w, b.h);
+        groupLines.push(`  ${colorGroups.size > 1 ? '  ' : ''}Stroke ${s.index + 1}: at ${pos}, size ${size}`);
+      });
+    });
+
+    strokeInfo = `\nDrawing region: ${fmtPos(allMinX, allMinY)}, size ${fmtSize(allMaxX - allMinX, allMaxY - allMinY)}
+Annotations (${strokes.length} stroke${strokes.length > 1 ? 's' : ''}, ${colorGroups.size} color${colorGroups.size > 1 ? 's' : ''}):
+${groupLines.join('\n')}`;
   }
 
   return `[Sketch from canvas — interpret the drawing and generate/modify components accordingly.${dimInfo}${strokeInfo}
-Boxes→buttons/cards, lines→layout, text→labels. Use the EXACT coordinates above for positioning.]
+Look at the image to identify shapes (circles, rectangles, arrows, lines, X marks, etc.) and their intent. Different colors = different annotations the user will reference by color. Use the EXACT coordinates above for positioning.]
 ![sketch](${imageDataUrl})`;
 }
 
