@@ -34,14 +34,18 @@ interface ChatPanelProps {
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 const EXPANDED_HEIGHT = SCREEN_HEIGHT * 0.55;
 
+console.log('[ChatPanel] module loaded');
+
 export default function ChatPanel({
   messages, onSend, onStop, onSketch, onImage, onFile,
   connected, isProcessing,
 }: ChatPanelProps) {
+  console.log('[ChatPanel] render: messages=', messages.length, 'connected=', connected, 'isProcessing=', isProcessing, 'expanded=');
   const [expanded, setExpanded] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
 
   const toggle = useCallback(() => {
+    console.log('[ChatPanel] HANDLE BAR TAPPED, toggling expanded');
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setExpanded(prev => !prev);
   }, []);
@@ -62,6 +66,7 @@ export default function ChatPanel({
   }, []);
 
   const renderMessage = (msg: SessionMessage) => {
+    try {
     const mono = styles.mono;
     switch (msg.content.type) {
       case 'text': {
@@ -100,7 +105,12 @@ export default function ChatPanel({
         );
 
       default:
+        console.log('[ChatPanel] renderMessage: unhandled type=', msg.content.type);
         return null;
+    }
+    } catch (err: any) {
+      console.error('[ChatPanel] renderMessage THREW:', err?.message, 'msg=', JSON.stringify(msg).slice(0, 200));
+      return null;
     }
   };
 

@@ -86,7 +86,10 @@ function ConfigErrorScreen() {
   );
 }
 
+console.log('[ConfigScreen] module loaded, errors=', _configLoadError);
+
 function ConfigScreenImpl() {
+  console.log('[ConfigScreen] render START');
   const router = useRouter();
   const isDark = true;
   const storeRef = useRef(ComponentStore ? new ComponentStore() : null);
@@ -166,6 +169,7 @@ function ConfigScreenImpl() {
 
   // --- Handlers ---
   const handleUnpair = () => {
+    console.log('[ConfigScreen] handleUnpair tapped');
     Alert.alert('Unpair Device', 'Remove all credentials? You\'ll need to scan a new QR code.', [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -179,6 +183,7 @@ function ConfigScreenImpl() {
   };
 
   const handleSaveServer = () => {
+    console.log('[ConfigScreen] handleSaveServer tapped');
     const trimmed = serverUrl.trim();
     if (!trimmed.startsWith('http')) {
       Alert.alert('Invalid URL', 'Must start with http:// or https://');
@@ -189,6 +194,7 @@ function ConfigScreenImpl() {
   };
 
   const handleQuickAction = (action: QuickAction) => {
+    console.log('[ConfigScreen] handleQuickAction:', action.id, action.label);
     Alert.alert(action.label, `Prompt: "${action.prompt}"`, [{ text: 'OK' }]);
   };
 

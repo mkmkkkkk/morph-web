@@ -135,13 +135,16 @@ export class HappyConnection {
    * (caller is responsible for encrypt + toBase64).
    */
   async sendMessage(sessionId: string, encryptedContent: string): Promise<void> {
+    console.log('[HappyConn] sendMessage: sid=', sessionId, 'socketConnected=', this.socket?.connected, 'contentLen=', encryptedContent.length);
     if (!this.socket?.connected) {
       throw new Error('Socket not connected');
     }
+    console.log('[HappyConn] emitting "message" event...');
     this.socket.emit('message', {
       sid: sessionId,
       message: encryptedContent,
     });
+    console.log('[HappyConn] "message" event emitted OK');
   }
 
   // ------------------------------------------------------------------

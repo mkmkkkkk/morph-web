@@ -8,6 +8,8 @@ import { StatusBar } from 'expo-status-bar';
 
 LogBox.ignoreLogs(['Using an insecure random number generator']);
 
+console.log('[Morph] _layout.tsx loading...');
+
 // Catch unhandled promise rejections — show as alert instead of crashing
 if (typeof global !== 'undefined') {
   const origHandler = (global as any).HermesInternal?.hasPromise?.()
@@ -16,10 +18,24 @@ if (typeof global !== 'undefined') {
   (global as any).onunhandledrejection = (e: any) => {
     const reason = e?.reason || e;
     const msg = reason?.message || String(reason);
-    console.error('[Morph] Unhandled rejection:', msg);
+    console.error('[Morph] UNHANDLED REJECTION:', msg, '\nStack:', reason?.stack);
     Alert.alert('Unhandled Error', msg + '\n' + (reason?.stack || ''));
     if (origHandler) origHandler(e);
   };
+}
+
+// Catch synchronous errors globally
+if (typeof global !== 'undefined' && typeof (global as any).ErrorUtils !== 'undefined') {
+  const origHandler = (global as any).ErrorUtils.getGlobalHandler();
+  (global as any).ErrorUtils.setGlobalHandler((error: any, isFatal: boolean) => {
+    console.error('[Morph] GLOBAL ERROR (fatal=' + isFatal + '):', error?.message, '\nStack:', error?.stack);
+    // Don't Alert on fatal — it may already be dead. Just log.
+    if (!isFatal) {
+      Alert.alert('Error', error?.message + '\n' + (error?.stack || ''));
+    }
+    origHandler?.(error, isFatal);
+  });
+  console.log('[Morph] ErrorUtils global handler installed');
 }
 
 let ConnectionProvider: React.ComponentType<{ children: React.ReactNode }> | null = null;

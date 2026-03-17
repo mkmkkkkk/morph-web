@@ -41,9 +41,12 @@ try {
   _connectLoadError = (_connectLoadError || '') + '\nConnectionContext: ' + e?.message;
 }
 
+console.log('[ConnectScreen] module loaded, errors=', _connectLoadError);
+
 type Mode = 'scan' | 'manual';
 
 export default function ConnectScreen() {
+  console.log('[ConnectScreen] render START');
   // Show load errors
   if (_connectLoadError && !useConnection) {
     return (
@@ -85,6 +88,7 @@ export default function ConnectScreen() {
   };
 
   const handlePairResult = async (result: any) => {
+    console.log('[ConnectScreen] handlePairResult:', JSON.stringify(result).slice(0, 200));
     if (result.success) {
       setPairStatus('connecting');
       setStatusText('Credentials saved. Connecting to server...');
@@ -113,6 +117,7 @@ export default function ConnectScreen() {
   };
 
   const handleQRScanned = async (data: string) => {
+    console.log('[ConnectScreen] handleQRScanned: data length=', data?.length);
     if (scannedRef.current || pairing) return;
     scannedRef.current = true;
     setPairing(true);
@@ -131,6 +136,7 @@ export default function ConnectScreen() {
   };
 
   const handleManualPair = async () => {
+    console.log('[ConnectScreen] handleManualPair tapped');
     const trimmed = manualInput.trim();
     if (!trimmed) return;
     setPairing(true);

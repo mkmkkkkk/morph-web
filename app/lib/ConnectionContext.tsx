@@ -43,7 +43,10 @@ export function useConnection() {
   return ctx;
 }
 
+console.log('[ConnectionProvider] module loaded');
+
 export function ConnectionProvider({ children }: { children: React.ReactNode }) {
+  console.log('[ConnectionProvider] render');
   const connectionRef = useRef(new HappyConnection());
   const apiRef = useRef<HappyApi | null>(null);
   const keepAliveRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -69,8 +72,14 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
 
   // Dispatch message to all handlers
   const dispatchMessage = useCallback((msg: SessionMessage) => {
+    const count = messageHandlersRef.current.size;
+    console.log('[ConnectionProvider] dispatchMessage: type=', msg.content.type, 'to', count, 'handlers');
     for (const handler of messageHandlersRef.current) {
-      try { handler(msg); } catch { /* swallow */ }
+      try {
+        handler(msg);
+      } catch (err: any) {
+        console.error('[ConnectionProvider] handler THREW:', err?.message, err?.stack);
+      }
     }
   }, []);
 
@@ -202,11 +211,22 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
       });
 
       const unsubUpdate = conn.onUpdate((data: any) => {
-        console.log('[Morph] received update:', JSON.stringify(data).slice(0, 200));
-        if (!encKey) return;
-        const msg = parseUpdate(data, encKey, variant);
-        console.log('[Morph] parsed message:', msg ? msg.content.type : 'null');
-        if (msg) dispatchMessage(msg);
+        try {
+          const bodyT = data?.body?.t;
+          console.log('[Morph] received update: t=', bodyT, 'preview=', JSON.stringify(data).slice(0, 300));
+          if (!encKey) {
+            console.warn('[Morph] onUpdate: encKey is null, cannot decrypt');
+            return;
+          }
+          const msg = parseUpdate(data, encKey, variant);
+          console.log('[Morph] parsed message:', msg ? `type=${msg.content.type} role=${msg.role} id=${msg.id}` : 'null');
+          if (msg) {
+            console.log('[Morph] dispatching to', messageHandlersRef.current.size, 'handler(s)');
+            dispatchMessage(msg);
+          }
+        } catch (err: any) {
+          console.error('[Morph] onUpdate THREW:', err?.message, err?.stack);
+        }
       });
 
       cleanupRef.current.push(unsubState, unsubUpdate);
@@ -251,35 +271,48 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
 
   // Send message via Socket.IO
   const sendMessage = useCallback((text: string) => {
-    if (!sessionId || !sessionKey || !connected) return;
+    console.log('[Morph] sendMessage called: sessionId=', sessionId, 'hasKey=', !!sessionKey, 'keyLen=', sessionKey?.length, 'connected=', connected, 'variant=', sessionVariant);
+    if (!sessionId || !sessionKey || !connected) {
+      console.warn('[Morph] sendMessage: precondition failed — sid=', !!sessionId, 'key=', !!sessionKey, 'conn=', connected);
+      return;
+    }
     try {
-      console.log('[Morph] sendMessage: sid=', sessionId, 'keyLen=', sessionKey.length, 'variant=', sessionVariant);
+      console.log('[Morph] sendMessage: encrypting text, length=', text.length);
       const encrypted = encryptUserMessage(text, sessionKey, sessionVariant);
-      console.log('[Morph] encrypted msg length:', encrypted.length);
-      connectionRef.current.sendMessage(sessionId, encrypted).catch((err) => {
-        console.warn('[Morph] sendMessage error:', err);
+      console.log('[Morph] sendMessage: encrypted OK, b64 length=', encrypted.length);
+      console.log('[Morph] sendMessage: emitting via socket...');
+      connectionRef.current.sendMessage(sessionId, encrypted).then(() => {
+        console.log('[Morph] sendMessage: socket emit resolved OK');
+      }).catch((err) => {
+        console.error('[Morph] sendMessage: socket emit REJECTED:', err?.message);
         Alert.alert('Send Error', String(err?.message || err));
       });
     } catch (err: any) {
-      console.error('[Morph] sendMessage sync error:', err);
+      console.error('[Morph] sendMessage SYNC ERROR:', err?.message, '\nStack:', err?.stack);
       Alert.alert('Send Error (sync)', String(err?.message || err) + '\n' + (err?.stack || ''));
     }
   }, [sessionId, sessionKey, sessionVariant, connected]);
 
   // Send interrupt
   const sendInterrupt = useCallback(() => {
+    console.log('[ConnectionProvider] sendInterrupt: sid=', sessionId, 'connected=', connected);
     if (!sessionId || !connected) return;
     connectionRef.current.sendInterrupt(sessionId);
   }, [sessionId, connected]);
 
   // Auto-connect on mount (best-effort, delayed to let app stabilize)
   useEffect(() => {
+    console.log('[ConnectionProvider] MOUNT — scheduling auto-connect in 500ms');
     const timer = setTimeout(() => {
-      safeConnect().catch((err) => {
-        console.warn('[Morph] auto-connect failed:', err?.message);
+      console.log('[ConnectionProvider] auto-connect timer fired, calling safeConnect...');
+      safeConnect().then(() => {
+        console.log('[ConnectionProvider] auto-connect SUCCEEDED');
+      }).catch((err) => {
+        console.warn('[ConnectionProvider] auto-connect FAILED:', err?.message);
       });
     }, 500);
     return () => {
+      console.log('[ConnectionProvider] UNMOUNT — clearing timer, disconnecting');
       clearTimeout(timer);
       doDisconnect();
     };

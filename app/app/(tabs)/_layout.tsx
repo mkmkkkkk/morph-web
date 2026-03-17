@@ -1,6 +1,8 @@
 import { Tabs } from 'expo-router';
 import { Text } from 'react-native';
 
+console.log('[TabLayout] module loaded');
+
 function TabIcon({ label, focused }: { label: string; focused: boolean }) {
   return (
     <Text style={{ fontSize: 20, opacity: focused ? 1 : 0.4 }}>
@@ -10,8 +12,17 @@ function TabIcon({ label, focused }: { label: string; focused: boolean }) {
 }
 
 export default function TabLayout() {
+  console.log('[TabLayout] render');
   return (
     <Tabs
+      screenListeners={{
+        tabPress: (e) => {
+          console.log('[TabLayout] TAB PRESSED:', e.target);
+        },
+        focus: (e) => {
+          console.log('[TabLayout] TAB FOCUSED:', e.target);
+        },
+      }}
       screenOptions={{
         tabBarStyle: {
           backgroundColor: '#000',

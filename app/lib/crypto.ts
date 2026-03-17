@@ -222,8 +222,17 @@ export function encryptJson(
   variant: 'legacy' | 'dataKey',
   obj: unknown,
 ): Uint8Array {
-  const plaintext = utf8Encode(JSON.stringify(obj));
-  return encrypt(key, variant, plaintext);
+  try {
+    const json = JSON.stringify(obj);
+    console.log('[Crypto] encryptJson: variant=', variant, 'jsonLen=', json.length);
+    const plaintext = utf8Encode(json);
+    const result = encrypt(key, variant, plaintext);
+    console.log('[Crypto] encryptJson OK, outputLen=', result.length);
+    return result;
+  } catch (err: any) {
+    console.error('[Crypto] encryptJson THREW:', err?.message, err?.stack);
+    throw err;
+  }
 }
 
 export function decryptJson<T = unknown>(
@@ -231,11 +240,20 @@ export function decryptJson<T = unknown>(
   variant: 'legacy' | 'dataKey',
   data: Uint8Array,
 ): T | null {
-  const decrypted = decrypt(key, variant, data);
-  if (!decrypted) return null;
   try {
-    return JSON.parse(utf8Decode(decrypted)) as T;
-  } catch {
+    console.log('[Crypto] decryptJson: variant=', variant, 'dataLen=', data.length);
+    const decrypted = decrypt(key, variant, data);
+    if (!decrypted) {
+      console.warn('[Crypto] decryptJson: decrypt returned null');
+      return null;
+    }
+    console.log('[Crypto] decryptJson: decrypted OK, len=', decrypted.length);
+    const text = utf8Decode(decrypted);
+    const parsed = JSON.parse(text) as T;
+    console.log('[Crypto] decryptJson: parsed OK');
+    return parsed;
+  } catch (err: any) {
+    console.error('[Crypto] decryptJson THREW:', err?.message);
     return null;
   }
 }
