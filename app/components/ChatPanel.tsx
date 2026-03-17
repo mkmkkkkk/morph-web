@@ -29,6 +29,8 @@ interface ChatPanelProps {
   connected: boolean;
   connectionState?: 'disconnected' | 'connecting' | 'connected' | 'error';
   isProcessing?: boolean;
+  pendingSketch?: { strokeCount: number } | null;
+  onClearSketch?: () => void;
 }
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
@@ -65,6 +67,7 @@ function CollapsibleBlock({ label, preview, headerStyle, content, contentStyle, 
 export default function ChatPanel({
   messages, onSend, onStop, onSketch, onImage, onFile,
   connected, connectionState, isProcessing,
+  pendingSketch, onClearSketch,
 }: ChatPanelProps) {
   const [terminalVisible, setTerminalVisible] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
@@ -239,6 +242,8 @@ export default function ChatPanel({
           onToggleTerminal={toggleTerminal}
           terminalVisible={terminalVisible}
           hasNewTerminal={hasNew}
+          pendingSketch={pendingSketch}
+          onClearSketch={onClearSketch}
         />
       </View>
     </KeyboardAvoidingView>

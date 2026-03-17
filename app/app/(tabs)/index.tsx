@@ -83,6 +83,11 @@ export default function CanvasScreen() {
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [messages, setMessages] = useState<any[]>([]);
+  const [pendingSketch, setPendingSketch] = useState<{
+    imageDataUrl: string;
+    dimensions?: { width: number; height: number; viewportWidth: number; viewportHeight: number };
+    strokes?: any[];
+  } | null>(null);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingMessagesRef = useRef<{ localId: string; wrappedText: string }[]>([]);
 
@@ -210,36 +215,48 @@ export default function CanvasScreen() {
     try {
       const localId = `local_${Date.now()}`;
       const manifest = storeRef.current?.getManifest() || { components: [], order: [] };
-      const wrappedText = promptLib?.wrapUserMessage(text, manifest, activeTab) || text;
+
+      // If there's a pending sketch, combine it with the user text
+      let fullText = text;
+      if (pendingSketch && promptLib) {
+        const sketchMsg = promptLib.buildSketchMessage(
+          pendingSketch.imageDataUrl,
+          pendingSketch.dimensions,
+          pendingSketch.strokes,
+        );
+        fullText = sketchMsg + (text ? '\n\n' + text : '');
+        setPendingSketch(null);
+      }
+
+      const wrappedText = promptLib?.wrapUserMessage(fullText, manifest, activeTab) || fullText;
+      // Display label: show user text or "Sketch" if sketch-only
+      const displayText = text || '[Sketch]';
 
       if (connected) {
         setMessages(prev => [...prev, {
           id: localId,
           timestamp: Date.now(),
           role: 'user',
-          content: { type: 'text', text },
+          content: { type: 'text', text: displayText },
         }]);
-        __DEV__ && console.log('[CanvasScreen] local message added');
         __DEV__ && console.log('[CanvasScreen] wrappedText length=', wrappedText.length);
         setIsProcessing(true);
         rawSendMessage(wrappedText);
-        __DEV__ && console.log('[CanvasScreen] rawSendMessage called OK');
       } else {
-        // Queue message for sending when connected
         setMessages(prev => [...prev, {
           id: localId,
           timestamp: Date.now(),
           role: 'user',
-          content: { type: 'text', text },
+          content: { type: 'text', text: displayText },
           pending: true,
         }]);
         pendingMessagesRef.current.push({ localId, wrappedText });
-        __DEV__ && console.log('[CanvasScreen] message queued (disconnected), queue size=', pendingMessagesRef.current.length);
+        __DEV__ && console.log('[CanvasScreen] message queued, queue size=', pendingMessagesRef.current.length);
       }
     } catch (err: any) {
       __DEV__ && console.error('[CanvasScreen] handleSend THREW:', err?.message, err?.stack);
     }
-  }, [connected, rawSendMessage, activeTab]);
+  }, [connected, rawSendMessage, activeTab, pendingSketch]);
 
   const handleStop = useCallback(() => {
     if (!connected) return;
@@ -263,13 +280,11 @@ export default function CanvasScreen() {
   }, []);
 
   const handleSketch = useCallback((imageDataUrl: string, width?: number, height?: number, viewportWidth?: number, viewportHeight?: number, strokes?: any[]) => {
-    if (!connected || !promptLib) return;
-    const manifest = storeRef.current?.getManifest() || { components: [], order: [] };
     const dimensions = (viewportWidth && viewportHeight && width && height)
       ? { width, height, viewportWidth, viewportHeight }
       : undefined;
-    rawSendMessage(promptLib.wrapUserMessage(promptLib.buildSketchMessage(imageDataUrl, dimensions, strokes), manifest, activeTab));
-  }, [connected, rawSendMessage, activeTab]);
+    setPendingSketch({ imageDataUrl, dimensions, strokes });
+  }, []);
 
   const handleImage = useCallback((imageDataUrl: string) => {
     if (!connected || !promptLib) return;
@@ -325,6 +340,8 @@ export default function CanvasScreen() {
           connected={connected}
           connectionState={connectionState}
           isProcessing={isProcessing}
+          pendingSketch={pendingSketch ? { strokeCount: pendingSketch.strokes?.length || 0 } : null}
+          onClearSketch={() => setPendingSketch(null)}
         />
       )}
     </View>

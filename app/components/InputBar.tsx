@@ -22,13 +22,15 @@ interface InputBarProps {
   onToggleTerminal?: () => void;
   terminalVisible?: boolean;
   hasNewTerminal?: boolean;
+  pendingSketch?: { strokeCount: number } | null;
+  onClearSketch?: () => void;
 }
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB limit for happy-wire
 
 __DEV__ && console.log('[InputBar] module loaded');
 
-export default function InputBar({ onSend, onStop, onSketch, onImage, onFile, connected, connectionState, isProcessing, forceDark, onToggleTerminal, terminalVisible, hasNewTerminal }: InputBarProps) {
+export default function InputBar({ onSend, onStop, onSketch, onImage, onFile, connected, connectionState, isProcessing, forceDark, onToggleTerminal, terminalVisible, hasNewTerminal, pendingSketch, onClearSketch }: InputBarProps) {
   __DEV__ && console.log('[InputBar] render: connected=', connected, 'connectionState=', connectionState, 'isProcessing=', isProcessing);
   const [text, setText] = useState('');
   const inputRef = useRef<TextInput>(null);
@@ -76,10 +78,12 @@ export default function InputBar({ onSend, onStop, onSketch, onImage, onFile, co
     }
   }, [isProcessing]);
 
+  const canSend = text.trim().length > 0 || !!pendingSketch;
+
   const handleSend = () => {
+    if (!canSend) return;
     const trimmed = text.trim();
-    if (!trimmed) return;
-    __DEV__ && console.log('[InputBar] handleSend: text=', JSON.stringify(trimmed).slice(0, 100), 'connected=', connected);
+    __DEV__ && console.log('[InputBar] handleSend: text=', JSON.stringify(trimmed).slice(0, 100), 'hasSketch=', !!pendingSketch);
     try {
       onSend(trimmed);
       __DEV__ && console.log('[InputBar] onSend callback returned OK');
@@ -164,7 +168,21 @@ export default function InputBar({ onSend, onStop, onSketch, onImage, onFile, co
   };
 
   return (
-    <View style={[styles.container, isDark ? styles.containerDark : styles.containerLight]}>
+    <View style={isDark ? styles.containerDark : styles.containerLight}>
+      {/* Pending sketch chip */}
+      {pendingSketch && (
+        <View style={styles.chipRow}>
+          <View style={styles.chip}>
+            <Text style={styles.chipText}>
+              Sketch{pendingSketch.strokeCount > 0 ? ` · ${pendingSketch.strokeCount} stroke${pendingSketch.strokeCount !== 1 ? 's' : ''}` : ''}
+            </Text>
+            <TouchableOpacity onPress={onClearSketch} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Text style={styles.chipClose}>✕</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+      <View style={styles.inputRow}>
       <Animated.View style={[styles.dotWrap, { opacity: pulseAnim }]}>
         <View style={[styles.dot, { backgroundColor: dotColor }]} />
       </Animated.View>
@@ -215,33 +233,59 @@ export default function InputBar({ onSend, onStop, onSketch, onImage, onFile, co
           </TouchableOpacity>
         ) : (
           <TouchableOpacity
-            style={[styles.sendBtn, !text.trim() && styles.sendBtnDisabled]}
+            style={[styles.sendBtn, !canSend && styles.sendBtnDisabled]}
             onPress={handleSend}
-            disabled={!text.trim()}
+            disabled={!canSend}
             activeOpacity={0.7}
           >
-            <Text style={[styles.sendText, !text.trim() && styles.sendTextDisabled]}>{'↑'}</Text>
+            <Text style={[styles.sendText, !canSend && styles.sendTextDisabled]}>{'↑'}</Text>
           </TouchableOpacity>
         )}
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
   containerDark: {
     backgroundColor: '#0a0a0a',
+    borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: 'rgba(255,255,255,0.06)',
   },
   containerLight: {
     backgroundColor: '#f8f8f8',
+    borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: 'rgba(0,0,0,0.08)',
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  chipRow: {
+    paddingHorizontal: 14,
+    paddingTop: 8,
+    paddingBottom: 2,
+  },
+  chip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    gap: 8,
+  },
+  chipText: {
+    color: '#aaa',
+    fontSize: 13,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  chipClose: {
+    color: '#666',
+    fontSize: 12,
   },
   dotWrap: {
     width: 20,
