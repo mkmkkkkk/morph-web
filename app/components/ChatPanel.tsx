@@ -49,7 +49,7 @@ function CollapsibleBlock({ label, preview, headerStyle, content, contentStyle, 
   return (
     <View style={styles.termLine}>
       <TouchableOpacity onPress={() => setOpen(prev => !prev)} activeOpacity={0.5}>
-        <Text selectable style={headerStyle}>
+        <Text selectable style={headerStyle} numberOfLines={open ? undefined : 1}>
           {open ? '▾ ' : '▸ '}{label}{!open && preview ? `: ${preview}` : ''}
         </Text>
       </TouchableOpacity>
@@ -148,37 +148,25 @@ export default function ChatPanel({
               ? params
               : JSON.stringify(params)
             : '';
-          if (paramStr && paramStr.length > 80) {
-            const prev = paramStr.length > 60 ? paramStr.slice(0, 60).replace(/\n/g, ' ') + '...' : paramStr.replace(/\n/g, ' ');
-            return (
-              <CollapsibleBlock
-                key={msg.id}
-                label={msg.content.name}
-                preview={prev}
-                headerStyle={[mono, styles.termToolName]}
-                content={paramStr}
-                contentStyle={[mono, styles.termToolParam]}
-              />
-            );
-          }
+          const prev = paramStr
+            ? paramStr.slice(0, 80).replace(/\n/g, ' ')
+            : '';
           return (
-            <View key={msg.id} style={styles.termLine}>
-              <Text selectable style={[mono, styles.termToolName]}>
-                {'> '}{msg.content.name}
-              </Text>
-              {paramStr ? (
-                <Text selectable style={[mono, styles.termToolParam]} numberOfLines={2}>
-                  {paramStr}
-                </Text>
-              ) : null}
-            </View>
+            <CollapsibleBlock
+              key={msg.id}
+              label={msg.content.name}
+              preview={prev}
+              headerStyle={[mono, styles.termToolName]}
+              content={paramStr}
+              contentStyle={[mono, styles.termToolParam]}
+            />
           );
         }
 
         case 'tool_call_end': {
           const result = msg.content.result;
           const resultStr = typeof result === 'string' ? result : JSON.stringify(result);
-          const prev = resultStr.length > 60 ? resultStr.slice(0, 60).replace(/\n/g, ' ') + '...' : resultStr.replace(/\n/g, ' ');
+          const prev = resultStr.slice(0, 80).replace(/\n/g, ' ');
           return (
             <CollapsibleBlock
               key={msg.id}
