@@ -65,6 +65,7 @@ export default function CanvasScreen() {
   // ALL hooks must be called unconditionally (Rules of Hooks)
   const bridgeRef = useRef(null);
   const storeRef = useRef(ComponentStore ? new ComponentStore() : null);
+  const componentHtmlCache = useRef(new Map<string, string>());
 
   const {
     connected,
@@ -128,8 +129,11 @@ export default function CanvasScreen() {
             let match;
 
             while ((match = componentRegex.exec(text)) !== null) {
-              console.log('[CanvasScreen] found morph-component:', match[1]);
-              bridge.addComponent(match[1], match[2].trim(), 'draft');
+              const compId = match[1];
+              const compHtml = match[2].trim();
+              console.log('[CanvasScreen] found morph-component:', compId);
+              componentHtmlCache.current.set(compId, compHtml);
+              bridge.addComponent(compId, compHtml, 'draft');
             }
 
             const cleanText = text.replace(componentRegex, '').trim();
@@ -195,7 +199,16 @@ export default function CanvasScreen() {
     setIsProcessing(false);
   }, [connected, sendInterrupt]);
 
-  const handleAdopt = useCallback(async (_componentId: string) => {}, []);
+  const handleAdopt = useCallback(async (componentId: string) => {
+    if (!storeRef.current) return;
+    const html = componentHtmlCache.current.get(componentId);
+    if (!html) {
+      console.warn('[CanvasScreen] handleAdopt: no cached HTML for', componentId);
+      return;
+    }
+    await storeRef.current.saveComponent(componentId, html);
+    console.log('[CanvasScreen] adopted component:', componentId);
+  }, []);
 
   const handleDismiss = useCallback(async (componentId: string) => {
     await storeRef.current?.removeComponent(componentId);
