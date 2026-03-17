@@ -230,7 +230,7 @@ export default function InputBar({ onSend, onStop, onSketch, onImage, onFile, co
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'center',
     paddingHorizontal: 10,
     paddingVertical: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
@@ -245,7 +245,6 @@ const styles = StyleSheet.create({
   },
   dotWrap: {
     width: 20,
-    height: 34,
     justifyContent: 'center',
     alignItems: 'center',
   },
