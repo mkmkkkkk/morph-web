@@ -4,8 +4,7 @@
  * Collapsed: handle bar + InputBar
  * Expanded: 100% terminal view — every CC event rendered
  *
- * Auto-expands when messages arrive.
- * Collapses only when user taps the handle bar.
+ * Thinking & tool results are collapsed by default (tap to expand).
  */
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
@@ -33,6 +32,33 @@ interface ChatPanelProps {
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 const EXPANDED_HEIGHT = SCREEN_HEIGHT * 0.55;
+
+// ---------------------------------------------------------------
+// CollapsibleBlock — tap header to expand/collapse content
+// ---------------------------------------------------------------
+function CollapsibleBlock({ header, headerStyle, content, contentStyle, defaultOpen = false }: {
+  header: string;
+  headerStyle: any;
+  content: string;
+  contentStyle: any;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <View style={styles.termLine}>
+      <TouchableOpacity onPress={() => setOpen(prev => !prev)} activeOpacity={0.5}>
+        <Text selectable style={headerStyle}>
+          {open ? '▾ ' : '▸ '}{header}
+        </Text>
+      </TouchableOpacity>
+      {open && content ? (
+        <Text selectable style={contentStyle}>
+          {content}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
 
 console.log('[ChatPanel] module loaded');
 
@@ -79,9 +105,23 @@ export default function ChatPanel({
 
           const isThinking = (msg.content as any).thinking;
 
+          // Thinking: collapsed by default, tap to expand
+          if (isThinking) {
+            const preview = text.length > 60 ? text.slice(0, 60) + '...' : text;
+            return (
+              <CollapsibleBlock
+                key={msg.id}
+                header={`thinking: ${preview}`}
+                headerStyle={[mono, styles.termThinking]}
+                content={text}
+                contentStyle={[mono, styles.termThinkingBody]}
+              />
+            );
+          }
+
           return (
             <View key={msg.id} style={styles.termLine}>
-              <Text selectable style={[mono, isUser ? styles.termUser : isThinking ? styles.termThinking : styles.termAgent]}>
+              <Text selectable style={[mono, isUser ? styles.termUser : styles.termAgent]}>
                 {isUser ? `> ${text}` : text}
               </Text>
             </View>
@@ -92,16 +132,28 @@ export default function ChatPanel({
           const params = msg.content.params;
           const paramStr = params
             ? typeof params === 'string'
-              ? params.slice(0, 150)
-              : JSON.stringify(params).slice(0, 150)
+              ? params
+              : JSON.stringify(params)
             : '';
+          // Tool call: header always visible, params collapsed
+          if (paramStr && paramStr.length > 80) {
+            return (
+              <CollapsibleBlock
+                key={msg.id}
+                header={msg.content.name}
+                headerStyle={[mono, styles.termToolName]}
+                content={paramStr}
+                contentStyle={[mono, styles.termToolParam]}
+              />
+            );
+          }
           return (
             <View key={msg.id} style={styles.termLine}>
               <Text selectable style={[mono, styles.termToolName]}>
                 {'> '}{msg.content.name}
               </Text>
               {paramStr ? (
-                <Text selectable style={[mono, styles.termToolParam]}>
+                <Text selectable style={[mono, styles.termToolParam]} numberOfLines={2}>
                   {paramStr}
                 </Text>
               ) : null}
@@ -112,13 +164,16 @@ export default function ChatPanel({
         case 'tool_call_end': {
           const result = msg.content.result;
           const resultStr = typeof result === 'string' ? result : JSON.stringify(result);
-          const display = resultStr.length > 500 ? resultStr.slice(0, 500) + '...' : resultStr;
+          // Tool result: collapsed by default
+          const preview = resultStr.length > 60 ? resultStr.slice(0, 60).replace(/\n/g, ' ') + '...' : resultStr.replace(/\n/g, ' ');
           return (
-            <View key={msg.id} style={styles.termLine}>
-              <Text selectable style={[mono, styles.termToolResult]}>
-                {display}
-              </Text>
-            </View>
+            <CollapsibleBlock
+              key={msg.id}
+              header={`result: ${preview}`}
+              headerStyle={[mono, styles.termToolResultHeader]}
+              content={resultStr.length > 2000 ? resultStr.slice(0, 2000) + '\n...' : resultStr}
+              contentStyle={[mono, styles.termToolResult]}
+            />
           );
         }
 
@@ -171,7 +226,6 @@ export default function ChatPanel({
           );
 
         default:
-          // Catch-all: render raw JSON so nothing is hidden
           return (
             <View key={msg.id} style={styles.termLine}>
               <Text selectable style={[mono, styles.termSystem]}>
@@ -304,10 +358,19 @@ const styles = StyleSheet.create({
   termAgent: {
     color: '#ccc',
   },
-  // Thinking — dim purple
+  // Thinking header — dim purple, tap to expand
   termThinking: {
     color: '#8e8ea0',
     fontStyle: 'italic',
+  },
+  // Thinking body — when expanded
+  termThinkingBody: {
+    color: '#6e6e80',
+    fontStyle: 'italic',
+    fontSize: 11,
+    lineHeight: 15,
+    marginTop: 2,
+    paddingLeft: 12,
   },
   // Tool name — yellow
   termToolName: {
@@ -317,12 +380,22 @@ const styles = StyleSheet.create({
   termToolParam: {
     color: '#555',
     fontSize: 11,
+    lineHeight: 15,
+    marginTop: 2,
+    paddingLeft: 12,
   },
-  // Tool result — dim grey
+  // Tool result header — dim, tappable
+  termToolResultHeader: {
+    color: '#555',
+    fontSize: 11,
+  },
+  // Tool result body — when expanded
   termToolResult: {
     color: '#666',
     fontSize: 11,
     lineHeight: 15,
+    marginTop: 2,
+    paddingLeft: 12,
   },
   // System/service — very dim
   termSystem: {
