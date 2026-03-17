@@ -11,7 +11,7 @@ import { HappyConnection, type ConnectionState } from './connection';
 import { HappyApi } from './api';
 import { loadCredentials, type HappyCredentials } from './credentials';
 import { getSetting, setSetting } from './settings';
-import { parseUpdate, encryptUserMessage, type SessionMessage } from './protocol';
+import { parseUpdate, parseSessionUpdate, encryptUserMessage, type SessionMessage } from './protocol';
 import { fromBase64, boxDecrypt } from './crypto';
 
 export interface ConnectionContextValue {
@@ -218,11 +218,27 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
             console.warn('[Morph] onUpdate: encKey is null, cannot decrypt');
             return;
           }
+
+          // Handle new-message events
           const msgs = parseUpdate(data, encKey, variant);
-          console.log('[Morph] parsed', msgs.length, 'messages');
           for (const msg of msgs) {
-            console.log('[Morph] dispatching:', msg.content.type, msg.role, msg.id);
             dispatchMessage(msg);
+          }
+
+          // Handle update-session events (agentState → turn_end)
+          const sessionUpdate = parseSessionUpdate(data, encKey, variant);
+          if (sessionUpdate?.agentState) {
+            console.log('[Morph] agentState update:', JSON.stringify(sessionUpdate.agentState).slice(0, 200));
+            // When agentState goes to null/idle, emit turn_end
+            const state = sessionUpdate.agentState;
+            if (!state || state.processing === false || state.status === 'idle') {
+              dispatchMessage({
+                id: `turn_end_${Date.now()}`,
+                timestamp: Date.now(),
+                role: 'system',
+                content: { type: 'turn_end', status: 'completed' },
+              });
+            }
           }
         } catch (err: any) {
           console.error('[Morph] onUpdate THREW:', err?.message, err?.stack);

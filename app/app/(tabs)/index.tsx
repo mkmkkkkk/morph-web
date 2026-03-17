@@ -79,6 +79,7 @@ export default function CanvasScreen() {
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [messages, setMessages] = useState<any[]>([]);
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Initialize component store
   useEffect(() => {
@@ -106,6 +107,12 @@ export default function CanvasScreen() {
       try {
         console.log('[CanvasScreen] onSessionMessage: type=', msg?.content?.type, 'role=', msg?.role, 'id=', msg?.id);
         setMessages(prev => [...prev, msg]);
+
+        // Reset idle timer — after 3s of no messages, assume turn ended
+        if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+        idleTimerRef.current = setTimeout(() => {
+          setIsProcessing(false);
+        }, 3000);
 
         if (!bridgeRef.current) {
           console.log('[CanvasScreen] no bridgeRef, skipping bridge dispatch');
@@ -140,16 +147,15 @@ export default function CanvasScreen() {
 
           case 'turn_end':
             console.log('[CanvasScreen] turn_end, status=', msg.content.status);
+            if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
             setIsProcessing(false);
             bridge.sendEvent('turn_end', msg.content);
             break;
 
           case 'service_message':
-            console.log('[CanvasScreen] service_message:', msg.content.text?.slice(0, 100));
             break;
 
           default:
-            console.log('[CanvasScreen] unhandled message type:', msg.content.type);
             break;
         }
       } catch (err: any) {
