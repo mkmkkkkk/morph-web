@@ -137,36 +137,36 @@ export function parseUpdate(
   variant: 'legacy' | 'dataKey',
 ): SessionMessage[] {
   if (!data?.body) {
-    console.log('[Protocol] parseUpdate: no body');
+    __DEV__ && console.log('[Protocol] parseUpdate: no body');
     return [];
   }
   const body = data.body;
 
   // Only handle new-message updates for now
   if (body.t !== 'new-message') {
-    console.log('[Protocol] parseUpdate: skipping t=', body.t);
+    __DEV__ && console.log('[Protocol] parseUpdate: skipping t=', body.t);
     return [];
   }
   if (!body.message?.content || body.message.content.t !== 'encrypted') {
-    console.log('[Protocol] parseUpdate: not encrypted, content.t=', body.message?.content?.t);
+    __DEV__ && console.log('[Protocol] parseUpdate: not encrypted, content.t=', body.message?.content?.t);
     return [];
   }
 
   try {
     const cipherB64 = body.message.content.c;
-    console.log('[Protocol] parseUpdate: decrypting, ciphertext b64 length=', cipherB64?.length);
+    __DEV__ && console.log('[Protocol] parseUpdate: decrypting, ciphertext b64 length=', cipherB64?.length);
     const ciphertext = fromBase64(cipherB64);
     const envelope = decryptJson<MessageEnvelope>(encKey, variant, ciphertext);
     if (!envelope) {
-      console.warn('[Protocol] parseUpdate: decryptJson returned null');
+      __DEV__ && console.warn('[Protocol] parseUpdate: decryptJson returned null');
       return [];
     }
-    console.log('[Protocol] parseUpdate: decrypted envelope role=', envelope.role, 'content.type=', envelope.content?.type);
+    __DEV__ && console.log('[Protocol] parseUpdate: decrypted envelope role=', envelope.role, 'content.type=', envelope.content?.type);
     const results = envelopeToSessionMessages(envelope);
-    console.log('[Protocol] parseUpdate: produced', results.length, 'messages');
+    __DEV__ && console.log('[Protocol] parseUpdate: produced', results.length, 'messages');
     return results;
   } catch (err: any) {
-    console.error('[Protocol] parseUpdate THREW:', err?.message, err?.stack);
+    __DEV__ && console.error('[Protocol] parseUpdate THREW:', err?.message, err?.stack);
     return [];
   }
 }
@@ -205,7 +205,7 @@ function envelopeToSessionMessages(env: MessageEnvelope): SessionMessage[] {
   const timestamp = Date.now();
   const role = env.role === 'user' ? 'user' : 'agent';
 
-  console.log('[Protocol] envelopeToSessionMessages: role=', env.role, 'content.type=', env.content.type, 'hasData=', !!env.content.data);
+  __DEV__ && console.log('[Protocol] envelopeToSessionMessages: role=', env.role, 'content.type=', env.content.type, 'hasData=', !!env.content.data);
 
   // User text message
   if (env.role === 'user' && env.content.type === 'text') {
@@ -219,7 +219,7 @@ function envelopeToSessionMessages(env: MessageEnvelope): SessionMessage[] {
 
   // Agent output — wraps Claude JSONL
   if (env.role === 'agent' && (env.content.type === 'output' || env.content.type === 'codex' || env.content.data)) {
-    console.log('[Protocol] → agent output, data.type=', env.content.data?.type);
+    __DEV__ && console.log('[Protocol] → agent output, data.type=', env.content.data?.type);
     return parseAgentOutput(env.content.data, id, timestamp);
   }
 
@@ -234,7 +234,7 @@ function envelopeToSessionMessages(env: MessageEnvelope): SessionMessage[] {
   }
 
   // Fallback
-  console.log('[Protocol] → FALLBACK, content keys=', Object.keys(env.content));
+  __DEV__ && console.log('[Protocol] → FALLBACK, content keys=', Object.keys(env.content));
   return [{
     id,
     timestamp,
@@ -249,11 +249,11 @@ function envelopeToSessionMessages(env: MessageEnvelope): SessionMessage[] {
 
 function parseAgentOutput(data: any, id: string, timestamp: number): SessionMessage[] {
   if (!data) {
-    console.log('[Protocol] parseAgentOutput: data is null');
+    __DEV__ && console.log('[Protocol] parseAgentOutput: data is null');
     return [];
   }
 
-  console.log('[Protocol] parseAgentOutput: data.type=', data.type, 'keys=', Object.keys(data).join(','));
+  __DEV__ && console.log('[Protocol] parseAgentOutput: data.type=', data.type, 'keys=', Object.keys(data).join(','));
 
   switch (data.type) {
     case 'user':
@@ -369,17 +369,17 @@ export function encryptUserMessage(
   encKey: Uint8Array,
   variant: 'legacy' | 'dataKey',
 ): string {
-  console.log('[Protocol] encryptUserMessage: textLen=', text.length, 'keyLen=', encKey.length, 'variant=', variant);
+  __DEV__ && console.log('[Protocol] encryptUserMessage: textLen=', text.length, 'keyLen=', encKey.length, 'variant=', variant);
   try {
     const msg = buildUserMessage(text);
-    console.log('[Protocol] buildUserMessage OK, role=', msg.role, 'content.type=', msg.content.type);
+    __DEV__ && console.log('[Protocol] buildUserMessage OK, role=', msg.role, 'content.type=', msg.content.type);
     const encrypted = encryptJson(encKey, variant, msg);
-    console.log('[Protocol] encryptJson OK, encrypted bytes=', encrypted.length);
+    __DEV__ && console.log('[Protocol] encryptJson OK, encrypted bytes=', encrypted.length);
     const b64 = toBase64(encrypted);
-    console.log('[Protocol] toBase64 OK, b64 length=', b64.length);
+    __DEV__ && console.log('[Protocol] toBase64 OK, b64 length=', b64.length);
     return b64;
   } catch (err: any) {
-    console.error('[Protocol] encryptUserMessage THREW:', err?.message, err?.stack);
+    __DEV__ && console.error('[Protocol] encryptUserMessage THREW:', err?.message, err?.stack);
     throw err;
   }
 }

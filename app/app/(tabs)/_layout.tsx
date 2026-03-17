@@ -2,7 +2,7 @@ import { Tabs } from 'expo-router';
 import { Text } from 'react-native';
 import { TabProvider, useActiveTab, type TabName } from '../../lib/TabContext';
 
-console.log('[TabLayout] module loaded');
+__DEV__ && console.log('[TabLayout] module loaded');
 
 // Map expo-router screen names to user-facing tab names
 const SCREEN_TO_TAB: Record<string, TabName> = {
@@ -19,17 +19,17 @@ function TabIcon({ label, focused }: { label: string; focused: boolean }) {
 }
 
 function TabLayoutInner() {
-  console.log('[TabLayout] render');
+  __DEV__ && console.log('[TabLayout] render');
   const { setActiveTab } = useActiveTab();
 
   return (
     <Tabs
       screenListeners={{
         tabPress: (e) => {
-          console.log('[TabLayout] TAB PRESSED:', e.target);
+          __DEV__ && console.log('[TabLayout] TAB PRESSED:', e.target);
         },
         focus: (e) => {
-          console.log('[TabLayout] TAB FOCUSED:', e.target);
+          __DEV__ && console.log('[TabLayout] TAB FOCUSED:', e.target);
           // e.target looks like "index-XXXX" or "config-XXXX"
           const screenName = (e.target || '').split('-')[0];
           const tabName = SCREEN_TO_TAB[screenName];

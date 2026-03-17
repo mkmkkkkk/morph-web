@@ -59,10 +59,10 @@ function useNoopConnection() {
 // Choose connection hook at module level (must be stable for Rules of Hooks)
 const useConnection = _useConnection || useNoopConnection;
 
-console.log('[CanvasScreen] module loaded, Canvas=', !!Canvas, 'ChatPanel=', !!ChatPanel, 'errors=', _tabLoadError);
+__DEV__ && console.log('[CanvasScreen] module loaded, Canvas=', !!Canvas, 'ChatPanel=', !!ChatPanel, 'errors=', _tabLoadError);
 
 export default function CanvasScreen() {
-  console.log('[CanvasScreen] render START');
+  __DEV__ && console.log('[CanvasScreen] render START');
   // ALL hooks must be called unconditionally (Rules of Hooks)
   const bridgeRef = useRef(null);
   const storeRef = useRef(ComponentStore ? new ComponentStore() : null);
@@ -79,7 +79,7 @@ export default function CanvasScreen() {
     onSessionMessage,
   } = useConnection();
 
-  console.log('[CanvasScreen] connection state:', connectionState, 'connected:', connected, 'lastError:', lastError);
+  __DEV__ && console.log('[CanvasScreen] connection state:', connectionState, 'connected:', connected, 'lastError:', lastError);
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [messages, setMessages] = useState<any[]>([]);
@@ -88,13 +88,13 @@ export default function CanvasScreen() {
 
   // Initialize component store
   useEffect(() => {
-    console.log('[CanvasScreen] mount: storeRef=', !!storeRef.current, 'Canvas=', !!Canvas, 'ChatPanel=', !!ChatPanel);
+    __DEV__ && console.log('[CanvasScreen] mount: storeRef=', !!storeRef.current, 'Canvas=', !!Canvas, 'ChatPanel=', !!ChatPanel);
     if (!storeRef.current) return;
     const init = async () => {
       try {
         await storeRef.current.init();
         const components = await storeRef.current.loadAllComponents();
-        console.log('[CanvasScreen] store init OK, components=', components.length);
+        __DEV__ && console.log('[CanvasScreen] store init OK, components=', components.length);
         // Populate HTML cache so draft-persist dedup works after refresh
         for (const comp of components) {
           componentHtmlCache.current.set(comp.id, comp.html);
@@ -103,7 +103,7 @@ export default function CanvasScreen() {
           (bridgeRef.current as any).loadComponents(components);
         }
       } catch (err: any) {
-        console.error('[CanvasScreen] store init FAILED:', err?.message);
+        __DEV__ && console.error('[CanvasScreen] store init FAILED:', err?.message);
       }
     };
     init().catch(() => {});
@@ -111,10 +111,10 @@ export default function CanvasScreen() {
 
   // Listen to session messages
   useEffect(() => {
-    console.log('[CanvasScreen] subscribing to onSessionMessage');
+    __DEV__ && console.log('[CanvasScreen] subscribing to onSessionMessage');
     return onSessionMessage((msg: any) => {
       try {
-        console.log('[CanvasScreen] onSessionMessage: type=', msg?.content?.type, 'role=', msg?.role, 'id=', msg?.id);
+        __DEV__ && console.log('[CanvasScreen] onSessionMessage: type=', msg?.content?.type, 'role=', msg?.role, 'id=', msg?.id);
         setMessages(prev => [...prev, msg]);
 
         // Reset idle timer — after 3s of no messages, assume turn ended
@@ -124,7 +124,7 @@ export default function CanvasScreen() {
         }, 3000);
 
         if (!bridgeRef.current) {
-          console.log('[CanvasScreen] no bridgeRef, skipping bridge dispatch');
+          __DEV__ && console.log('[CanvasScreen] no bridgeRef, skipping bridge dispatch');
           return;
         }
         const bridge = bridgeRef.current as any;
@@ -132,21 +132,21 @@ export default function CanvasScreen() {
         switch (msg.content.type) {
           case 'text': {
             const text = msg.content.text;
-            console.log('[CanvasScreen] text message, length=', text?.length, 'preview=', text?.slice(0, 80));
+            __DEV__ && console.log('[CanvasScreen] text message, length=', text?.length, 'preview=', text?.slice(0, 80));
             const componentRegex = /```morph-component:(\S+)\n([\s\S]*?)```/g;
             let match;
 
             while ((match = componentRegex.exec(text)) !== null) {
               const compId = match[1];
               const compHtml = match[2].trim();
-              console.log('[CanvasScreen] found morph-component:', compId);
+              __DEV__ && console.log('[CanvasScreen] found morph-component:', compId);
               const prevHtml = componentHtmlCache.current.get(compId);
               componentHtmlCache.current.set(compId, compHtml);
               bridge.addComponent(compId, compHtml, 'draft');
               // Auto-persist draft so it survives app refresh
               if (storeRef.current && compHtml !== prevHtml) {
                 storeRef.current.saveComponent(compId, compHtml).catch((e: any) =>
-                  console.warn('[CanvasScreen] draft persist failed:', compId, e?.message)
+                  __DEV__ && console.warn('[CanvasScreen] draft persist failed:', compId, e?.message)
                 );
               }
             }
@@ -160,12 +160,12 @@ export default function CanvasScreen() {
 
           case 'tool_call_start':
           case 'tool_call_end':
-            console.log('[CanvasScreen] tool_call:', msg.content.type, msg.content.name);
+            __DEV__ && console.log('[CanvasScreen] tool_call:', msg.content.type, msg.content.name);
             bridge.sendEvent('tool_call', msg.content);
             break;
 
           case 'turn_end':
-            console.log('[CanvasScreen] turn_end, status=', msg.content.status);
+            __DEV__ && console.log('[CanvasScreen] turn_end, status=', msg.content.status);
             if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
             setIsProcessing(false);
             bridge.sendEvent('turn_end', msg.content);
@@ -178,7 +178,7 @@ export default function CanvasScreen() {
             break;
         }
       } catch (err: any) {
-        console.error('[CanvasScreen] onSessionMessage THREW:', err?.message, err?.stack);
+        __DEV__ && console.error('[CanvasScreen] onSessionMessage THREW:', err?.message, err?.stack);
       }
     });
   }, [onSessionMessage]);
@@ -186,7 +186,7 @@ export default function CanvasScreen() {
   // Flush pending message queue when connection is established
   useEffect(() => {
     if (connected && pendingMessagesRef.current.length > 0) {
-      console.log('[CanvasScreen] connected — flushing', pendingMessagesRef.current.length, 'pending messages');
+      __DEV__ && console.log('[CanvasScreen] connected — flushing', pendingMessagesRef.current.length, 'pending messages');
       const queue = [...pendingMessagesRef.current];
       const sentIds = new Set(queue.map(q => q.localId));
       pendingMessagesRef.current = [];
@@ -199,14 +199,14 @@ export default function CanvasScreen() {
       // Send each queued message in order
       for (const item of queue) {
         rawSendMessage(item.wrappedText);
-        console.log('[CanvasScreen] sent queued message:', item.localId);
+        __DEV__ && console.log('[CanvasScreen] sent queued message:', item.localId);
       }
       setIsProcessing(true);
     }
   }, [connected, rawSendMessage]);
 
   const handleSend = useCallback((text: string) => {
-    console.log('[CanvasScreen] handleSend: connected=', connected, 'text=', JSON.stringify(text).slice(0, 100));
+    __DEV__ && console.log('[CanvasScreen] handleSend: connected=', connected, 'text=', JSON.stringify(text).slice(0, 100));
     try {
       const localId = `local_${Date.now()}`;
       const manifest = storeRef.current?.getManifest() || { components: [], order: [] };
@@ -219,11 +219,11 @@ export default function CanvasScreen() {
           role: 'user',
           content: { type: 'text', text },
         }]);
-        console.log('[CanvasScreen] local message added');
-        console.log('[CanvasScreen] wrappedText length=', wrappedText.length);
+        __DEV__ && console.log('[CanvasScreen] local message added');
+        __DEV__ && console.log('[CanvasScreen] wrappedText length=', wrappedText.length);
         setIsProcessing(true);
         rawSendMessage(wrappedText);
-        console.log('[CanvasScreen] rawSendMessage called OK');
+        __DEV__ && console.log('[CanvasScreen] rawSendMessage called OK');
       } else {
         // Queue message for sending when connected
         setMessages(prev => [...prev, {
@@ -234,10 +234,10 @@ export default function CanvasScreen() {
           pending: true,
         }]);
         pendingMessagesRef.current.push({ localId, wrappedText });
-        console.log('[CanvasScreen] message queued (disconnected), queue size=', pendingMessagesRef.current.length);
+        __DEV__ && console.log('[CanvasScreen] message queued (disconnected), queue size=', pendingMessagesRef.current.length);
       }
     } catch (err: any) {
-      console.error('[CanvasScreen] handleSend THREW:', err?.message, err?.stack);
+      __DEV__ && console.error('[CanvasScreen] handleSend THREW:', err?.message, err?.stack);
     }
   }, [connected, rawSendMessage, activeTab]);
 
@@ -251,11 +251,11 @@ export default function CanvasScreen() {
     if (!storeRef.current) return;
     const html = componentHtmlCache.current.get(componentId);
     if (!html) {
-      console.warn('[CanvasScreen] handleAdopt: no cached HTML for', componentId);
+      __DEV__ && console.warn('[CanvasScreen] handleAdopt: no cached HTML for', componentId);
       return;
     }
     await storeRef.current.saveComponent(componentId, html);
-    console.log('[CanvasScreen] adopted component:', componentId);
+    __DEV__ && console.log('[CanvasScreen] adopted component:', componentId);
   }, []);
 
   const handleDismiss = useCallback(async (componentId: string) => {

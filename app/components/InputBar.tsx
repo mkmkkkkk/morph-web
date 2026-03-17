@@ -26,10 +26,10 @@ interface InputBarProps {
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB limit for happy-wire
 
-console.log('[InputBar] module loaded');
+__DEV__ && console.log('[InputBar] module loaded');
 
 export default function InputBar({ onSend, onStop, onSketch, onImage, onFile, connected, connectionState, isProcessing, forceDark, onToggleTerminal, terminalVisible, hasNewTerminal }: InputBarProps) {
-  console.log('[InputBar] render: connected=', connected, 'connectionState=', connectionState, 'isProcessing=', isProcessing);
+  __DEV__ && console.log('[InputBar] render: connected=', connected, 'connectionState=', connectionState, 'isProcessing=', isProcessing);
   const [text, setText] = useState('');
   const inputRef = useRef<TextInput>(null);
   const router = useRouter();
@@ -79,19 +79,19 @@ export default function InputBar({ onSend, onStop, onSketch, onImage, onFile, co
   const handleSend = () => {
     const trimmed = text.trim();
     if (!trimmed) return;
-    console.log('[InputBar] handleSend: text=', JSON.stringify(trimmed).slice(0, 100), 'connected=', connected);
+    __DEV__ && console.log('[InputBar] handleSend: text=', JSON.stringify(trimmed).slice(0, 100), 'connected=', connected);
     try {
       onSend(trimmed);
-      console.log('[InputBar] onSend callback returned OK');
+      __DEV__ && console.log('[InputBar] onSend callback returned OK');
     } catch (err: any) {
-      console.error('[InputBar] onSend THREW:', err?.message, err?.stack);
+      __DEV__ && console.error('[InputBar] onSend THREW:', err?.message, err?.stack);
       Alert.alert('InputBar Error', String(err?.message || err));
     }
     setText('');
   };
 
   const pickImage = async (useCamera: boolean) => {
-    console.log('[InputBar] pickImage: useCamera=', useCamera);
+    __DEV__ && console.log('[InputBar] pickImage: useCamera=', useCamera);
     const opts: ImagePicker.ImagePickerOptions = {
       mediaTypes: ['images'],
       base64: true,
@@ -112,7 +112,7 @@ export default function InputBar({ onSend, onStop, onSketch, onImage, onFile, co
   };
 
   const pickFile = async () => {
-    console.log('[InputBar] pickFile tapped');
+    __DEV__ && console.log('[InputBar] pickFile tapped');
     const result = await DocumentPicker.getDocumentAsync({
       copyToCacheDirectory: true,
     });
@@ -138,7 +138,7 @@ export default function InputBar({ onSend, onStop, onSketch, onImage, onFile, co
   };
 
   const handleAttach = () => {
-    console.log('[InputBar] handleAttach tapped');
+    __DEV__ && console.log('[InputBar] handleAttach tapped');
     if (Platform.OS === 'ios') {
       ActionSheetIOS.showActionSheetWithOptions(
         {

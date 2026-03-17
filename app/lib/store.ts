@@ -14,7 +14,7 @@ function initFS(): boolean {
     _DirectoryClass = fs.Directory;
     const Paths = fs.Paths;
     if (!_FileClass || !_DirectoryClass || !Paths) {
-      console.warn('[Store] expo-file-system missing File/Directory/Paths exports');
+      __DEV__ && console.warn('[Store] expo-file-system missing File/Directory/Paths exports');
       return false;
     }
     MORPH_DIR = new _DirectoryClass(Paths.document, 'morph-data');
@@ -26,7 +26,7 @@ function initFS(): boolean {
     _fsInitialized = true;
     return true;
   } catch (e: any) {
-    console.warn('[Store] expo-file-system init failed:', e?.message);
+    __DEV__ && console.warn('[Store] expo-file-system init failed:', e?.message);
     return false;
   }
 }
@@ -68,7 +68,7 @@ export class ComponentStore {
         }
       }
     } catch (e: any) {
-      console.warn('[Store] init error:', e?.message);
+      __DEV__ && console.warn('[Store] init error:', e?.message);
       this.fsAvailable = false;
     }
   }

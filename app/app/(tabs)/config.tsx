@@ -86,10 +86,10 @@ function ConfigErrorScreen() {
   );
 }
 
-console.log('[ConfigScreen] module loaded, errors=', _configLoadError);
+__DEV__ && console.log('[ConfigScreen] module loaded, errors=', _configLoadError);
 
 function ConfigScreenImpl() {
-  console.log('[ConfigScreen] render START');
+  __DEV__ && console.log('[ConfigScreen] render START');
   const router = useRouter();
   const isDark = true;
   const storeRef = useRef(ComponentStore ? new ComponentStore() : null);
@@ -152,7 +152,7 @@ function ConfigScreenImpl() {
         if (!task.enabled) continue;
         const lastRun = task.lastRun || 0;
         if (now - lastRun >= task.intervalMs) {
-          console.log(`[Scheduler] Firing task: ${task.name}`);
+          __DEV__ && console.log(`[Scheduler] Firing task: ${task.name}`);
           task.lastRun = now;
           updated = true;
         }
@@ -169,7 +169,7 @@ function ConfigScreenImpl() {
 
   // --- Handlers ---
   const handleUnpair = () => {
-    console.log('[ConfigScreen] handleUnpair tapped');
+    __DEV__ && console.log('[ConfigScreen] handleUnpair tapped');
     Alert.alert('Unpair Device', 'Remove all credentials? You\'ll need to scan a new QR code.', [
       { text: 'Cancel', style: 'cancel' },
       {
@@ -183,7 +183,7 @@ function ConfigScreenImpl() {
   };
 
   const handleSaveServer = () => {
-    console.log('[ConfigScreen] handleSaveServer tapped');
+    __DEV__ && console.log('[ConfigScreen] handleSaveServer tapped');
     const trimmed = serverUrl.trim();
     if (!trimmed.startsWith('http')) {
       Alert.alert('Invalid URL', 'Must start with http:// or https://');
@@ -194,8 +194,14 @@ function ConfigScreenImpl() {
   };
 
   const handleQuickAction = (action: QuickAction) => {
-    console.log('[ConfigScreen] handleQuickAction:', action.id, action.label);
-    Alert.alert(action.label, `Prompt: "${action.prompt}"`, [{ text: 'OK' }]);
+    __DEV__ && console.log('[ConfigScreen] handleQuickAction:', action.id, action.label);
+    if (!connected) {
+      Alert.alert('Not Connected', 'Connect to Claude Code first.');
+      return;
+    }
+    setIsProcessing(true);
+    sendMessage(action.prompt);
+    setTimeout(() => setIsProcessing(false), 30_000);
   };
 
   const handleRestoreSnapshot = (snap: any) => {
@@ -513,6 +519,7 @@ function ConfigScreenImpl() {
           onSend={handleChatSend}
           onStop={handleChatStop}
           connected={connected}
+          connectionState={connectionState}
           isProcessing={isProcessing}
           forceDark
         />

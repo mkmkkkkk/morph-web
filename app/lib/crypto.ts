@@ -224,13 +224,13 @@ export function encryptJson(
 ): Uint8Array {
   try {
     const json = JSON.stringify(obj);
-    console.log('[Crypto] encryptJson: variant=', variant, 'jsonLen=', json.length);
+    __DEV__ && console.log('[Crypto] encryptJson: variant=', variant, 'jsonLen=', json.length);
     const plaintext = utf8Encode(json);
     const result = encrypt(key, variant, plaintext);
-    console.log('[Crypto] encryptJson OK, outputLen=', result.length);
+    __DEV__ && console.log('[Crypto] encryptJson OK, outputLen=', result.length);
     return result;
   } catch (err: any) {
-    console.error('[Crypto] encryptJson THREW:', err?.message, err?.stack);
+    __DEV__ && console.error('[Crypto] encryptJson THREW:', err?.message, err?.stack);
     throw err;
   }
 }
@@ -241,19 +241,19 @@ export function decryptJson<T = unknown>(
   data: Uint8Array,
 ): T | null {
   try {
-    console.log('[Crypto] decryptJson: variant=', variant, 'dataLen=', data.length);
+    __DEV__ && console.log('[Crypto] decryptJson: variant=', variant, 'dataLen=', data.length);
     const decrypted = decrypt(key, variant, data);
     if (!decrypted) {
-      console.warn('[Crypto] decryptJson: decrypt returned null');
+      __DEV__ && console.warn('[Crypto] decryptJson: decrypt returned null');
       return null;
     }
-    console.log('[Crypto] decryptJson: decrypted OK, len=', decrypted.length);
+    __DEV__ && console.log('[Crypto] decryptJson: decrypted OK, len=', decrypted.length);
     const text = utf8Decode(decrypted);
     const parsed = JSON.parse(text) as T;
-    console.log('[Crypto] decryptJson: parsed OK');
+    __DEV__ && console.log('[Crypto] decryptJson: parsed OK');
     return parsed;
   } catch (err: any) {
-    console.error('[Crypto] decryptJson THREW:', err?.message);
+    __DEV__ && console.error('[Crypto] decryptJson THREW:', err?.message);
     return null;
   }
 }
