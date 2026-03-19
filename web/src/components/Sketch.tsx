@@ -157,9 +157,9 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
 
   const toolBtn = (id: Tool, label: string) => (
     <button key={id} tabIndex={-1} onClick={() => setTool(id)} style={{
-      padding: '8px 16px', borderRadius: 8, border: 'none', cursor: 'pointer',
-      backgroundColor: tool === id ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.06)',
-      color: '#fff', fontSize: 15, fontWeight: tool === id ? 600 : 400,
+      padding: '6px 10px', borderRadius: 8, border: 'none', cursor: 'pointer',
+      backgroundColor: tool === id ? 'rgba(255,255,255,0.2)' : 'transparent',
+      color: tool === id ? '#fff' : '#888', fontSize: 14, fontWeight: tool === id ? 600 : 400,
     }}>{label}</button>
   );
 
@@ -182,8 +182,8 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
       <div ref={toolbarRef} style={{
         position: 'fixed',
         ...(toolbarPos ? { left: toolbarPos.x, top: toolbarPos.y } : { bottom: 24, left: '50%', transform: 'translateX(-50%)' }),
-        display: 'flex', alignItems: 'center', gap: 4,
-        padding: '6px 10px', borderRadius: 20,
+        display: 'flex', alignItems: 'center', gap: 3, flexWrap: 'wrap', maxWidth: 'calc(100vw - 32px)',
+        padding: '6px 8px', borderRadius: 20,
         backgroundColor: 'rgba(17,17,17,0.95)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
         border: '1px solid rgba(255,255,255,0.08)',
         boxShadow: '0 12px 40px rgba(0,0,0,0.7)',
@@ -197,11 +197,11 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
           <div style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.25)' }} />
         </div>
 
-        <button tabIndex={-1} onClick={onClose} style={{ padding: '7px 10px', border: 'none', borderRadius: 12, background: 'transparent', color: '#555', fontSize: 16, cursor: 'pointer', fontWeight: 600 }}>&times;</button>
+        <button tabIndex={-1} onClick={onClose} style={{ padding: '5px 6px', border: 'none', borderRadius: 10, background: 'transparent', color: '#555', fontSize: 15, cursor: 'pointer', fontWeight: 600 }}>&times;</button>
         <span style={{ width: 1, height: 20, backgroundColor: 'rgba(255,255,255,0.06)' }} />
         {colors.map(c => (
           <div key={c} onClick={() => setColor(c)} style={{
-            width: 20, height: 20, borderRadius: 10, backgroundColor: c, cursor: 'pointer',
+            width: 16, height: 16, borderRadius: 8, backgroundColor: c, cursor: 'pointer',
             border: color === c ? '2px solid rgba(255,255,255,0.5)' : '2px solid rgba(255,255,255,0.06)',
             boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
           }} />
@@ -211,8 +211,8 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
         {toolBtn('rect', '▢')}
         {toolBtn('arrow', '→')}
         <span style={{ width: 1, height: 20, backgroundColor: 'rgba(255,255,255,0.06)' }} />
-        <button tabIndex={-1} onClick={handleClear} style={{ padding: '7px 10px', border: 'none', borderRadius: 12, background: 'transparent', color: '#b0903a', fontSize: 13, cursor: 'pointer', fontWeight: 600, fontFamily: 'Menlo, SF Mono, monospace' }}>clear</button>
-        <button tabIndex={-1} onClick={handleInsert} style={{ padding: '7px 14px', border: 'none', borderRadius: 14, background: '#30d158', color: '#0a0a0a', fontSize: 13, cursor: 'pointer', fontWeight: 700, fontFamily: 'Menlo, SF Mono, monospace' }}>send</button>
+        <button tabIndex={-1} onClick={handleClear} style={{ padding: '5px 8px', border: 'none', borderRadius: 10, background: 'transparent', color: '#b0903a', fontSize: 12, cursor: 'pointer', fontWeight: 600, fontFamily: 'Menlo, SF Mono, monospace' }}>clr</button>
+        <button tabIndex={-1} onClick={handleInsert} style={{ padding: '5px 12px', border: 'none', borderRadius: 12, background: '#30d158', color: '#0a0a0a', fontSize: 12, cursor: 'pointer', fontWeight: 700, fontFamily: 'Menlo, SF Mono, monospace' }}>send</button>
       </div>
     </div>
   );
