@@ -11,6 +11,7 @@ export interface Message {
   content: string;
   name?: string; // tool name
   collapsed?: boolean;
+  pending?: boolean; // true = not yet confirmed by server
   ts: number;
 }
 
@@ -175,23 +176,26 @@ export function setCurrentTab(tab: string) { _currentTab = tab; }
 
 export function send(text: string) {
   if (!sessionId) return;
-  // Show user message immediately (display without context prefix)
-  emit({ id: uid(), role: 'user', type: 'text', content: text, ts: Date.now() });
+  // Show user message immediately as pending
+  const msgId = uid();
+  emit({ id: msgId, role: 'user', type: 'text', content: text, ts: Date.now(), pending: true });
 
   // Inject page context so Claude knows where the user is
   const ctx = _currentTab === 'config'
     ? '[User is on the Config page (settings, sessions, quick actions). They may be asking about configuration or system management.]\n\n'
     : '';
-  text = ctx + text;
+  const fullText = ctx + text;
 
   fetch(`${RELAY_URL}/v2/claude/send`, {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message: text, sessionId }),
+    body: JSON.stringify({ message: fullText, sessionId }),
   }).then(res => {
+    // Confirm message delivery
+    emit({ id: msgId, role: 'user', type: 'text', content: text, ts: Date.now(), pending: false });
     if (!res.ok) emit({ id: uid(), role: 'system', type: 'error', content: `Send failed (${res.status})`, ts: Date.now() });
   }).catch(() => {
-    socket?.emit('direct-send', { sessionId, message: text });
+    socket?.emit('direct-send', { sessionId, message: fullText });
   });
 }
 
