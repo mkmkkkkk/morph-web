@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      background: #0a0a0a; color: #fff;
+      min-height: 100vh;
+      padding: 0;
+      padding-bottom: 80px;
+      -webkit-font-smoothing: antialiased;
+      /* Grid background */
+      background-image:
+        linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+      background-size: 24px 24px;
+    }
+    #morph-canvas {
+      display: flex; flex-direction: column; gap: 12px;
+      padding: 16px; position: relative; z-index: 1;
+    }
+    .morph-component {
+      background: rgba(28,28,30,0.95); border-radius: 14px; padding: 16px;
+      border: 1px solid rgba(255,255,255,0.06); position: relative;
+      animation: fadeIn 0.3s ease;
+      backdrop-filter: blur(8px);
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .morph-component.draft {
+      border: 1px dashed rgba(255,255,255,0.15);
+    }
+    .morph-component.draft::after {
+      content: 'DRAFT'; position: absolute; top: 10px; right: 10px;
+      font-size: 9px; color: #666; text-transform: uppercase; letter-spacing: 1px;
+      background: rgba(255,255,255,0.06); padding: 3px 8px; border-radius: 4px;
+      font-weight: 600;
+    }
+    .morph-action-menu {
+      display: none; position: fixed; background: #2c2c2e;
+      border-radius: 14px; padding: 6px; gap: 2px;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.6); z-index: 1000;
+      flex-direction: column; min-width: 160px;
+      border: 1px solid rgba(255,255,255,0.1);
+      animation: menuIn 0.15s ease;
+    }
+    @keyframes menuIn {
+      from { opacity: 0; transform: scale(0.95); }
+      to { opacity: 1; transform: scale(1); }
+    }
+    .morph-action-menu.visible { display: flex; }
+    .morph-action-btn {
+      padding: 11px 16px; border: none; border-radius: 10px;
+      font-size: 15px; cursor: pointer; text-align: left;
+      background: transparent; color: #fff;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .morph-action-btn:active { background: rgba(255,255,255,0.08); }
+    .morph-action-btn .icon { font-size: 16px; width: 20px; text-align: center; }
+    .morph-action-btn.adopt .icon { color: #30d158; }
+    .morph-action-btn.dismiss .icon { color: #ff453a; }
+    .morph-action-btn.edit .icon { color: #5e5ce6; }
+    .morph-menu-sep { height: 1px; background: rgba(255,255,255,0.08); margin: 2px 8px; }
+
+    /* Empty state */
+    #morph-empty {
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; min-height: 70vh; color: #555;
+      padding: 40px 20px; text-align: center;
+    }
+    #morph-empty .logo {
+      font-size: 48px; margin-bottom: 20px; opacity: 0.12;
+      font-weight: 200; letter-spacing: -2px;
+    }
+    #morph-empty h2 {
+      font-size: 22px; margin-bottom: 8px; color: #666;
+      font-weight: 500; letter-spacing: -0.5px;
+    }
+    #morph-empty p {
+      font-size: 14px; line-height: 1.5; max-width: 260px; color: #444;
+    }
+    #morph-empty .hint {
+      margin-top: 32px; font-size: 12px; color: #444;
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    #morph-empty .hint-item {
+      display: flex; align-items: center; gap: 8px;
+      background: rgba(255,255,255,0.02); padding: 8px 14px;
+      border-radius: 8px; font-size: 13px;
+    }
+    #morph-empty .hint-icon { color: #555; font-size: 14px; }
+
+    .morph-message { padding: 12px 16px; border-radius: 14px; margin: 4px 0; max-width: 85%; }
+    .morph-message.agent { background: #1c1c2e; align-self: flex-start; }
+    .morph-message.user { background: #1e3a2f; align-self: flex-end; margin-left: auto; }
+    .morph-message pre { white-space: pre-wrap; font-size: 13px; line-height: 1.5; }
+
+    /* === SKETCH MODE === */
+    #sketch-overlay {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      z-index: 500; display: none; opacity: 0;
+      background-color: rgba(0,0,0,0.3);
+      transition: opacity 0.25s ease;
+    }
+    /* display/opacity controlled by JS for smooth transitions */
+
+    /* Full-screen transparent drawing surface */
+    #sketch-canvas {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      width: 100%; height: 100%;
+      touch-action: none;
+      background: transparent;
+    }
+
+    /* Toolbar — floating pill at bottom */
+    #sketch-toolbar {
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+      display: flex; gap: 4px; align-items: center; z-index: 501;
+      background: #111; border-radius: 20px; padding: 6px 10px;
+      border: 1px solid rgba(255,255,255,0.08);
+      box-shadow:
+        0 12px 40px rgba(0,0,0,0.7),
+        0 0 0 1px rgba(255,255,255,0.03);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+    }
+
+    .sketch-btn {
+      padding: 7px 14px; border: none; border-radius: 12px;
+      font-size: 13px; cursor: pointer; color: #888;
+      background: transparent; font-weight: 600;
+      font-family: 'Menlo', 'SF Mono', monospace;
+      letter-spacing: -0.3px;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+    .sketch-btn:active { background: rgba(255,255,255,0.06); }
+
+    .sketch-btn.send {
+      color: #0a0a0a; background: #30d158;
+      border-radius: 14px; padding: 7px 18px;
+      font-weight: 700; letter-spacing: 0;
+    }
+    .sketch-btn.send:active { background: #28b84c; }
+
+    .sketch-btn.clear { color: #b0903a; }
+    .sketch-btn.clear:active { color: #d4ac4a; }
+
+    .sketch-btn.close { color: #555; }
+    .sketch-btn.close:active { color: #888; }
+
+    .sketch-btn.undo { color: #666; }
+    .sketch-btn.undo:active { color: #999; }
+
+    /* Color picker dots */
+    .sketch-colors { display: flex; gap: 5px; align-items: center; padding: 0 4px; }
+    .sketch-color {
+      width: 20px; height: 20px; border-radius: 10px;
+      border: 2px solid rgba(255,255,255,0.06);
+      cursor: pointer;
+      transition: border-color 0.15s ease, transform 0.15s ease;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    }
+    .sketch-color:active { transform: scale(0.9); }
+    .sketch-color.active {
+      border-color: rgba(255,255,255,0.5);
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.15), 0 1px 3px rgba(0,0,0,0.3);
+    }
+
+    .sketch-sep {
+      width: 1px; height: 20px;
+      background: rgba(255,255,255,0.06);
+      margin: 0 2px;
+    }
+
+    /* Sketch mode indicator — top label */
+    #sketch-label {
+      position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+      z-index: 501;
+      background: rgba(255,255,255,0.04);
+      color: #444;
+      padding: 5px 16px; border-radius: 20px;
+      font-size: 10px; font-weight: 700;
+      font-family: 'Menlo', 'SF Mono', monospace;
+      letter-spacing: 2px; text-transform: uppercase;
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+  </style>
+</head>
+<body>
+  <div id="morph-canvas"></div>
+  <div id="morph-empty">
+    <div class="logo">M</div>
+    <h2>Your canvas is empty</h2>
+    <p>Connect to Claude Code, then ask it to build UI components for you.</p>
+    <div class="hint">
+      <div class="hint-item"><span class="hint-icon">1</span> Pair via Settings tab</div>
+      <div class="hint-item"><span class="hint-icon">2</span> Type a request below</div>
+      <div class="hint-item"><span class="hint-icon">3</span> Long-press to adopt or remove</div>
+    </div>
+  </div>
+  <div class="morph-action-menu" id="morph-menu"></div>
+
+  <!-- Sketch overlay -->
+  <div id="sketch-overlay">
+    <canvas id="sketch-canvas"></canvas>
+    <div id="sketch-label">SKETCH</div>
+    <div id="sketch-toolbar">
+      <button class="sketch-btn close" onclick="_sketchClose()">&times;</button>
+      <div class="sketch-sep"></div>
+      <div class="sketch-colors">
+        <div class="sketch-color active" data-color="#ffffff" style="background:#ffffff"></div>
+        <div class="sketch-color" data-color="#ff453a" style="background:#ff453a"></div>
+        <div class="sketch-color" data-color="#30d158" style="background:#30d158"></div>
+        <div class="sketch-color" data-color="#007aff" style="background:#007aff"></div>
+        <div class="sketch-color" data-color="#ffcc00" style="background:#ffcc00"></div>
+      </div>
+      <div class="sketch-sep"></div>
+      <button class="sketch-btn undo" onclick="_sketchUndo()">undo</button>
+      <button class="sketch-btn clear" onclick="_sketchClear()">clear</button>
+      <div class="sketch-sep"></div>
+      <button class="sketch-btn send" onclick="_sketchSend()">Send</button>
+    </div>
+  </div>
+
+  <script>
+    // === STATE ===
+    var _components = new Map();
+    var _listeners = new Map();
+    var _store = {};
+    var _menuTarget = null;
+
+    // === SKETCH STATE ===
+    var _sketchActive = false;
+    var _sketchCtx = null;
+    var _sketchDrawing = false;
+    var _sketchColor = '#ffffff';
+    var _sketchHistory = []; // array of ImageData for undo
+    var _sketchStrokes = []; // array of { color, points: [{x,y}] } for AI
+    var _sketchCurrentStroke = null;
+    var _sketchLineWidth = 3;
+    var _sketchInitialized = false;
+
+    // === BRIDGE ===
+    function _postToNative(action, payload) {
+      var msg = JSON.stringify(Object.assign({ action: action }, payload || {}));
+      if (window.ReactNativeWebView) {
+        window.ReactNativeWebView.postMessage(msg);
+      } else if (window.parent !== window) {
+        window.parent.postMessage(msg, '*');
+      }
+    }
+
+    function _handleNativeMessage(msg) {
+      var data = typeof msg === 'string' ? JSON.parse(msg) : msg;
+      switch (data.action) {
+        case 'canvas.add':
+          _addComponent(data.id, data.html, data.status || 'draft');
+          break;
+        case 'canvas.update':
+          _updateComponent(data.id, data.html);
+          break;
+        case 'canvas.remove':
+          _removeComponent(data.id);
+          break;
+        case 'canvas.reorder':
+          _reorderComponents(data.ids);
+          break;
+        case 'canvas.load':
+          if (data.components) {
+            data.components.forEach(function(c) { _addComponent(c.id, c.html, 'adopted'); });
+          }
+          break;
+        case 'sketch.open':
+          _sketchOpen();
+          break;
+        case 'message':
+          _emit('message', data.data);
+          break;
+        case 'tool_call':
+          _emit('tool_call', data.data);
+          break;
+        case 'turn_end':
+          _emit('turn_end', data.data);
+          break;
+      }
+    }
+
+    window.addEventListener('message', function(e) { _handleNativeMessage(e.data); });
+    window._morphReceive = _handleNativeMessage;
+
+    // === COMPONENTS ===
+    function _addComponent(id, html, status) {
+      _components.set(id, { html: html, status: status });
+      var canvas = document.getElementById('morph-canvas');
+      var empty = document.getElementById('morph-empty');
+      if (empty) empty.style.display = 'none';
+
+      var wrapper = document.createElement('div');
+      wrapper.id = 'morph-c-' + id;
+      wrapper.className = 'morph-component' + (status === 'draft' ? ' draft' : '');
+      wrapper.innerHTML = html;
+      wrapper.setAttribute('data-component-id', id);
+
+      var pressTimer = null;
+      wrapper.addEventListener('touchstart', function(e) {
+        var touch = e.touches[0];
+        var tx = touch.clientX, ty = touch.clientY;
+        pressTimer = setTimeout(function() { _showMenu(id, tx, ty); }, 500);
+      });
+      wrapper.addEventListener('touchend', function() { clearTimeout(pressTimer); });
+      wrapper.addEventListener('touchmove', function() { clearTimeout(pressTimer); });
+
+      canvas.appendChild(wrapper);
+
+      var scripts = wrapper.querySelectorAll('script');
+      scripts.forEach(function(s) {
+        var newScript = document.createElement('script');
+        newScript.textContent = s.textContent;
+        s.parentNode.replaceChild(newScript, s);
+      });
+    }
+
+    function _updateComponent(id, html) {
+      var el = document.getElementById('morph-c-' + id);
+      if (el) {
+        el.innerHTML = html;
+        var comp = _components.get(id);
+        if (comp) comp.html = html;
+        var scripts = el.querySelectorAll('script');
+        scripts.forEach(function(s) {
+          var newScript = document.createElement('script');
+          newScript.textContent = s.textContent;
+          s.parentNode.replaceChild(newScript, s);
+        });
+      }
+    }
+
+    function _removeComponent(id) {
+      var el = document.getElementById('morph-c-' + id);
+      if (el) {
+        el.style.animation = 'fadeOut 0.2s ease forwards';
+        setTimeout(function() { el.remove(); }, 200);
+      }
+      _components.delete(id);
+      if (_components.size === 0) {
+        var empty = document.getElementById('morph-empty');
+        if (empty) empty.style.display = 'flex';
+      }
+    }
+
+    function _reorderComponents(ids) {
+      var canvas = document.getElementById('morph-canvas');
+      ids.forEach(function(id) {
+        var el = document.getElementById('morph-c-' + id);
+        if (el) canvas.appendChild(el);
+      });
+    }
+
+    // === ACTION MENU ===
+    function _showMenu(id, x, y) {
+      if (_sketchActive) return;
+      _menuTarget = id;
+      var comp = _components.get(id);
+      var menu = document.getElementById('morph-menu');
+      menu.innerHTML = '';
+
+      if (comp && comp.status === 'draft') {
+        var adoptBtn = document.createElement('button');
+        adoptBtn.className = 'morph-action-btn adopt';
+        adoptBtn.innerHTML = '<span class="icon">+</span> Adopt';
+        adoptBtn.onclick = function() { _hideMenu(); morph.adopt(id); };
+        menu.appendChild(adoptBtn);
+        menu.appendChild(_sep());
+      }
+
+      var editBtn = document.createElement('button');
+      editBtn.className = 'morph-action-btn edit';
+      editBtn.innerHTML = '<span class="icon">/</span> Edit';
+      editBtn.onclick = function() { _hideMenu(); morph.send('Edit component ' + id); };
+      menu.appendChild(editBtn);
+      menu.appendChild(_sep());
+
+      var dismissBtn = document.createElement('button');
+      dismissBtn.className = 'morph-action-btn dismiss';
+      dismissBtn.innerHTML = '<span class="icon">-</span> Remove';
+      dismissBtn.onclick = function() { _hideMenu(); morph.dismiss(id); };
+      menu.appendChild(dismissBtn);
+
+      menu.style.left = Math.min(x, window.innerWidth - 180) + 'px';
+      menu.style.top = Math.min(y - 20, window.innerHeight - 180) + 'px';
+      menu.classList.add('visible');
+    }
+
+    function _sep() {
+      var d = document.createElement('div');
+      d.className = 'morph-menu-sep';
+      return d;
+    }
+
+    function _hideMenu() {
+      document.getElementById('morph-menu').classList.remove('visible');
+      _menuTarget = null;
+    }
+    document.addEventListener('touchstart', function(e) {
+      if (!e.target.closest('.morph-action-menu') && !_sketchActive) _hideMenu();
+    });
+
+    // === SKETCH MODE ===
+    function _sketchInit() {
+      var c = document.getElementById('sketch-canvas');
+      var dpr = window.devicePixelRatio || 1;
+      // Use the element's rendered size (CSS-positioned, not full screen)
+      var rect = c.getBoundingClientRect();
+      c.width = rect.width * dpr;
+      c.height = rect.height * dpr;
+      _sketchCtx = c.getContext('2d');
+      _sketchCtx.scale(dpr, dpr);
+      _sketchCtx.lineCap = 'round';
+      _sketchCtx.lineJoin = 'round';
+      _sketchCtx.lineWidth = _sketchLineWidth;
+      _sketchCtx.strokeStyle = _sketchColor;
+
+      // Only add listeners once
+      if (!_sketchInitialized) {
+        _sketchInitialized = true;
+        c.addEventListener('touchstart', _sketchTouchStart, { passive: false });
+        c.addEventListener('touchmove', _sketchTouchMove, { passive: false });
+        c.addEventListener('touchend', _sketchTouchEnd);
+        // Also support mouse for web testing
+        c.addEventListener('mousedown', _sketchMouseDown);
+        c.addEventListener('mousemove', _sketchMouseMove);
+        c.addEventListener('mouseup', _sketchMouseUp);
+
+        // Color picker
+        document.querySelectorAll('.sketch-color').forEach(function(el) {
+          el.addEventListener('click', function() {
+            document.querySelectorAll('.sketch-color').forEach(function(e) { e.classList.remove('active'); });
+            el.classList.add('active');
+            _sketchColor = el.dataset.color;
+            if (_sketchCtx) _sketchCtx.strokeStyle = _sketchColor;
+          });
+        });
+      }
+    }
+
+    // Get coordinates relative to the canvas element
+    function _sketchCoords(clientX, clientY) {
+      var c = document.getElementById('sketch-canvas');
+      var rect = c.getBoundingClientRect();
+      return { x: clientX - rect.left, y: clientY - rect.top };
+    }
+
+    // Start a new stroke (shared by mouse & touch)
+    function _sketchBeginStroke(x, y) {
+      _sketchDrawing = true;
+      var c = document.getElementById('sketch-canvas');
+      _sketchHistory.push(_sketchCtx.getImageData(0, 0, c.width, c.height));
+      if (_sketchHistory.length > 30) _sketchHistory.shift();
+      _sketchCurrentStroke = { color: _sketchColor, points: [{ x: Math.round(x), y: Math.round(y) }] };
+      _sketchCtx.beginPath();
+      _sketchCtx.moveTo(x, y);
+    }
+    function _sketchContinueStroke(x, y) {
+      if (!_sketchDrawing) return;
+      // Sample every ~4px to keep data small
+      var pts = _sketchCurrentStroke.points;
+      var last = pts[pts.length - 1];
+      if (Math.abs(x - last.x) > 3 || Math.abs(y - last.y) > 3) {
+        pts.push({ x: Math.round(x), y: Math.round(y) });
+      }
+      _sketchCtx.lineTo(x, y);
+      _sketchCtx.stroke();
+    }
+    function _sketchEndStroke() {
+      _sketchDrawing = false;
+      _sketchCtx.closePath();
+      if (_sketchCurrentStroke && _sketchCurrentStroke.points.length > 1) {
+        _sketchStrokes.push(_sketchCurrentStroke);
+      }
+      _sketchCurrentStroke = null;
+    }
+
+    // Mouse handlers for web/desktop testing
+    function _sketchMouseDown(e) { _sketchBeginStroke(e.offsetX, e.offsetY); }
+    function _sketchMouseMove(e) { _sketchContinueStroke(e.offsetX, e.offsetY); }
+    function _sketchMouseUp() { _sketchEndStroke(); }
+
+    function _sketchTouchStart(e) {
+      e.preventDefault();
+      var t = e.touches[0];
+      var pos = _sketchCoords(t.clientX, t.clientY);
+      _sketchBeginStroke(pos.x, pos.y);
+    }
+    function _sketchTouchMove(e) {
+      e.preventDefault();
+      var t = e.touches[0];
+      var pos = _sketchCoords(t.clientX, t.clientY);
+      _sketchContinueStroke(pos.x, pos.y);
+    }
+    function _sketchTouchEnd() { _sketchEndStroke(); }
+
+    function _sketchOpen() {
+      _sketchActive = true;
+      var overlay = document.getElementById('sketch-overlay');
+      overlay.style.display = 'block';
+      // Force reflow then animate in
+      overlay.offsetHeight;
+      overlay.style.opacity = '1';
+      // Prevent body scroll while sketching
+      document.body.style.overflow = 'hidden';
+      document.body.style.touchAction = 'none';
+      _sketchInit();
+      _sketchClear();
+      _postToNative('sketch.opened', {});
+    }
+
+    function _sketchClose() {
+      _sketchActive = false;
+      var overlay = document.getElementById('sketch-overlay');
+      overlay.style.opacity = '0';
+      setTimeout(function() {
+        overlay.style.display = 'none';
+      }, 250);
+      document.body.style.overflow = '';
+      document.body.style.touchAction = '';
+      _sketchHistory = [];
+      _postToNative('sketch.closed', {});
+    }
+
+    function _sketchClear() {
+      if (!_sketchCtx) return;
+      var c = document.getElementById('sketch-canvas');
+      var dpr = window.devicePixelRatio || 1;
+      _sketchCtx.clearRect(0, 0, c.width / dpr, c.height / dpr);
+      _sketchHistory = [];
+      _sketchStrokes = [];
+    }
+
+    function _sketchUndo() {
+      if (!_sketchCtx || _sketchHistory.length === 0) return;
+      var prev = _sketchHistory.pop();
+      _sketchCtx.putImageData(prev, 0, 0);
+      _sketchStrokes.pop();
+    }
+
+    function _sketchSend() {
+      var c = document.getElementById('sketch-canvas');
+      // Downscale to max 400px to keep base64 under ~30KB
+      var maxDim = 400;
+      var dpr = window.devicePixelRatio || 1;
+      var w = c.width / dpr, h = c.height / dpr;
+      var scale = Math.min(maxDim / w, maxDim / h, 1);
+      var outW = Math.round(w * scale), outH = Math.round(h * scale);
+      var tmp = document.createElement('canvas');
+      tmp.width = outW; tmp.height = outH;
+      var tCtx = tmp.getContext('2d');
+      // Dark background so strokes are visible to AI vision (transparent → white = invisible)
+      tCtx.fillStyle = '#0a0a0a';
+      tCtx.fillRect(0, 0, outW, outH);
+      tCtx.drawImage(c, 0, 0, c.width, c.height, 0, 0, outW, outH);
+      var dataUrl = tmp.toDataURL('image/png');
+      // Build compact stroke summary: bounding box + simplified points
+      var strokeSummary = _sketchStrokes.map(function(s) {
+        var pts = s.points;
+        var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        pts.forEach(function(p) {
+          if (p.x < minX) minX = p.x; if (p.y < minY) minY = p.y;
+          if (p.x > maxX) maxX = p.x; if (p.y > maxY) maxY = p.y;
+        });
+        // Simplify: keep start, end, and key intermediate points (max 10 per stroke)
+        var simplified = [pts[0]];
+        if (pts.length > 2) {
+          var step = Math.max(1, Math.floor(pts.length / 8));
+          for (var i = step; i < pts.length - 1; i += step) simplified.push(pts[i]);
+        }
+        simplified.push(pts[pts.length - 1]);
+        return {
+          color: s.color,
+          bbox: { x: minX, y: minY, w: maxX - minX, h: maxY - minY },
+          points: simplified,
+        };
+      });
+      _postToNative('sketch', {
+        image: dataUrl,
+        width: outW,
+        height: outH,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        strokes: strokeSummary,
+      });
+      _sketchStrokes = [];
+      _sketchClose();
+    }
+
+    // === EVENT SYSTEM ===
+    function _emit(event, data) {
+      var cbs = _listeners.get(event);
+      if (cbs) cbs.forEach(function(cb) { cb(data); });
+    }
+
+    // === PUBLIC API ===
+    window.morph = {
+      send: function(message) {
+        _postToNative('send', { message: message });
+      },
+      on: function(event, callback) {
+        if (!_listeners.has(event)) _listeners.set(event, new Set());
+        _listeners.get(event).add(callback);
+        return function() { _listeners.get(event).delete(callback); };
+      },
+      adopt: function(componentId) {
+        var comp = _components.get(componentId);
+        if (comp) {
+          comp.status = 'adopted';
+          var el = document.getElementById('morph-c-' + componentId);
+          if (el) el.classList.remove('draft');
+        }
+        _postToNative('adopt', { componentId: componentId });
+      },
+      dismiss: function(componentId) {
+        _removeComponent(componentId);
+        _postToNative('dismiss', { componentId: componentId });
+      },
+      sketch: function() {
+        _sketchOpen();
+      },
+      canvas: {
+        add: function(id, html) { _postToNative('canvas.add', { id: id, html: html }); },
+        update: function(id, html) { _postToNative('canvas.update', { id: id, html: html }); },
+        remove: function(id) { _postToNative('canvas.remove', { id: id }); },
+        reorder: function(ids) { _postToNative('canvas.reorder', { ids: ids }); },
+        getAll: function() {
+          return Array.from(_components.entries()).map(function(entry) {
+            return { id: entry[0], status: entry[1].status, hasHtml: !!entry[1].html };
+          });
+        }
+      },
+      store: {
+        get: function(key) { return _store[key]; },
+        set: function(key, value) {
+          _store[key] = value;
+          _postToNative('store.set', { key: key, value: value });
+        }
+      }
+    };
+
+    var style = document.createElement('style');
+    style.textContent = '@keyframes fadeOut { to { opacity: 0; transform: translateY(-8px); } }';
+    document.head.appendChild(style);
+
+    _postToNative('canvas.ready', {});
+  </script>
+</body>
+</html>
