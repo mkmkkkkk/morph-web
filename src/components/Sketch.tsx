@@ -185,7 +185,7 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
             whileTap={{ scale: 0.9 }}
             style={{ width: 48, height: 48, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ccc" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ccc" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5Z"/>
             </svg>
           </motion.div>
@@ -215,21 +215,21 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
               backgroundColor: tool === 'pen' ? 'rgba(255,255,255,0.2)' : 'transparent',
               color: tool === 'pen' ? '#fff' : '#888', display: 'flex', alignItems: 'center',
             }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
             </motion.button>
             <motion.button whileTap={{ scale: 0.85 }} tabIndex={-1} onClick={() => setTool('rect')} style={{
               padding: '6px 10px', borderRadius: 8, border: 'none', cursor: 'pointer',
               backgroundColor: tool === 'rect' ? 'rgba(255,255,255,0.2)' : 'transparent',
               color: tool === 'rect' ? '#fff' : '#888', display: 'flex', alignItems: 'center',
             }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
             </motion.button>
             <motion.button whileTap={{ scale: 0.85 }} tabIndex={-1} onClick={() => setTool('arrow')} style={{
               padding: '6px 10px', borderRadius: 8, border: 'none', cursor: 'pointer',
               backgroundColor: tool === 'arrow' ? 'rgba(255,255,255,0.2)' : 'transparent',
               color: tool === 'arrow' ? '#fff' : '#888', display: 'flex', alignItems: 'center',
             }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
             </motion.button>
           </div>
 
