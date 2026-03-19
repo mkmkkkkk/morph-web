@@ -1,5 +1,5 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useMotionValue } from 'framer-motion';
 
 type Tool = 'pen' | 'rect' | 'arrow';
 
@@ -22,6 +22,10 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
   // Toolbar state
   const toolbarRef = useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = useState(false);
+  const dragX = useMotionValue(0);
+  const dragY = useMotionValue(0);
+
+  const resetToolbarPos = () => { dragX.set(0); dragY.set(0); };
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -137,13 +141,6 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
 
   const colors = ['#c8c8c8', '#e07070', '#6899cc'];
 
-  const toolBtn = (id: Tool, label: string) => (
-    <button key={id} tabIndex={-1} onClick={() => setTool(id)} style={{
-      padding: '6px 10px', borderRadius: 8, border: 'none', cursor: 'pointer',
-      backgroundColor: tool === id ? 'rgba(255,255,255,0.2)' : 'transparent',
-      color: tool === id ? '#fff' : '#888', fontSize: 14, fontWeight: tool === id ? 600 : 400,
-    }}>{label}</button>
-  );
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', flexDirection: 'column' }}>
@@ -160,41 +157,41 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
         onMouseLeave={endDraw}
       />
 
-      {/* Drag constraint = full screen overlay (the parent div) */}
-      {/* Floating draggable toolbar — Framer Motion drag */}
+      {/* Floating draggable toolbar */}
       <motion.div ref={toolbarRef}
-        drag dragMomentum={false} dragElastic={0.1}
-        dragConstraints={canvasRef}
-        initial={{ scale: 0.8, opacity: 0 }}
-        animate={{
-          scale: 1, opacity: 1,
-          width: collapsed ? 48 : 220,
-          borderRadius: collapsed ? 24 : 16,
-        }}
-        transition={{ type: 'spring', stiffness: 400, damping: 28 }}
+        drag dragMomentum={false} dragElastic={0.05}
+        dragConstraints={{ left: -12, right: window.innerWidth - 232, top: -(window.innerHeight * 0.7), bottom: window.innerHeight * 0.25 }}
         style={{
-          position: 'fixed', top: '68%', left: collapsed ? 'calc(50% - 24px)' : 'calc(50% - 110px)',
+          x: dragX, y: dragY,
+          position: 'fixed', top: '70%', left: 12,
           display: 'flex', flexDirection: 'column', alignItems: collapsed ? 'center' : 'stretch',
           justifyContent: collapsed ? 'center' : 'flex-start',
+          width: collapsed ? 48 : 220,
           minHeight: collapsed ? 48 : 'auto',
+          borderRadius: collapsed ? 24 : 16,
           backgroundColor: 'rgba(28,28,30,0.92)', backdropFilter: 'blur(40px)', WebkitBackdropFilter: 'blur(40px)',
           border: '1px solid rgba(255,255,255,0.1)',
           boxShadow: '0 12px 40px rgba(0,0,0,0.6)',
           zIndex: 1001, touchAction: 'none', overflow: 'hidden', cursor: 'grab',
         }}
+        initial={{ scale: 0.8, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        transition={{ type: 'spring', stiffness: 400, damping: 28 }}
       >
         {collapsed ? (
-          /* Collapsed: small circle with pen icon */
+          /* Collapsed: small circle with pen SVG */
           <motion.div
-            onClick={() => setCollapsed(false)}
+            onClick={() => { setCollapsed(false); resetToolbarPos(); }}
             whileTap={{ scale: 0.9 }}
-            style={{ width: 48, height: 48, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20, cursor: 'pointer' }}
+            style={{ width: 48, height: 48, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
           >
-            ✏
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ccc" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5Z"/>
+            </svg>
           </motion.div>
         ) : (<>
-          {/* Drag handle — tap to collapse */}
-          <div onClick={() => setCollapsed(true)} style={{
+          {/* Drag handle — tap to collapse, resets position */}
+          <div onClick={() => { setCollapsed(true); resetToolbarPos(); }} style={{
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             height: 28, cursor: 'pointer',
             borderBottom: '1px solid rgba(255,255,255,0.06)',
@@ -213,9 +210,27 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
               }} />
             ))}
             <span style={{ width: 1, height: 20, backgroundColor: 'rgba(255,255,255,0.08)', margin: '0 2px' }} />
-            {toolBtn('pen', '✏')}
-            {toolBtn('rect', '▢')}
-            {toolBtn('arrow', '→')}
+            <motion.button whileTap={{ scale: 0.85 }} tabIndex={-1} onClick={() => setTool('pen')} style={{
+              padding: '6px 10px', borderRadius: 8, border: 'none', cursor: 'pointer',
+              backgroundColor: tool === 'pen' ? 'rgba(255,255,255,0.2)' : 'transparent',
+              color: tool === 'pen' ? '#fff' : '#888', display: 'flex', alignItems: 'center',
+            }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+            </motion.button>
+            <motion.button whileTap={{ scale: 0.85 }} tabIndex={-1} onClick={() => setTool('rect')} style={{
+              padding: '6px 10px', borderRadius: 8, border: 'none', cursor: 'pointer',
+              backgroundColor: tool === 'rect' ? 'rgba(255,255,255,0.2)' : 'transparent',
+              color: tool === 'rect' ? '#fff' : '#888', display: 'flex', alignItems: 'center',
+            }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+            </motion.button>
+            <motion.button whileTap={{ scale: 0.85 }} tabIndex={-1} onClick={() => setTool('arrow')} style={{
+              padding: '6px 10px', borderRadius: 8, border: 'none', cursor: 'pointer',
+              backgroundColor: tool === 'arrow' ? 'rgba(255,255,255,0.2)' : 'transparent',
+              color: tool === 'arrow' ? '#fff' : '#888', display: 'flex', alignItems: 'center',
+            }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            </motion.button>
           </div>
 
           {/* Row 2: Close / Clear / Insert */}
