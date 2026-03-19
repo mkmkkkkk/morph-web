@@ -33,12 +33,14 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const dpr = window.devicePixelRatio || 2;
-    const rect = canvas.getBoundingClientRect();
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
+    // Use window dimensions (full screen) not getBoundingClientRect (may exclude safe areas)
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
     const ctx = canvas.getContext('2d')!;
     ctx.scale(dpr, dpr);
-    ctx.clearRect(0, 0, rect.width, rect.height);
+    ctx.clearRect(0, 0, w, h);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
   }, []);
@@ -115,9 +117,11 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
   const handleInsert = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
 
-    // Calculate bounding box of all drawn points (as % of screen)
+    // Use window dimensions for percentage calculation (matches actual screen)
+    const screenW = window.innerWidth;
+    const screenH = window.innerHeight;
+
     const pts = allPoints.current;
     if (pts.length === 0) { onClose(); return; }
     const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
@@ -125,10 +129,10 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
     const minY = Math.min(...ys), maxY = Math.max(...ys);
 
     const bounds = {
-      x: (minX / rect.width) * 100,
-      y: (minY / rect.height) * 100,
-      w: ((maxX - minX) / rect.width) * 100,
-      h: ((maxY - minY) / rect.height) * 100,
+      x: Math.round((minX / screenW) * 100),
+      y: Math.round((minY / screenH) * 100),
+      w: Math.round(((maxX - minX) / screenW) * 100),
+      h: Math.round(((maxY - minY) / screenH) * 100),
     };
 
     onInsert(canvas.toDataURL('image/png'), bounds);
