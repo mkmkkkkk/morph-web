@@ -36,7 +36,7 @@ try {
   _connectLoadError = (_connectLoadError || '') + '\nauth: ' + e?.message;
 }
 try {
-  useConnection = require('../lib/ConnectionContext').useConnection;
+  useConnection = require('../lib/useConnection').useConnection;
 } catch (e: any) {
   _connectLoadError = (_connectLoadError || '') + '\nConnectionContext: ' + e?.message;
 }

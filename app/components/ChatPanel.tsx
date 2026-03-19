@@ -31,10 +31,11 @@ interface ChatPanelProps {
   isProcessing?: boolean;
   pendingSketch?: { strokeCount: number } | null;
   onClearSketch?: () => void;
+  defaultTerminalOpen?: boolean;
 }
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
-const TERMINAL_HEIGHT = SCREEN_HEIGHT * 0.5;
+const TERMINAL_HEIGHT = Platform.OS === 'web' ? SCREEN_HEIGHT * 0.85 : SCREEN_HEIGHT * 0.5;
 
 // ---------------------------------------------------------------
 // CollapsibleBlock — tap header to expand/collapse content
@@ -67,9 +68,9 @@ function CollapsibleBlock({ label, preview, headerStyle, content, contentStyle, 
 export default function ChatPanel({
   messages, onSend, onStop, onSketch, onImage, onFile,
   connected, connectionState, isProcessing,
-  pendingSketch, onClearSketch,
+  pendingSketch, onClearSketch, defaultTerminalOpen,
 }: ChatPanelProps) {
-  const [terminalVisible, setTerminalVisible] = useState(false);
+  const [terminalVisible, setTerminalVisible] = useState(defaultTerminalOpen ?? false);
   const scrollRef = useRef<ScrollView>(null);
   const prevMsgCount = useRef(0);
 

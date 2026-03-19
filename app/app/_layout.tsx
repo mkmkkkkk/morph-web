@@ -42,16 +42,29 @@ let ConnectionProvider: React.ComponentType<{ children: React.ReactNode }> | nul
 let _err: string | null = null;
 
 try {
-  ConnectionProvider = require('../lib/ConnectionContext').ConnectionProvider;
+  const { loadSettings, getSetting } = require('../lib/settings');
+  loadSettings().then(() => {
+    // After settings load, check connection mode
+    const mode = getSetting('connectionMode');
+    console.log('[Morph] connectionMode:', mode);
+  }).catch(() => {});
 } catch (e: any) {
-  _err = (_err || '') + '\nConnectionContext: ' + e?.message;
+  _err = (_err || '') + '\nSettings: ' + e?.message;
 }
 
 try {
-  const { loadSettings } = require('../lib/settings');
-  loadSettings().catch(() => {});
+  // Choose provider based on connectionMode setting
+  const { getSetting } = require('../lib/settings');
+  const mode = getSetting('connectionMode');
+  if (mode === 'direct') {
+    ConnectionProvider = require('../lib/DirectConnectionContext').DirectConnectionProvider;
+    console.log('[Morph] Using DirectConnectionProvider (v2)');
+  } else {
+    ConnectionProvider = require('../lib/ConnectionContext').ConnectionProvider;
+    console.log('[Morph] Using HappyConnectionProvider (v1)');
+  }
 } catch (e: any) {
-  _err = (_err || '') + '\nSettings: ' + e?.message;
+  _err = (_err || '') + '\nConnectionContext: ' + e?.message;
 }
 
 export default function RootLayout() {

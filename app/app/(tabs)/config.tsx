@@ -19,7 +19,7 @@ try { InputBar = require('../../components/InputBar').default; } catch (e: any) 
 try { deleteCredentials = require('../../lib/credentials').deleteCredentials; } catch (e: any) {
   _configLoadError = (_configLoadError || '') + '\ncredentials: ' + e?.message;
 }
-try { useConnection = require('../../lib/ConnectionContext').useConnection; } catch (e: any) {
+try { useConnection = require('../../lib/useConnection').useConnection; } catch (e: any) {
   _configLoadError = (_configLoadError || '') + '\nConnectionContext: ' + e?.message;
 }
 try { settingsLib = require('../../lib/settings'); } catch (e: any) {

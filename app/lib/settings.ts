@@ -18,6 +18,7 @@ export interface AppSettings {
   keepAliveEnabled: boolean;
   autoReconnect: boolean;
   proxyUrl: string | null;
+  connectionMode: 'happy' | 'direct';
 }
 
 const DEFAULTS: AppSettings = {
@@ -29,6 +30,7 @@ const DEFAULTS: AppSettings = {
   keepAliveEnabled: true,
   autoReconnect: true,
   proxyUrl: null,
+  connectionMode: 'direct',  // v2 direct mode as default
 };
 
 // In-memory cache — loaded once at startup, then synchronous reads

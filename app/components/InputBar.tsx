@@ -143,7 +143,27 @@ export default function InputBar({ onSend, onStop, onSketch, onImage, onFile, co
 
   const handleAttach = () => {
     __DEV__ && console.log('[InputBar] handleAttach tapped');
-    if (Platform.OS === 'ios') {
+    if (Platform.OS === 'web') {
+      // Web: use native file input
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*,.pdf,.txt,.md,.json,.csv';
+      input.onchange = async (e: any) => {
+        const file = e.target?.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          const base64 = (reader.result as string).split(',')[1];
+          if (file.type.startsWith('image/')) {
+            onImage?.(`data:${file.type};base64,${base64}`);
+          } else {
+            onFile?.({ name: file.name, mime: file.type, base64, size: file.size });
+          }
+        };
+        reader.readAsDataURL(file);
+      };
+      input.click();
+    } else if (Platform.OS === 'ios') {
       ActionSheetIOS.showActionSheetWithOptions(
         {
           options: ['Cancel', 'Take Photo', 'Photo Library', 'File', 'Sketch'],
@@ -210,19 +230,60 @@ export default function InputBar({ onSend, onStop, onSketch, onImage, onFile, co
             )}
           </TouchableOpacity>
         )}
-        <TextInput
-          ref={inputRef}
-          style={[styles.input, isDark ? styles.inputDark : styles.inputLight]}
-          value={text}
-          onChangeText={setText}
-          placeholder="Message Claude Code..."
-          placeholderTextColor={isDark ? '#555' : '#999'}
-          multiline
-          maxLength={10000}
-          returnKeyType="send"
-          onSubmitEditing={handleSend}
-          blurOnSubmit={false}
-        />
+        {Platform.OS === 'web' ? (
+          <textarea
+            ref={inputRef as any}
+            style={{
+              flex: 1,
+              minHeight: 34,
+              maxHeight: 120,
+              borderRadius: 20,
+              paddingLeft: 16,
+              paddingRight: 16,
+              paddingTop: 7,
+              paddingBottom: 7,
+              fontSize: 16,
+              lineHeight: '20px',
+              resize: 'none',
+              border: 'none',
+              outline: 'none',
+              fontFamily: '-apple-system, system-ui, sans-serif',
+              backgroundColor: isDark ? '#1c1c1e' : '#e8e8e8',
+              color: isDark ? '#fff' : '#000',
+              WebkitAppearance: 'none',
+              ...(text ? {} : {}),
+            } as any}
+            value={text}
+            onChange={(e: any) => setText(e.target.value)}
+            placeholder="Message Claude Code..."
+            rows={1}
+            onKeyDown={(e: any) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
+            onInput={(e: any) => {
+              // Auto-resize textarea
+              e.target.style.height = '34px';
+              e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+            }}
+          />
+        ) : (
+          <TextInput
+            ref={inputRef}
+            style={[styles.input, isDark ? styles.inputDark : styles.inputLight]}
+            value={text}
+            onChangeText={setText}
+            placeholder="Message Claude Code..."
+            placeholderTextColor={isDark ? '#555' : '#999'}
+            multiline
+            maxLength={10000}
+            returnKeyType="send"
+            onSubmitEditing={handleSend}
+            blurOnSubmit={false}
+          />
+        )}
         {isProcessing ? (
           <TouchableOpacity
             style={styles.stopBtn}
