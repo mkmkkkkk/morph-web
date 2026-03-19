@@ -214,37 +214,51 @@ function markViewed(id: string) {
   const s = getViewed(); s.add(id); localStorage.setItem(VIEWED_KEY, JSON.stringify([...s]));
 }
 
-// Pin persistence
-function getPinned(): Set<string> { try { return new Set(JSON.parse(localStorage.getItem('morph-pinned') || '[]')); } catch { return new Set(); } }
-function togglePin(id: string) { const p = getPinned(); if (p.has(id)) p.delete(id); else p.add(id); localStorage.setItem('morph-pinned', JSON.stringify([...p])); return p; }
+// ─── Multi-environment session system ───
+// Pin persistence (per-environment)
+function getPinned(envId: string): Set<string> { try { return new Set(JSON.parse(localStorage.getItem(`morph-pinned-${envId}`) || '[]')); } catch { return new Set(); } }
+function togglePin(envId: string, id: string) { const p = getPinned(envId); if (p.has(id)) p.delete(id); else p.add(id); localStorage.setItem(`morph-pinned-${envId}`, JSON.stringify([...p])); return p; }
 
-function SessionCards({ onSelect }: { onSelect: (sessionId: string, display?: string) => void }) {
+// Environment config — stored in localStorage, add more via Config tab
+type EnvConfig = { id: string; label: string; relayUrl: string; maxSessions: number };
+const DEFAULT_ENV: EnvConfig = { id: 'workspace', label: '/workspace', relayUrl: '', maxSessions: 6 };
+function getEnvironments(): EnvConfig[] {
+  try { const stored = JSON.parse(localStorage.getItem('morph-environments') || 'null'); return stored || [DEFAULT_ENV]; }
+  catch { return [DEFAULT_ENV]; }
+}
+function saveEnvironments(envs: EnvConfig[]) { localStorage.setItem('morph-environments', JSON.stringify(envs)); }
+
+const timeAgo = (ms: number) => {
+  const diff = Date.now() - ms;
+  if (diff < 60000) return 'now';
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}m`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h`;
+  return `${Math.floor(diff / 86400000)}d`;
+};
+
+// Reusable environment group — renders session cards for one environment
+function EnvironmentGroup({ env, onSelect }: { env: EnvConfig; onSelect: (sessionId: string, display?: string, relayUrl?: string) => void }) {
   const [sessions, setSessions] = useState<any[]>([]);
   const [viewed, setViewed] = useState<Set<string>>(getViewed);
-  const [pinned, setPinned] = useState<Set<string>>(getPinned);
+  const [pinned, setPinned] = useState<Set<string>>(() => getPinned(env.id));
   const [expanded, setExpanded] = useState(true);
 
   useEffect(() => {
-    fetchSessions().then(all => {
-      const pins = getPinned();
-      // Filter out fixed session
-      const filtered = all.filter(s => s.id !== FIXED_SESSION_ID);
-      // Pinned sessions always shown, unpinned limited to fill up to 6 total
-      const pinnedSessions = filtered.filter(s => pins.has(s.id));
-      const unpinned = filtered.filter(s => !pins.has(s.id)).slice(0, 6 - pinnedSessions.length);
-      setSessions([...pinnedSessions, ...unpinned]);
-    });
-  }, []);
+    const base = env.relayUrl || '';
+    const token = localStorage.getItem('morph-auth') || '';
+    fetch(`${base}/v2/claude/sessions?limit=30`, { headers: { 'Authorization': `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(d => {
+        const all = d.sessions || [];
+        const pins = getPinned(env.id);
+        const filtered = all.filter((s: any) => s.id !== FIXED_SESSION_ID);
+        const pinnedSessions = filtered.filter((s: any) => pins.has(s.id));
+        const unpinned = filtered.filter((s: any) => !pins.has(s.id)).slice(0, env.maxSessions - pinnedSessions.length);
+        setSessions([...pinnedSessions, ...unpinned]);
+      })
+      .catch(() => setSessions([]));
+  }, [env.id, env.relayUrl]);
 
-  const timeAgo = (ms: number) => {
-    const diff = Date.now() - ms;
-    if (diff < 60000) return 'now';
-    if (diff < 3600000) return `${Math.floor(diff / 60000)}m`;
-    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h`;
-    return `${Math.floor(diff / 86400000)}d`;
-  };
-
-  // Color: green=active, yellow=unviewed+inactive, gray=viewed+inactive
   const dotColor = (s: any) => {
     if (s.active) return '#30d158';
     if (!viewed.has(s.id)) return '#ffcc00';
@@ -260,7 +274,7 @@ function SessionCards({ onSelect }: { onSelect: (sessionId: string, display?: st
     markViewed(id);
     setViewed(getViewed());
     const s = sessions.find(x => x.id === id);
-    onSelect(id, s?.display);
+    onSelect(id, s?.display, env.relayUrl);
   };
 
   if (sessions.length === 0) return null;
@@ -269,21 +283,18 @@ function SessionCards({ onSelect }: { onSelect: (sessionId: string, display?: st
   const unviewedCount = sessions.filter(s => !s.active && !viewed.has(s.id)).length;
 
   return (
-    <div style={{ position: 'absolute', top: 90, left: 0, right: 0, zIndex: 2, padding: '0 8px', pointerEvents: 'none' }}>
-      {/* Header — tap to toggle */}
+    <div style={{ marginBottom: 12, pointerEvents: 'none' }}>
       <div
         onClick={() => setExpanded(v => !v)}
         style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: expanded ? 6 : 0, cursor: 'pointer', pointerEvents: 'auto' }}
       >
         <span style={{ color: '#777', fontSize: 11, fontWeight: 600, textTransform: 'uppercase' as const, letterSpacing: 0.5 }}>
-          /workspace ({sessions.length})
+          {env.label} ({sessions.length})
         </span>
         {activeCount > 0 && <span style={{ fontSize: 9, color: '#30d158' }}>{activeCount} active</span>}
         {unviewedCount > 0 && <span style={{ fontSize: 9, color: '#ffcc00' }}>{unviewedCount} new</span>}
         <span style={{ color: '#888', fontSize: 10 }}>{expanded ? '▾' : '▸'}</span>
       </div>
-
-      {/* Session rows */}
       <AnimatePresence>
         {expanded && (
           <motion.div
@@ -310,7 +321,7 @@ function SessionCards({ onSelect }: { onSelect: (sessionId: string, display?: st
                   {s.display || s.id.slice(0, 8)}
                 </span>
                 <span style={{ color: '#777', fontSize: 11, flexShrink: 0 }}>{timeAgo(s.updatedAt)}</span>
-                <span onClick={(e) => { e.stopPropagation(); setPinned(togglePin(s.id)); }} style={{ fontSize: 14, color: pinned.has(s.id) ? '#ffcc00' : '#555', cursor: 'pointer', padding: '8px 10px', margin: '-8px -10px -8px 0', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <span onClick={(e) => { e.stopPropagation(); setPinned(togglePin(env.id, s.id)); }} style={{ fontSize: 14, color: pinned.has(s.id) ? '#ffcc00' : '#555', cursor: 'pointer', padding: '8px 10px', margin: '-8px -10px -8px 0', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   {pinned.has(s.id) ? '★' : '☆'}
                 </span>
               </motion.div>
@@ -318,6 +329,18 @@ function SessionCards({ onSelect }: { onSelect: (sessionId: string, display?: st
           </motion.div>
         )}
       </AnimatePresence>
+    </div>
+  );
+}
+
+// Canvas overlay — renders all environment groups
+function SessionCards({ onSelect }: { onSelect: (sessionId: string, display?: string, relayUrl?: string) => void }) {
+  const envs = getEnvironments();
+  return (
+    <div style={{ position: 'absolute', top: 90, left: 0, right: 0, zIndex: 2, padding: '0 8px' }}>
+      {envs.map(env => (
+        <EnvironmentGroup key={env.id} env={env} onSelect={onSelect} />
+      ))}
     </div>
   );
 }
