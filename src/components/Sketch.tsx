@@ -29,15 +29,21 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
 
   const resetToolbarPos = () => { dragX.set(0); dragY.set(0); };
 
+  // Full screen height including safe areas
+  const screenH = useRef(window.screen.height);
+  const screenW = useRef(window.screen.width);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const dpr = window.devicePixelRatio || 2;
-    // Use window dimensions (full screen) not getBoundingClientRect (may exclude safe areas)
-    const w = window.innerWidth;
-    const h = window.innerHeight;
+    const w = screenW.current;
+    const h = screenH.current;
     canvas.width = w * dpr;
     canvas.height = h * dpr;
+    // Explicitly size canvas to full screen (including safe areas)
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
     const ctx = canvas.getContext('2d')!;
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, w, h);
@@ -118,9 +124,8 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    // Use window dimensions for percentage calculation (matches actual screen)
-    const screenW = window.innerWidth;
-    const screenH = window.innerHeight;
+    const sw = screenW.current;
+    const sh = screenH.current;
 
     const pts = allPoints.current;
     if (pts.length === 0) { onClose(); return; }
@@ -129,10 +134,10 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
     const minY = Math.min(...ys), maxY = Math.max(...ys);
 
     const bounds = {
-      x: Math.round((minX / screenW) * 100),
-      y: Math.round((minY / screenH) * 100),
-      w: Math.round(((maxX - minX) / screenW) * 100),
-      h: Math.round(((maxY - minY) / screenH) * 100),
+      x: Math.round((minX / sw) * 100),
+      y: Math.round((minY / sh) * 100),
+      w: Math.round(((maxX - minX) / sw) * 100),
+      h: Math.round(((maxY - minY) / sh) * 100),
     };
 
     onInsert(canvas.toDataURL('image/png'), bounds);
