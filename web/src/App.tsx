@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { connect, send, interrupt, onMessage, onState, getState, type Message } from './lib/connection';
+import { connect, send, interrupt, clearSession, setCurrentTab, onMessage, onState, getState, type Message } from './lib/connection';
+import Sketch from './components/Sketch';
 
 // ─── Password Gate ───
 const PASS_KEY = 'morph-auth';
@@ -16,7 +17,8 @@ function PasswordGate({ onAuth }: { onAuth: () => void }) {
   };
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 16, padding: 20 }}>
-      <div style={{ color: '#fff', fontSize: 24, fontWeight: 600 }}>Morph</div>
+      <div style={{ color: '#fff', fontSize: 48, fontFamily: "'CloisterBlack', serif", opacity: 0.8 }}>M</div>
+      <div style={{ color: '#666', fontSize: 14, marginTop: -8 }}>Morph</div>
       <input type="password" value={pass}
         onChange={e => { setPass(e.target.value); setError(''); }}
         onKeyDown={e => { if (e.key === 'Enter') handleSubmit(); }}
@@ -33,18 +35,18 @@ function PasswordGate({ onAuth }: { onAuth: () => void }) {
 function Collapsible({ label, preview, content, color }: { label: string; preview?: string; content: string; color: string }) {
   const [open, setOpen] = useState(false);
   return (
-    <div style={{ marginBottom: 2 }}>
-      <div onClick={() => setOpen(!open)} style={{ cursor: 'pointer', color, fontSize: 12, fontFamily: 'Menlo, monospace', lineHeight: '18px' }}>
+    <div style={{ marginBottom: 2, overflow: 'hidden', maxWidth: '100%' }}>
+      <div onClick={() => setOpen(!open)} style={{ cursor: 'pointer', color, fontSize: 12, fontFamily: 'Menlo, monospace', lineHeight: '18px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {open ? '▾' : '▸'} {label}{!open && preview ? `: ${preview}` : ''}
       </div>
-      {open && <pre style={{ color: '#888', fontSize: 12, fontFamily: 'Menlo, monospace', lineHeight: '17px', marginLeft: 16, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{content}</pre>}
+      {open && <pre style={{ color: '#888', fontSize: 12, fontFamily: 'Menlo, monospace', lineHeight: '17px', marginLeft: 16, whiteSpace: 'pre-wrap', wordBreak: 'break-all', overflow: 'hidden', maxWidth: '100%', margin: 0, marginLeft: 16 }}>{content}</pre>}
     </div>
   );
 }
 
 // ─── Message Row ───
 function MessageRow({ msg }: { msg: Message }) {
-  const mono = { fontFamily: 'Menlo, monospace', fontSize: 12, lineHeight: '18px' } as const;
+  const mono = { fontFamily: 'Menlo, monospace', fontSize: 12, lineHeight: '18px', overflow: 'hidden' as const, maxWidth: '100%' } as const;
   switch (msg.type) {
     case 'text':
       return msg.role === 'user'
@@ -53,7 +55,7 @@ function MessageRow({ msg }: { msg: Message }) {
     case 'thinking':
       return <Collapsible label="thinking" preview={msg.content.slice(0, 60)} content={msg.content} color="#8e8e93" />;
     case 'tool':
-      return <Collapsible label={msg.name || 'tool'} preview={msg.content.slice(0, 80).replace(/\n/g, ' ')} content={msg.content} color="#bf5af2" />;
+      return <Collapsible label={msg.name || 'tool'} preview={msg.content.slice(0, 80).replace(/\n/g, ' ')} content={msg.content} color="#8e8e93" />;
     case 'tool_result':
       return <Collapsible label="result" preview={msg.content.slice(0, 80).replace(/\n/g, ' ')} content={msg.content.length > 2000 ? msg.content.slice(0, 2000) + '\n...' : msg.content} color="#64d2ff" />;
     case 'status':
@@ -74,7 +76,7 @@ function TerminalOverlay({ messages, visible }: { messages: Message[]; visible: 
   if (!visible) return null;
   return (
     <div ref={scrollRef} style={{
-      height: '50vh', overflowY: 'auto', padding: '8px 12px',
+      flex: '1 1 0', minHeight: 0, overflowY: 'scroll', overflowX: 'hidden', padding: '8px 12px',
       borderTop: '1px solid rgba(255,255,255,0.08)', backgroundColor: '#0a0a0a',
       WebkitOverflowScrolling: 'touch' as any,
     }}>
@@ -87,10 +89,12 @@ function TerminalOverlay({ messages, visible }: { messages: Message[]; visible: 
 }
 
 // ─── Input Bar (matches native: dot + attach + terminal toggle + input + send/stop) ───
-function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, onToggleTerminal, hasNew, onAttach }: {
+function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, onToggleTerminal, hasNew, onAttach, onSketch, pendingSketch }: {
   onSend: (text: string) => void; onStop: () => void; isProcessing: boolean; connected: boolean;
   terminalVisible: boolean; onToggleTerminal: () => void; hasNew: boolean;
   onAttach: () => void;
+  onSketch: () => void;
+  pendingSketch: string | null;
 }) {
   const [text, setText] = useState('');
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -110,21 +114,25 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
       {/* Connection dot */}
       <div style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: dotColor, flexShrink: 0 }} />
 
-      {/* Terminal toggle (first — closer to edge) */}
+      {/* Terminal toggle — green when CC running, yellow when idle+hasNew, grey default */}
       <button tabIndex={-1} onClick={onToggleTerminal} style={{
         width: 34, height: 34, borderRadius: 17, border: 'none', cursor: 'pointer', flexShrink: 0,
         backgroundColor: 'rgba(255,255,255,0.08)',
-        color: hasNew ? '#30d158' : '#666', fontSize: 22, lineHeight: '22px',
+        color: isProcessing ? '#30d158' : hasNew ? '#999' : '#666',
+        fontSize: 22, lineHeight: '22px',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        animation: isProcessing ? 'pulse 0.8s infinite' : undefined,
       }}>{terminalVisible ? '⌄' : '›'}</button>
 
-      {/* Attach button */}
-      <button tabIndex={-1} onClick={onAttach} style={{
-        width: 34, height: 34, borderRadius: 17, border: 'none', cursor: 'pointer', flexShrink: 0,
-        backgroundColor: 'rgba(255,255,255,0.08)', color: '#666', fontSize: 22, lineHeight: '22px',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}>+</button>
+      {/* Attach menu button */}
+      <button tabIndex={-1} onClick={onAttach}
+        style={{
+          width: 34, height: 34, borderRadius: 17, border: 'none', cursor: 'pointer', flexShrink: 0,
+          backgroundColor: pendingSketch ? 'rgba(48,209,88,0.2)' : 'rgba(255,255,255,0.08)',
+          color: pendingSketch ? '#30d158' : '#666', fontSize: 22, lineHeight: '22px',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+        {pendingSketch ? '✓' : '+'}
+      </button>
 
       {/* Text input — textarea with auto-grow, Enter=send, Shift+Enter=newline */}
       <textarea ref={ref} value={text}
@@ -163,90 +171,6 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
           color: text.trim() ? '#fff' : '#444', fontSize: 18, fontWeight: 'bold',
         }}>↑</button>
       )}
-    </div>
-  );
-}
-
-// ─── Canvas Tab (iframe canvas + terminal overlay + input bar) ───
-function CanvasTab({ messages, isProcessing, connected, onSend, onStop }: {
-  messages: Message[]; isProcessing: boolean; connected: boolean;
-  onSend: (text: string) => void; onStop: () => void;
-}) {
-  const [terminalVisible, setTerminalVisible] = useState(false); // default: show Canvas, terminal hidden
-  const [hasNew, setHasNew] = useState(false);
-  const prevCount = useRef(0);
-
-  useEffect(() => {
-    if (messages.length > prevCount.current && !terminalVisible) setHasNew(true);
-    prevCount.current = messages.length;
-  }, [messages.length, terminalVisible]);
-
-  const toggleTerminal = () => {
-    setTerminalVisible(v => !v);
-    setHasNew(false);
-  };
-
-  const handleAttach = () => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'image/*,.pdf,.txt,.md,.json,.csv';
-    input.onchange = async (e: any) => {
-      const file = e.target?.files?.[0];
-      if (!file) return;
-
-      // Read as base64
-      const b64: string = await new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve((reader.result as string).split(',')[1]);
-        reader.readAsDataURL(file);
-      });
-
-      // Upload to relay → saves to ~/Downloads/
-      try {
-        const token = localStorage.getItem('morph-auth') || '';
-        const res = await fetch('/v2/claude/upload', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filename: file.name, base64: b64, mime: file.type }),
-        });
-        const data = await res.json();
-        if (data.path) {
-          // Tell Claude to read the uploaded file
-          if (file.type.startsWith('image/')) {
-            onSend(`Look at this image: ${data.path}`);
-          } else {
-            onSend(`Read this file: ${data.path}`);
-          }
-        } else {
-          onSend(`[Upload failed: ${data.error || 'unknown'}]`);
-        }
-      } catch (err: any) {
-        onSend(`[Upload error: ${err.message}]`);
-      }
-    };
-    input.click();
-  };
-
-  return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-      {/* Canvas area (iframe) — hidden when terminal is open on mobile */}
-      <div style={{ flex: 1, position: 'relative', display: terminalVisible ? 'none' : 'flex' }}>
-        <iframe src="/canvas.html" style={{ width: '100%', height: '100%', border: 'none', backgroundColor: '#0a0a0a' }} sandbox="allow-scripts allow-same-origin" />
-      </div>
-
-      {/* Terminal overlay — auto-expand on send per design doc */}
-      {terminalVisible && (
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-          <TerminalOverlay messages={messages} visible={true} />
-        </div>
-      )}
-
-      <InputBar
-        onSend={onSend} onStop={onStop}
-        isProcessing={isProcessing} connected={connected}
-        terminalVisible={terminalVisible} onToggleTerminal={toggleTerminal}
-        hasNew={hasNew} onAttach={handleAttach}
-      />
     </div>
   );
 }
@@ -338,7 +262,7 @@ function Row({ label, value, valueColor }: { label: string; value: string; value
 // ─── Tab Bar ───
 function TabBar({ tab, onTab }: { tab: string; onTab: (t: string) => void }) {
   return (
-    <div style={{ display: 'flex', borderTop: '1px solid rgba(255,255,255,0.06)', paddingBottom: 'max(4px, env(safe-area-inset-bottom))' }}>
+    <div style={{ display: 'flex', borderTop: '1px solid rgba(255,255,255,0.06)', paddingBottom: 4, flexShrink: 0 }}>
       {[{ id: 'canvas', icon: '◇', label: 'Canvas' }, { id: 'config', icon: '⚙', label: 'Config' }].map(t => (
         <button key={t.id} tabIndex={-1} onClick={() => onTab(t.id)} style={{
           flex: 1, padding: '8px 0 4px', border: 'none', cursor: 'pointer', backgroundColor: 'transparent',
@@ -359,32 +283,204 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [connState, setConnState] = useState(getState());
   const [isProcessing, setIsProcessing] = useState(false);
+  const [sketchOpen, setSketchOpen] = useState(false);
+  const [pendingSketch, setPendingSketch] = useState<{ dataUrl: string; bounds: { x: number; y: number; w: number; h: number } } | null>(null);
   const idleTimer = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
     if (!authed) return;
     const unsub1 = onMessage((msg) => {
       setMessages(prev => [...prev, msg]);
-      if (msg.role === 'agent') setIsProcessing(true);
-      if (msg.type === 'status' || msg.type === 'error') setIsProcessing(false);
+      if (msg.role === 'agent' || msg.type === 'tool' || msg.type === 'thinking') setIsProcessing(true);
+      // Only stop processing on explicit done/exit signals
+      if (msg.type === 'status' && msg.content.includes('done')) setIsProcessing(false);
+      if (msg.type === 'status' && msg.content.includes('exit')) setIsProcessing(false);
+      if (msg.type === 'error') setIsProcessing(false);
+      // Fallback: 30s idle timeout
       clearTimeout(idleTimer.current);
-      idleTimer.current = setTimeout(() => setIsProcessing(false), 3000);
+      idleTimer.current = setTimeout(() => setIsProcessing(false), 30000);
     });
     const unsub2 = onState(setConnState);
     connect();
     return () => { unsub1(); unsub2(); };
   }, [authed]);
 
+  const [terminalVisible, setTerminalVisible] = useState(false);
+  const [terminalHeight, setTerminalHeight] = useState(70); // percentage
+  const [hasNew, setHasNew] = useState(false);
+  const prevCount = useRef(0);
+  const dragging = useRef(false);
+  const dragStartY = useRef(0);
+  const dragStartH = useRef(70);
+
+  useEffect(() => {
+    if (messages.length > prevCount.current && !terminalVisible && isProcessing) setHasNew(true);
+    prevCount.current = messages.length;
+  }, [messages.length, terminalVisible, isProcessing]);
+
+  useEffect(() => { if (!isProcessing) setHasNew(false); }, [isProcessing]);
+
+  const toggleTerminal = () => { setTerminalVisible(v => !v); setHasNew(false); };
+
+  const handleTab = (t: string) => { setTab(t); setCurrentTab(t); if (t === 'config') setTerminalVisible(false); };
+
+  const handleSend = async (text: string) => {
+    if (text === '/clear') { setMessages([]); setIsProcessing(false); clearSession(); setPendingSketch(null); return; }
+
+    // If there's a pending sketch, upload it first and prepend to message
+    if (pendingSketch) {
+      const b64 = pendingSketch.dataUrl.split(',')[1];
+      const { x, y, w, h } = pendingSketch.bounds;
+      try {
+        const token = localStorage.getItem('morph-auth') || '';
+        const res = await fetch('/v2/claude/upload', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: `sketch-${Date.now()}.png`, base64: b64, mime: 'image/png' }),
+        });
+        const data = await res.json();
+        if (data.path) {
+          const sketchContext = `[Sketch annotation at screen position: x=${Math.round(x)}%, y=${Math.round(y)}%, w=${Math.round(w)}%, h=${Math.round(h)}%]\nImage: ${data.path}`;
+          send(sketchContext + (text ? `\n\n${text}` : ''));
+          setPendingSketch(null);
+          return;
+        }
+      } catch {}
+      setPendingSketch(null);
+    }
+
+    send(text);
+  };
+
+  const [attachMenu, setAttachMenu] = useState(false);
+
+  const handleAttach = () => setAttachMenu(v => !v);
+
+  const uploadFile = (accept: string) => {
+    setAttachMenu(false);
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = accept;
+    input.onchange = async (e: any) => {
+      const file = e.target?.files?.[0];
+      if (!file) return;
+      const b64: string = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve((reader.result as string).split(',')[1]);
+        reader.readAsDataURL(file);
+      });
+      try {
+        const token = localStorage.getItem('morph-auth') || '';
+        const res = await fetch('/v2/claude/upload', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: file.name, base64: b64, mime: file.type }),
+        });
+        const data = await res.json();
+        if (data.path) {
+          send(file.type.startsWith('image/') ? `Look at this image: ${data.path}` : `Read this file: ${data.path}`);
+        }
+      } catch {}
+    };
+    input.click();
+  };
+
+  const handleSketchInsert = (dataUrl: string, bounds: { x: number; y: number; w: number; h: number }) => {
+    setSketchOpen(false);
+    // Insert as pending attachment — user can add text prompt before sending
+    setPendingSketch({ dataUrl, bounds });
+  };
+
   if (!authed) return <PasswordGate onAuth={() => setAuthed(true)} />;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', maxWidth: 600, margin: '0 auto', width: '100%' }}>
-      {tab === 'canvas' ? (
-        <CanvasTab messages={messages} isProcessing={isProcessing} connected={connState === 'connected'} onSend={send} onStop={interrupt} />
-      ) : (
-        <ConfigTab connState={connState} />
+      {/* Content area — tab-specific, always full height */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
+        {/* Canvas iframe */}
+        <div style={{ flex: 1, display: tab === 'canvas' ? 'flex' : 'none' }}>
+          <iframe src="/canvas.html" style={{ width: '100%', height: '100%', border: 'none', backgroundColor: '#0a0a0a' }} sandbox="allow-scripts allow-same-origin" loading="lazy" />
+        </div>
+
+        {/* Config content */}
+        <div style={{ flex: 1, display: tab === 'config' ? 'flex' : 'none' }}>
+          <ConfigTab connState={connState} />
+        </div>
+
+        {/* Terminal sheet — slides up from bottom, draggable height */}
+        <div style={{
+          position: 'absolute', left: 0, right: 0, bottom: 0,
+          height: `${terminalHeight}%`,
+          transform: terminalVisible ? 'translateY(0)' : 'translateY(100%)',
+          transition: dragging.current ? 'none' : 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+          display: 'flex', flexDirection: 'column',
+          backgroundColor: '#0a0a0a',
+          borderTopLeftRadius: 12, borderTopRightRadius: 12,
+          boxShadow: terminalVisible ? '0 -4px 20px rgba(0,0,0,0.5)' : 'none',
+        }}>
+          {/* Drag handle bar — drag to resize, tap to collapse */}
+          <div
+            onClick={(e) => { if (!dragging.current) toggleTerminal(); }}
+            onTouchStart={(e) => {
+              dragging.current = true;
+              dragStartY.current = e.touches[0].clientY;
+              dragStartH.current = terminalHeight;
+            }}
+            onTouchMove={(e) => {
+              if (!dragging.current) return;
+              const containerH = (e.currentTarget.parentElement?.parentElement?.getBoundingClientRect().height || 600);
+              const dy = dragStartY.current - e.touches[0].clientY;
+              const newH = dragStartH.current + (dy / containerH * 100);
+              setTerminalHeight(Math.max(20, Math.min(95, newH)));
+            }}
+            onTouchEnd={() => {
+              if (terminalHeight < 25) { setTerminalVisible(false); setTerminalHeight(70); }
+              dragging.current = false;
+            }}
+            style={{
+              display: 'flex', justifyContent: 'center', alignItems: 'center',
+              padding: '10px 0 6px', cursor: 'grab', flexShrink: 0, touchAction: 'none',
+            }}
+          >
+            <div style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.25)' }} />
+          </div>
+          <TerminalOverlay messages={messages} visible={true} />
+        </div>
+      </div>
+
+      {/* Shared InputBar — always visible */}
+      <InputBar
+        onSend={handleSend} onStop={interrupt}
+        isProcessing={isProcessing} connected={connState === 'connected'}
+        terminalVisible={terminalVisible} onToggleTerminal={toggleTerminal}
+        hasNew={hasNew} onAttach={handleAttach} onSketch={() => setSketchOpen(true)}
+        pendingSketch={pendingSketch ? pendingSketch.dataUrl : null}
+      />
+      <TabBar tab={tab} onTab={handleTab} />
+      {/* Attach menu popup */}
+      {attachMenu && (
+        <div style={{
+          position: 'absolute', bottom: 100, left: 12, zIndex: 999,
+          backgroundColor: 'rgba(44,44,46,0.95)', backdropFilter: 'blur(12px)',
+          borderRadius: 12, padding: 4, minWidth: 180,
+          boxShadow: '0 8px 30px rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)',
+        }}>
+          {[
+            { label: 'Photo Library', icon: '🖼', action: () => uploadFile('image/*') },
+            { label: 'File', icon: '📄', action: () => uploadFile('*/*') },
+            { label: 'Sketch', icon: '✏', action: () => { setAttachMenu(false); setSketchOpen(true); } },
+            { label: 'Cancel', icon: '✕', action: () => setAttachMenu(false) },
+          ].map(item => (
+            <button key={item.label} tabIndex={-1} onClick={item.action} style={{
+              display: 'flex', alignItems: 'center', gap: 10, width: '100%',
+              padding: '12px 14px', border: 'none', cursor: 'pointer', borderRadius: 8,
+              backgroundColor: 'transparent', color: item.label === 'Cancel' ? '#999' : '#fff',
+              fontSize: 15, textAlign: 'left',
+            }}>{item.icon} {item.label}</button>
+          ))}
+        </div>
       )}
-      <TabBar tab={tab} onTab={setTab} />
+      {sketchOpen && <Sketch onInsert={handleSketchInsert} onClose={() => setSketchOpen(false)} />}
     </div>
   );
 }
