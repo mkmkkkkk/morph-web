@@ -22,6 +22,7 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
   const toolbarRef = useRef<HTMLDivElement>(null);
   const dragState = useRef({ dragging: false, offsetX: 0, offsetY: 0 });
   const [toolbarPos, setToolbarPos] = useState<{ x: number; y: number } | null>(null);
+  const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -195,42 +196,59 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
       {/* Floating draggable toolbar */}
       <div ref={toolbarRef} style={{
         position: 'fixed',
-        ...(toolbarPos ? { left: toolbarPos.x, top: toolbarPos.y } : { top: '75%', left: '50%', transform: 'translate(-50%, -50%)' }),
-        display: 'flex', alignItems: 'center', gap: 3, maxWidth: 'calc(100vw - 32px)',
-        padding: '6px 8px', borderRadius: 20,
-        backgroundColor: 'rgba(17,17,17,0.95)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
-        border: '1px solid rgba(255,255,255,0.08)',
-        boxShadow: '0 12px 40px rgba(0,0,0,0.7)',
-        zIndex: 1001, touchAction: 'none',
+        ...(toolbarPos ? { left: toolbarPos.x, top: toolbarPos.y } : { top: '72%', left: '50%', transform: 'translate(-50%, -50%)' }),
+        display: 'flex', flexDirection: 'column', alignItems: 'stretch',
+        width: 220, borderRadius: 16,
+        backgroundColor: 'rgba(28,28,30,0.92)', backdropFilter: 'blur(40px)', WebkitBackdropFilter: 'blur(40px)',
+        border: '1px solid rgba(255,255,255,0.1)',
+        boxShadow: '0 12px 40px rgba(0,0,0,0.6)',
+        zIndex: 1001, touchAction: 'none', overflow: 'hidden',
       }}>
-        {/* Drag handle — visible grip inside toolbar */}
-        <div id="sketch-drag-handle" style={{
+        {/* Drag handle — tap to collapse, drag to move */}
+        <div id="sketch-drag-handle" onClick={() => setCollapsed(c => !c)} style={{
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          width: 28, height: 28, cursor: 'grab', touchAction: 'none',
-          borderRadius: 8, background: 'rgba(255,255,255,0.06)',
+          height: 28, cursor: 'grab', touchAction: 'none',
+          borderBottom: collapsed ? 'none' : '1px solid rgba(255,255,255,0.06)',
         }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <div style={{ width: 12, height: 2, borderRadius: 1, backgroundColor: 'rgba(255,255,255,0.3)' }} />
-            <div style={{ width: 12, height: 2, borderRadius: 1, backgroundColor: 'rgba(255,255,255,0.3)' }} />
-          </div>
+          <div style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.2)' }} />
         </div>
-        <span style={{ width: 1, height: 20, backgroundColor: 'rgba(255,255,255,0.06)' }} />
-        <button tabIndex={-1} onClick={onClose} style={{ padding: '5px 6px', border: 'none', borderRadius: 10, background: 'transparent', color: '#555', fontSize: 15, cursor: 'pointer', fontWeight: 600 }}>&times;</button>
-        <span style={{ width: 1, height: 20, backgroundColor: 'rgba(255,255,255,0.06)' }} />
-        {colors.map(c => (
-          <div key={c} onClick={() => setColor(c)} style={{
-            width: 16, height: 16, borderRadius: 8, backgroundColor: c, cursor: 'pointer',
-            border: color === c ? '2px solid rgba(255,255,255,0.5)' : '2px solid rgba(255,255,255,0.06)',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
-          }} />
-        ))}
-        <span style={{ width: 1, height: 20, backgroundColor: 'rgba(255,255,255,0.06)' }} />
-        {toolBtn('pen', '✏')}
-        {toolBtn('rect', '▢')}
-        {toolBtn('arrow', '→')}
-        <span style={{ width: 1, height: 20, backgroundColor: 'rgba(255,255,255,0.06)' }} />
-        <button tabIndex={-1} onClick={handleClear} style={{ padding: '5px 8px', border: 'none', borderRadius: 10, background: 'transparent', color: '#b0903a', fontSize: 12, cursor: 'pointer', fontWeight: 600, fontFamily: 'Menlo, SF Mono, monospace' }}>clr</button>
-        <button tabIndex={-1} onClick={handleInsert} style={{ padding: '5px 12px', border: 'none', borderRadius: 12, background: '#30d158', color: '#0a0a0a', fontSize: 12, cursor: 'pointer', fontWeight: 700, fontFamily: 'Menlo, SF Mono, monospace' }}>send</button>
+
+        {!collapsed && (<>
+          {/* Row 1: Colors + Tools */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '8px 12px' }}>
+            {colors.map(c => (
+              <div key={c} onClick={() => setColor(c)} style={{
+                width: 22, height: 22, borderRadius: 11, backgroundColor: c, cursor: 'pointer',
+                border: color === c ? '2px solid rgba(255,255,255,0.6)' : '2px solid rgba(255,255,255,0.08)',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                transition: 'border-color 0.15s',
+              }} />
+            ))}
+            <span style={{ width: 1, height: 20, backgroundColor: 'rgba(255,255,255,0.08)', margin: '0 2px' }} />
+            {toolBtn('pen', '✏')}
+            {toolBtn('rect', '▢')}
+            {toolBtn('arrow', '→')}
+          </div>
+
+          {/* Row 2: Close / Clear / Insert */}
+          <div style={{ display: 'flex', gap: 6, padding: '0 10px 10px' }}>
+            <button tabIndex={-1} onClick={onClose} style={{
+              flex: 1, padding: '10px 0', borderRadius: 10, border: 'none', cursor: 'pointer',
+              backgroundColor: 'rgba(255,255,255,0.06)', color: '#999', fontSize: 14,
+              fontFamily: '-apple-system, system-ui, sans-serif',
+            }}>Cancel</button>
+            <button tabIndex={-1} onClick={handleClear} style={{
+              flex: 1, padding: '10px 0', borderRadius: 10, border: 'none', cursor: 'pointer',
+              backgroundColor: 'rgba(255,255,255,0.06)', color: '#b0903a', fontSize: 14,
+              fontFamily: '-apple-system, system-ui, sans-serif',
+            }}>Clear</button>
+            <button tabIndex={-1} onClick={handleInsert} style={{
+              flex: 1, padding: '10px 0', borderRadius: 10, border: 'none', cursor: 'pointer',
+              backgroundColor: '#30d158', color: '#0a0a0a', fontSize: 14, fontWeight: 600,
+              fontFamily: '-apple-system, system-ui, sans-serif',
+            }}>Insert</button>
+          </div>
+        </>)}
       </div>
     </div>
   );

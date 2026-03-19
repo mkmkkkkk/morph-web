@@ -143,6 +143,18 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
         {pendingSketch ? '✓' : '+'}
       </button>
 
+      {/* Pending sketch tag */}
+      {pendingSketch && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 4,
+          padding: '4px 10px', borderRadius: 12,
+          backgroundColor: 'rgba(48,209,88,0.12)', border: '1px solid rgba(48,209,88,0.2)',
+          fontSize: 12, color: '#30d158', fontFamily: 'Menlo, SF Mono, monospace', flexShrink: 0,
+        }}>
+          [Sketch]
+        </div>
+      )}
+
       {/* Text input — textarea with auto-grow, Enter=send, Shift+Enter=newline */}
       <textarea ref={ref} value={text}
         onChange={e => {
