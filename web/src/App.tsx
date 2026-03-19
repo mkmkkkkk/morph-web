@@ -114,14 +114,20 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
       {/* Connection dot */}
       <div style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: dotColor, flexShrink: 0 }} />
 
-      {/* Terminal toggle — green when CC running, yellow when idle+hasNew, grey default */}
+      {/* Terminal toggle — CSS equilateral triangle */}
       <button tabIndex={-1} onClick={onToggleTerminal} style={{
         width: 34, height: 34, borderRadius: 17, border: 'none', cursor: 'pointer', flexShrink: 0,
         backgroundColor: 'rgba(255,255,255,0.08)',
-        color: isProcessing ? '#30d158' : hasNew ? '#999' : '#666',
-        fontSize: 22, lineHeight: '22px',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}>{terminalVisible ? '▼' : '▲'}</button>
+      }}>
+        <div style={{
+          width: 0, height: 0,
+          borderLeft: '7px solid transparent', borderRight: '7px solid transparent',
+          ...(terminalVisible
+            ? { borderTop: `12px solid ${isProcessing ? '#30d158' : hasNew ? '#999' : '#666'}` }
+            : { borderBottom: `12px solid ${isProcessing ? '#30d158' : hasNew ? '#999' : '#666'}` }),
+        }} />
+      </button>
 
       {/* Attach menu button */}
       <button tabIndex={-1} onClick={onAttach}
@@ -159,18 +165,21 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
         }}
       />
 
-      {/* Send / Stop */}
-      {isProcessing ? (
-        <button tabIndex={-1} onClick={onStop} style={{ width: 36, height: 36, borderRadius: 18, border: 'none', backgroundColor: '#ff3b30', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-          <div style={{ width: 12, height: 12, borderRadius: 2, backgroundColor: '#fff' }} />
-        </button>
-      ) : (
-        <button tabIndex={-1} onClick={handleSend} disabled={!text.trim()} style={{
-          width: 36, height: 36, borderRadius: 18, border: 'none', flexShrink: 0,
-          backgroundColor: text.trim() ? '#333' : '#1c1c1e', cursor: text.trim() ? 'pointer' : 'default',
-          color: text.trim() ? '#fff' : '#444', fontSize: 18, fontWeight: 'bold',
-        }}>↑</button>
-      )}
+      {/* Stop button — always visible, red when processing */}
+      <button tabIndex={-1} onClick={onStop} style={{
+        width: 36, height: 36, borderRadius: 18, border: 'none', cursor: 'pointer',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+        backgroundColor: isProcessing ? '#ff3b30' : 'rgba(255,255,255,0.06)',
+      }}>
+        <div style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: isProcessing ? '#fff' : '#444' }} />
+      </button>
+
+      {/* Send button — always visible */}
+      <button tabIndex={-1} onClick={handleSend} disabled={!text.trim()} style={{
+        width: 36, height: 36, borderRadius: 18, border: 'none', flexShrink: 0,
+        backgroundColor: text.trim() ? '#333' : '#1c1c1e', cursor: text.trim() ? 'pointer' : 'default',
+        color: text.trim() ? '#fff' : '#444', fontSize: 18, fontWeight: 'bold',
+      }}>↑</button>
     </div>
   );
 }
