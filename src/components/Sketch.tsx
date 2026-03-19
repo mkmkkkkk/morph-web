@@ -30,22 +30,34 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const dpr = window.devicePixelRatio || 2;
-    const rect = canvas.getBoundingClientRect();
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
-    const ctx = canvas.getContext('2d')!;
-    ctx.scale(dpr, dpr);
-    ctx.clearRect(0, 0, rect.width, rect.height);
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
+    // Delay to ensure layout is complete (Framer Motion animation may affect dimensions)
+    const setup = () => {
+      const dpr = window.devicePixelRatio || 2;
+      const rect = canvas.getBoundingClientRect();
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      const ctx = canvas.getContext('2d')!;
+      ctx.scale(dpr, dpr);
+      ctx.clearRect(0, 0, rect.width, rect.height);
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+    };
+    // Run after Framer Motion entry animation completes (~300ms)
+    const t = setTimeout(setup, 350);
+    return () => clearTimeout(t);
   }, []);
 
   const getPos = (e: React.TouchEvent | React.MouseEvent) => {
     const canvas = canvasRef.current!;
     const rect = canvas.getBoundingClientRect();
     const t = 'touches' in e ? e.touches[0] || e.changedTouches[0] : e;
-    return { x: (t as any).clientX - rect.left, y: (t as any).clientY - rect.top };
+    // Account for any CSS transform scale on the canvas or parent
+    const scaleX = canvas.offsetWidth / rect.width;
+    const scaleY = canvas.offsetHeight / rect.height;
+    return {
+      x: ((t as any).clientX - rect.left) * scaleX,
+      y: ((t as any).clientY - rect.top) * scaleY,
+    };
   };
 
   const startDraw = useCallback((e: React.TouchEvent | React.MouseEvent) => {
