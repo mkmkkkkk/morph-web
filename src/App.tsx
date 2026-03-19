@@ -278,6 +278,7 @@ export default function App() {
   const [connState, setConnState] = useState(getState());
   const [isProcessing, setIsProcessing] = useState(false);
   const [sketchOpen, setSketchOpen] = useState(false);
+  const [canvasLoaded, setCanvasLoaded] = useState(false);
   const [pendingSketch, setPendingSketch] = useState<{ dataUrl: string; bounds: { x: number; y: number; w: number; h: number } } | null>(null);
   const idleTimer = useRef<ReturnType<typeof setTimeout>>();
 
@@ -392,8 +393,16 @@ export default function App() {
       {/* Content area — tab-specific, always full height */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
         {/* Canvas iframe */}
-        <div style={{ flex: 1, display: tab === 'canvas' ? 'flex' : 'none' }}>
-          <iframe src={`/canvas.html?v=${BUILD_TS}`} style={{ width: '100%', height: '100%', border: 'none', backgroundColor: '#0a0a0a' }} sandbox="allow-scripts allow-same-origin" loading="lazy" />
+        <div style={{ flex: 1, display: tab === 'canvas' ? 'flex' : 'none', position: 'relative' }}>
+          {!canvasLoaded && (
+            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0a0a0a', zIndex: 1 }}>
+              <div style={{ width: 120, height: 2, borderRadius: 1, backgroundColor: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+                <div style={{ width: '40%', height: '100%', backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 1, animation: 'canvasLoad 1.2s ease-in-out infinite' }} />
+              </div>
+              <style>{`@keyframes canvasLoad { 0% { transform: translateX(-120%); } 100% { transform: translateX(300%); } }`}</style>
+            </div>
+          )}
+          <iframe key={BUILD_TS} src={`/canvas.html?v=${BUILD_TS}`} onLoad={() => setCanvasLoaded(true)} style={{ width: '100%', height: '100%', border: 'none', backgroundColor: '#0a0a0a' }} sandbox="allow-scripts allow-same-origin" />
         </div>
 
         {/* Config content */}
