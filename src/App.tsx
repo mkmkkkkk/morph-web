@@ -77,26 +77,21 @@ const MessageRow = React.memo(function MessageRow({ msg }: { msg: Message }) {
 
 // ─── Terminal Overlay (toggle-able, sits above input bar) ───
 function TerminalOverlay({ messages, visible }: { messages: Message[]; visible: boolean }) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const lastLen = useRef(0);
-  useEffect(() => {
-    // Use 'auto' for rapid bursts (multiple messages in <500ms), 'smooth' for single messages
-    const rapid = messages.length - lastLen.current > 1;
-    lastLen.current = messages.length;
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: rapid ? 'auto' : 'smooth' });
-  }, [messages.length]);
-
   if (!visible) return null;
   return (
-    <div ref={scrollRef} style={{
-      flex: '1 1 0', minHeight: 0, overflowY: 'scroll', overflowX: 'hidden', padding: '8px 12px',
+    <div style={{
+      flex: '1 1 0', minHeight: 0, overflowY: 'scroll', overflowX: 'hidden',
+      display: 'flex', flexDirection: 'column-reverse',
       borderTop: '1px solid rgba(255,255,255,0.08)', backgroundColor: '#0a0a0a',
       WebkitOverflowScrolling: 'touch' as any,
     }}>
-      {messages.length === 0
-        ? <div style={{ color: '#333', fontSize: 13, textAlign: 'center', padding: 16, fontFamily: 'Menlo, monospace' }}>waiting for session...</div>
-        : messages.map(msg => <MessageRow key={msg.id} msg={msg} />)
-      }
+      {/* column-reverse: browser natively anchors scroll to bottom. Inner div keeps message order correct. */}
+      <div style={{ padding: '8px 12px' }}>
+        {messages.length === 0
+          ? <div style={{ color: '#333', fontSize: 13, textAlign: 'center', padding: 16, fontFamily: 'Menlo, monospace' }}>waiting for session...</div>
+          : messages.map(msg => <MessageRow key={msg.id} msg={msg} />)
+        }
+      </div>
     </div>
   );
 }
@@ -615,9 +610,9 @@ export default function App() {
           }} />
         </div>
 
-        {/* Terminal sheet — slides up from bottom, draggable height */}
+        {/* Origin Terminal — always on top of Canvas UI */}
         <div style={{
-          position: 'absolute', left: 0, right: 0, bottom: 0,
+          position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 10,
           height: `${terminalHeight}%`,
           transform: terminalVisible ? 'translateY(0)' : 'translateY(100%)',
           transition: dragging.current ? 'none' : 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
