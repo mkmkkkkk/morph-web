@@ -127,7 +127,7 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
   const borderTint = isBlue ? 'rgba(100,140,255,0.15)' : 'rgba(255,255,255,0.10)';
 
   return (
-    <div style={{ borderTop: `1px solid ${borderTint}`, padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
+    <div style={{ borderTop: `1px solid ${borderTint}`, padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
       {/* Connection dot */}
       <div style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: dotColor, flexShrink: 0 }} />
 
@@ -572,6 +572,8 @@ function SessionTerminal({ session, messages, onBack, onSend }: {
         onClearPending={() => { setSessionSketch(null); setSessionFile(null); }}
         tint="blue"
       />
+      {/* Bottom spacer — matches main view's TabBar (51px + safe area) */}
+      <div style={{ flexShrink: 0, height: 'calc(51px + env(safe-area-inset-bottom))', backgroundColor: '#0a0a0a' }} />
 
       {/* Session attach menu */}
       <AnimatePresence>
