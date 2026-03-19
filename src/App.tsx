@@ -97,7 +97,7 @@ function TerminalOverlay({ messages, visible }: { messages: Message[]; visible: 
 }
 
 // ─── Input Bar (matches native: dot + attach + terminal toggle + input + send/stop) ───
-function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, onToggleTerminal, hasNew, onAttach, onSketch, pendingSketch, pendingFile, onClearPending, tint }: {
+function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, onToggleTerminal, hasNew, onAttach, onSketch, pendingSketch, pendingFile, onClearPending, tint, keyboardOpen }: {
   onSend: (text: string) => void; onStop: () => void; isProcessing: boolean; connected: boolean;
   terminalVisible?: boolean; onToggleTerminal?: () => void; hasNew?: boolean;
   onAttach: () => void;
@@ -106,6 +106,7 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
   pendingFile: 'image' | 'file' | null;
   onClearPending: () => void;
   tint?: 'blue'; // session terminal color
+  keyboardOpen?: boolean;
 }) {
   const [text, setText] = useState('');
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -127,7 +128,7 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
   const borderTint = isBlue ? 'rgba(100,140,255,0.15)' : 'rgba(255,255,255,0.10)';
 
   return (
-    <div style={{ borderTop: `1px solid ${borderTint}`, padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
+    <div style={{ borderTop: `1px solid ${borderTint}`, padding: keyboardOpen ? '8px 10px 2px' : '6px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
       {/* Connection dot */}
       <div style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: dotColor, flexShrink: 0 }} />
 
@@ -461,11 +462,12 @@ function TabBar({ tab, onTab }: { tab: string; onTab: (t: string) => void }) {
 }
 
 // ─── Session Terminal (slide-in from right, swipe to go back) ───
-function SessionTerminal({ session, messages, onBack, onSend }: {
+function SessionTerminal({ session, messages, onBack, onSend, keyboardOpen }: {
   session: { id: string; display: string };
   messages: Message[];
   onBack: () => void;
   onSend: (text: string) => void;
+  keyboardOpen?: boolean;
 }) {
   const dragX = useMotionValue(0);
   const swipeStart = useRef<{ x: number } | null>(null);
@@ -571,6 +573,7 @@ function SessionTerminal({ session, messages, onBack, onSend }: {
         pendingFile={sessionFile ? (sessionFile.isImage ? 'image' : 'file') : null}
         onClearPending={() => { setSessionSketch(null); setSessionFile(null); }}
         tint="blue"
+        keyboardOpen={keyboardOpen}
       />
       {/* Bottom spacer — matches main view's TabBar (51px + safe area) */}
       <div style={{ flexShrink: 0, height: 'calc(51px + env(safe-area-inset-bottom))', backgroundColor: '#0a0a0a' }} />
@@ -872,6 +875,7 @@ export default function App() {
           pendingSketch={pendingSketch ? pendingSketch.dataUrl : null}
           pendingFile={pendingFile ? (pendingFile.isImage ? 'image' : 'file') : null}
           onClearPending={() => { setPendingSketch(null); setPendingFile(null); }}
+          keyboardOpen={keyboardOpen}
         />
       </div>
       {!keyboardOpen && <TabBar tab={tab} onTab={handleTab} />}
@@ -934,6 +938,7 @@ export default function App() {
             onSend={(text) => {
               switchSession(selectedSession.id, { resume: true, message: text });
             }}
+            keyboardOpen={keyboardOpen}
           />
         )}
       </AnimatePresence>
