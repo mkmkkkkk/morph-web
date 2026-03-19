@@ -427,24 +427,24 @@ function Row({ label, value, valueColor }: { label: string; value: string; value
 
 // ─── Tab Bar ───
 const tabs = [{ id: 'canvas', label: 'Canvas' }, { id: 'config', label: 'Config' }];
-function TabBar({ tab, onTab }: { tab: string; onTab: (t: string) => void }) {
+function TabBar({ tab, onTab, disabled }: { tab: string; onTab: (t: string) => void; disabled?: boolean }) {
   return (
-    <div style={{ display: 'flex', borderTop: '1px solid rgba(255,255,255,0.10)', paddingBottom: 'max(4px, env(safe-area-inset-bottom))', flexShrink: 0, position: 'relative', backgroundColor: '#0a0a0a' }}>
+    <div style={{ display: 'flex', borderTop: '1px solid rgba(255,255,255,0.10)', paddingBottom: 'max(4px, env(safe-area-inset-bottom))', flexShrink: 0, position: 'relative', backgroundColor: '#0a0a0a', opacity: disabled ? 0.3 : 1, pointerEvents: disabled ? 'none' : 'auto' }}>
       {/* Sliding indicator */}
-      <motion.div
+      {!disabled && <motion.div
         layoutId="tab-indicator"
         style={{
           position: 'absolute', top: 0, height: 2, width: '50%', backgroundColor: '#fff', borderRadius: 1,
         }}
         animate={{ x: tab === 'canvas' ? 0 : '100%' }}
         transition={{ type: 'spring', stiffness: 500, damping: 35 }}
-      />
+      />}
       {tabs.map(t => (
         <motion.button key={t.id} tabIndex={-1} onClick={() => onTab(t.id)}
-          whileTap={{ scale: 0.92 }}
+          whileTap={disabled ? undefined : { scale: 0.92 }}
           style={{
-            flex: 1, padding: '8px 0 4px', border: 'none', cursor: 'pointer', backgroundColor: 'transparent',
-            color: tab === t.id ? '#fff' : '#636366', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+            flex: 1, padding: '8px 0 4px', border: 'none', cursor: disabled ? 'default' : 'pointer', backgroundColor: 'transparent',
+            color: disabled ? '#333' : (tab === t.id ? '#fff' : '#636366'), display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
             transition: 'color 0.2s',
           }}>
           <span style={{ display: 'flex' }}>
@@ -575,8 +575,8 @@ function SessionTerminal({ session, messages, onBack, onSend, keyboardOpen }: {
         tint="blue"
         keyboardOpen={keyboardOpen}
       />
-      {/* Bottom spacer — matches main view's TabBar (51px + safe area) */}
-      <div style={{ flexShrink: 0, height: 'calc(51px + env(safe-area-inset-bottom))', backgroundColor: '#0a0a0a' }} />
+      {/* Disabled TabBar — same height as main, keeps InputBar aligned */}
+      {!keyboardOpen && <TabBar tab="canvas" onTab={() => {}} disabled />}
 
       {/* Session attach menu */}
       <AnimatePresence>
