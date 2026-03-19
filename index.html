@@ -13,12 +13,18 @@
   <style>@font-face { font-family: 'CloisterBlack'; src: url('/CloisterBlack.ttf'); }</style>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { height: 100%; margin: 0; padding: 0; background: #0a0a0a; }
-    #root { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: #0a0a0a; color: #fff; font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; overflow: hidden; }
+    html, body { margin: 0; padding: 0; background: #0a0a0a; overflow: hidden; height: var(--real-h, 100%); }
+    #root { height: var(--real-h, 100%); width: 100%; background: #0a0a0a; color: #fff; font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; overflow: hidden; }
   </style>
 </head>
 <body>
   <div id="root"></div>
+  <script>
+    // Use actual screen height — CSS viewport units don't include iOS safe area
+    var h = window.screen.height;
+    document.documentElement.style.setProperty('--real-h', h + 'px');
+    document.getElementById('root').style.height = h + 'px';
+  </script>
   <script type="module" src="/src/main.tsx"></script>
 </body>
 </html>

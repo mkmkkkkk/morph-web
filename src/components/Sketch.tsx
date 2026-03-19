@@ -213,19 +213,13 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
             </svg>
           </motion.div>
         ) : (<>
-          {/* Drag handle + close */}
-          <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            height: 28, padding: '0 8px',
+          {/* Drag handle (tap to collapse) */}
+          <div onClick={() => { setCollapsed(true); resetToolbarPos(); }} style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            height: 28, cursor: 'pointer',
             borderBottom: '1px solid rgba(255,255,255,0.06)',
           }}>
-            <motion.div whileTap={{ scale: 0.85 }} onClick={onClose} style={{ width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#666" strokeWidth="1.5" strokeLinecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
-            </motion.div>
-            <div onClick={() => { setCollapsed(true); resetToolbarPos(); }} style={{ flex: 1, display: 'flex', justifyContent: 'center', cursor: 'pointer' }}>
-              <div style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.2)' }} />
-            </div>
-            <div style={{ width: 20 }} />
+            <div style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.2)' }} />
           </div>
 
           {/* Row 1: Colors + Tools */}
@@ -263,17 +257,18 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
           </div>
 
           {/* Row 2: Undo / Clear / Insert + close */}
+          {/* Row 2: Cancel / Undo / Insert */}
           <div style={{ display: 'flex', gap: 6, padding: '0 10px 10px' }}>
+            <motion.button tabIndex={-1} whileTap={{ scale: 0.93 }} onClick={onClose} style={{
+              flex: 1, padding: '10px 0', borderRadius: 10, border: 'none', cursor: 'pointer',
+              backgroundColor: 'rgba(255,59,48,0.12)', color: '#ff6961', fontSize: 14,
+              fontFamily: '-apple-system, system-ui, sans-serif',
+            }}>Cancel</motion.button>
             <motion.button tabIndex={-1} whileTap={{ scale: 0.93 }} onClick={handleUndo} style={{
               flex: 1, padding: '10px 0', borderRadius: 10, border: 'none', cursor: 'pointer',
               backgroundColor: 'rgba(255,255,255,0.06)', color: '#999', fontSize: 14,
               fontFamily: '-apple-system, system-ui, sans-serif',
             }}>Undo</motion.button>
-            <motion.button tabIndex={-1} whileTap={{ scale: 0.93 }} onClick={handleClear} style={{
-              flex: 1, padding: '10px 0', borderRadius: 10, border: 'none', cursor: 'pointer',
-              backgroundColor: 'rgba(255,255,255,0.06)', color: '#b0903a', fontSize: 14,
-              fontFamily: '-apple-system, system-ui, sans-serif',
-            }}>Clear</motion.button>
             <motion.button tabIndex={-1} whileTap={{ scale: 0.93 }} onClick={handleInsert} style={{
               flex: 1, padding: '10px 0', borderRadius: 10, border: 'none', cursor: 'pointer',
               backgroundColor: '#30d158', color: '#0a0a0a', fontSize: 14, fontWeight: 600,
