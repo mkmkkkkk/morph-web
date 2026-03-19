@@ -122,9 +122,9 @@
       background: transparent;
     }
 
-    /* Toolbar — floating pill at bottom */
+    /* Toolbar — draggable floating pill */
     #sketch-toolbar {
-      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+      position: fixed; bottom: 24px; left: 50%;
       display: flex; gap: 4px; align-items: center; z-index: 501;
       background: #111; border-radius: 20px; padding: 6px 10px;
       border: 1px solid rgba(255,255,255,0.08);
@@ -133,6 +133,9 @@
         0 0 0 1px rgba(255,255,255,0.03);
       backdrop-filter: blur(20px);
       -webkit-backdrop-filter: blur(20px);
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
     }
 
     .sketch-btn {
@@ -509,6 +512,55 @@
     }
     function _sketchTouchEnd() { _sketchEndStroke(); }
 
+    // === TOOLBAR DRAG ===
+    var _toolbarDragging = false;
+    var _toolbarOffsetX = 0;
+    var _toolbarOffsetY = 0;
+
+    function _toolbarInitDrag() {
+      var tb = document.getElementById('sketch-toolbar');
+      // Reset transform — position with left/bottom instead
+      var rect = tb.getBoundingClientRect();
+      tb.style.left = rect.left + 'px';
+      tb.style.bottom = 'auto';
+      tb.style.top = rect.top + 'px';
+      tb.style.transform = 'none';
+
+      tb.addEventListener('touchstart', function(e) {
+        // Only drag from the toolbar background, not buttons
+        if (e.target.closest('.sketch-btn, .sketch-color')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        _toolbarDragging = true;
+        var t = e.touches[0];
+        var rect = tb.getBoundingClientRect();
+        _toolbarOffsetX = t.clientX - rect.left;
+        _toolbarOffsetY = t.clientY - rect.top;
+      }, { passive: false });
+
+      tb.addEventListener('touchmove', function(e) {
+        if (!_toolbarDragging) return;
+        e.preventDefault();
+        e.stopPropagation();
+        var t = e.touches[0];
+        var x = t.clientX - _toolbarOffsetX;
+        var y = t.clientY - _toolbarOffsetY;
+        // Clamp to viewport
+        var w = tb.offsetWidth, h = tb.offsetHeight;
+        x = Math.max(0, Math.min(window.innerWidth - w, x));
+        y = Math.max(0, Math.min(window.innerHeight - h, y));
+        tb.style.left = x + 'px';
+        tb.style.top = y + 'px';
+      }, { passive: false });
+
+      tb.addEventListener('touchend', function(e) {
+        if (_toolbarDragging) {
+          e.stopPropagation();
+          _toolbarDragging = false;
+        }
+      });
+    }
+
     function _sketchOpen() {
       _sketchActive = true;
       var overlay = document.getElementById('sketch-overlay');
@@ -521,6 +573,13 @@
       document.body.style.touchAction = 'none';
       _sketchInit();
       _sketchClear();
+      // Reset toolbar to default position + init drag
+      var tb = document.getElementById('sketch-toolbar');
+      tb.style.left = '50%';
+      tb.style.top = '';
+      tb.style.bottom = '24px';
+      tb.style.transform = 'translateX(-50%)';
+      setTimeout(_toolbarInitDrag, 50);
       _postToNative('sketch.opened', {});
     }
 
