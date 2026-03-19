@@ -179,7 +179,12 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
   );
 
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', flexDirection: 'column' }}>
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', flexDirection: 'column',
+      animation: 'sketchIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both',
+      transformOrigin: 'bottom left',
+    }}>
+      <style>{`@keyframes sketchIn { from { transform: scale(0.85); opacity: 0; } to { transform: scale(1); opacity: 1; } }`}</style>
       {/* Transparent canvas overlay */}
       <canvas
         ref={canvasRef}
