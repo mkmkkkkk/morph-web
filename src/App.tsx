@@ -23,7 +23,7 @@ function PasswordGate({ onAuth }: { onAuth: () => void }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 16, padding: 20 }}>
       <div style={{ color: '#fff', fontSize: 48, fontFamily: "'CloisterBlack', serif", opacity: 0.8 }}>M</div>
-      <div style={{ color: '#666', fontSize: 14, marginTop: -8 }}>Morph</div>
+      <div style={{ color: '#888', fontSize: 14, marginTop: -8 }}>Morph</div>
       <input type="password" value={pass}
         onChange={e => { setPass(e.target.value); setError(''); }}
         onKeyDown={e => { if (e.key === 'Enter') handleSubmit(); }}
@@ -66,7 +66,7 @@ const MessageRow = React.memo(function MessageRow({ msg }: { msg: Message }) {
     case 'status':
       return msg.content.length > 120
         ? <Collapsible label="status" preview={msg.content.slice(0, 80).replace(/\n/g, ' ')} content={msg.content} color="#555" />
-        : <div style={{ ...mono, color: '#555', textAlign: 'center', marginTop: 4, marginBottom: 4 }}>{msg.content}</div>;
+        : <div style={{ ...mono, color: '#777', textAlign: 'center', marginTop: 4, marginBottom: 4 }}>{msg.content}</div>;
     case 'error':
       return msg.content.length > 120
         ? <Collapsible label="error" preview={msg.content.slice(0, 80).replace(/\n/g, ' ')} content={msg.content} color="#ff453a" />
@@ -88,7 +88,7 @@ function TerminalOverlay({ messages, visible }: { messages: Message[]; visible: 
       {/* column-reverse: browser natively anchors scroll to bottom. Inner div keeps message order correct. */}
       <div style={{ padding: '8px 12px' }}>
         {messages.length === 0
-          ? <div style={{ color: '#333', fontSize: 13, textAlign: 'center', padding: 16, fontFamily: 'Menlo, monospace' }}>waiting for session...</div>
+          ? <div style={{ color: '#4a4a4a', fontSize: 13, textAlign: 'center', padding: 16, fontFamily: 'Menlo, monospace' }}>waiting for session...</div>
           : messages.map(msg => <MessageRow key={msg.id} msg={msg} />)
         }
       </div>
@@ -118,7 +118,7 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
   const dotColor = connected ? '#30d158' : '#636366';
 
   return (
-    <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
+    <div style={{ borderTop: '1px solid rgba(255,255,255,0.10)', padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
       {/* Connection dot */}
       <div style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: dotColor, flexShrink: 0, marginBottom: 0 }} />
 
@@ -167,11 +167,11 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
         enterKeyHint="send"
         autoComplete="off"
         style={{
-          flex: 1, minHeight: 36, maxHeight: 120, resize: 'none',
+          flex: 1, minHeight: 36, maxHeight: 120, resize: 'none', overflow: 'hidden',
           borderRadius: 18, border: 'none', outline: 'none',
           padding: '8px 16px', fontSize: 16, lineHeight: '20px',
           fontFamily: '-apple-system, system-ui, sans-serif', backgroundColor: '#1c1c1e', color: '#fff',
-          WebkitAppearance: 'none' as any,
+          WebkitAppearance: 'none' as any, WebkitUserSelect: 'text' as any,
         }}
       />
 
@@ -196,7 +196,7 @@ function markViewed(id: string) {
   const s = getViewed(); s.add(id); localStorage.setItem(VIEWED_KEY, JSON.stringify([...s]));
 }
 
-function SessionCards({ onSelect }: { onSelect: (sessionId: string) => void }) {
+function SessionCards({ onSelect }: { onSelect: (sessionId: string, display?: string) => void }) {
   const [sessions, setSessions] = useState<any[]>([]);
   const [viewed, setViewed] = useState<Set<string>>(getViewed);
   const [expanded, setExpanded] = useState(true);
@@ -226,13 +226,14 @@ function SessionCards({ onSelect }: { onSelect: (sessionId: string) => void }) {
   const borderColor = (s: any) => {
     if (s.active) return 'rgba(48,209,88,0.25)';
     if (!viewed.has(s.id)) return 'rgba(255,204,0,0.2)';
-    return 'rgba(255,255,255,0.04)';
+    return 'rgba(255,255,255,0.08)';
   };
 
   const handleSelect = (id: string) => {
     markViewed(id);
     setViewed(getViewed());
-    onSelect(id);
+    const s = sessions.find(x => x.id === id);
+    onSelect(id, s?.display);
   };
 
   if (sessions.length === 0) return null;
@@ -247,12 +248,12 @@ function SessionCards({ onSelect }: { onSelect: (sessionId: string) => void }) {
         onClick={() => setExpanded(v => !v)}
         style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: expanded ? 6 : 0, cursor: 'pointer', pointerEvents: 'auto' }}
       >
-        <span style={{ color: '#555', fontSize: 11, fontWeight: 600, textTransform: 'uppercase' as const, letterSpacing: 0.5 }}>
+        <span style={{ color: '#777', fontSize: 11, fontWeight: 600, textTransform: 'uppercase' as const, letterSpacing: 0.5 }}>
           Sessions ({sessions.length})
         </span>
         {activeCount > 0 && <span style={{ fontSize: 9, color: '#30d158' }}>{activeCount} active</span>}
         {unviewedCount > 0 && <span style={{ fontSize: 9, color: '#ffcc00' }}>{unviewedCount} new</span>}
-        <span style={{ color: '#444', fontSize: 10 }}>{expanded ? '▾' : '▸'}</span>
+        <span style={{ color: '#888', fontSize: 10 }}>{expanded ? '▾' : '▸'}</span>
       </div>
 
       {/* Session rows */}
@@ -280,7 +281,7 @@ function SessionCards({ onSelect }: { onSelect: (sessionId: string) => void }) {
                 <span style={{ color: '#ddd', fontSize: 13, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
                   {s.display || s.id.slice(0, 8)}
                 </span>
-                <span style={{ color: '#555', fontSize: 11, flexShrink: 0 }}>{timeAgo(s.updatedAt)}</span>
+                <span style={{ color: '#777', fontSize: 11, flexShrink: 0 }}>{timeAgo(s.updatedAt)}</span>
               </motion.div>
             ))}
           </motion.div>
@@ -339,19 +340,19 @@ function ConfigTab({ connState, onQuickAction }: { connState: string; onQuickAct
         ].map(a => (
           <button key={a.label} onClick={() => onQuickAction(a.prompt)} style={{
             padding: '10px 0', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 14, width: '100%', textAlign: 'center',
-            backgroundColor: 'rgba(255,255,255,0.06)', color: '#fff', marginBottom: 4,
+            backgroundColor: 'rgba(255,255,255,0.10)', color: '#fff', marginBottom: 4,
           }}>{a.label}</button>
         ))}
       </Section>
 
-      <Section title={<span>Sessions <span style={{ color: '#666', fontWeight: 400, fontSize: 11 }}>{loading ? '...' : `${sessions.length}`}</span></span>}>
-        <button onClick={loadSessions} style={{ padding: '6px', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 12, width: '100%', backgroundColor: 'rgba(255,255,255,0.04)', color: '#666', marginBottom: 8 }}>
+      <Section title={<span>Sessions <span style={{ color: '#888', fontWeight: 400, fontSize: 11 }}>{loading ? '...' : `${sessions.length}`}</span></span>}>
+        <button onClick={loadSessions} style={{ padding: '6px', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 12, width: '100%', backgroundColor: 'rgba(255,255,255,0.08)', color: '#888', marginBottom: 8 }}>
           {loading ? 'Loading...' : 'Refresh'}
         </button>
 
         {/* Active sessions first */}
         {activeSessions.map((s: any) => (
-          <div key={s.id} style={{ padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+          <div key={s.id} style={{ padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <div style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#30d158', flexShrink: 0 }} />
               <span style={{ color: '#fff', fontSize: 13, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
@@ -364,15 +365,15 @@ function ConfigTab({ connState, onQuickAction }: { connState: string; onQuickAct
 
         {/* Recent sessions */}
         {sessions.map((s: any) => (
-          <div key={s.id} style={{ padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+          <div key={s.id} style={{ padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <div style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: s.active ? '#30d158' : '#555', flexShrink: 0 }} />
               <span style={{ color: '#e0e0e0', fontSize: 13, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
                 {s.display || s.id.slice(0, 8)}
               </span>
-              <span style={{ color: '#666', fontSize: 11, flexShrink: 0 }}>{timeAgo(s.updatedAt)}</span>
+              <span style={{ color: '#888', fontSize: 11, flexShrink: 0 }}>{timeAgo(s.updatedAt)}</span>
             </div>
-            <div style={{ fontSize: 11, color: '#555', fontFamily: 'Menlo, monospace', marginTop: 2, marginLeft: 12 }}>
+            <div style={{ fontSize: 11, color: '#777', fontFamily: 'Menlo, monospace', marginTop: 2, marginLeft: 12 }}>
               {s.id.slice(0, 8)}
             </div>
           </div>
@@ -411,7 +412,7 @@ function Row({ label, value, valueColor }: { label: string; value: string; value
 const tabs = [{ id: 'canvas', label: 'Canvas' }, { id: 'config', label: 'Config' }];
 function TabBar({ tab, onTab }: { tab: string; onTab: (t: string) => void }) {
   return (
-    <div style={{ display: 'flex', borderTop: '1px solid rgba(255,255,255,0.06)', paddingBottom: 'max(4px, env(safe-area-inset-bottom))', flexShrink: 0, position: 'relative', backgroundColor: '#0a0a0a' }}>
+    <div style={{ display: 'flex', borderTop: '1px solid rgba(255,255,255,0.10)', paddingBottom: 'max(4px, env(safe-area-inset-bottom))', flexShrink: 0, position: 'relative', backgroundColor: '#0a0a0a' }}>
       {/* Sliding indicator */}
       <motion.div
         layoutId="tab-indicator"
@@ -454,6 +455,8 @@ export default function App() {
   const [canvasLoaded, setCanvasLoaded] = useState(false);
   const [pendingSketch, setPendingSketch] = useState<{ dataUrl: string; bounds: { x: number; y: number; w: number; h: number } } | null>(null);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
+  const [selectedSession, setSelectedSession] = useState<{ id: string; display: string } | null>(null);
+  const [sessionMessages, setSessionMessages] = useState<Message[]>([]);
   const idleTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const inputBarRef = useRef<HTMLDivElement>(null);
 
@@ -468,6 +471,22 @@ export default function App() {
     vv.addEventListener('resize', onResize);
     return () => vv.removeEventListener('resize', onResize);
   }, []);
+
+  // Load history when a session is selected
+  useEffect(() => {
+    if (!selectedSession) return;
+    const token = localStorage.getItem('morph-auth') || '';
+    fetch(`/v2/claude/history/${selectedSession.id}?limit=50`, { headers: { 'Authorization': `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(d => {
+        const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        setSessionMessages((d.messages || []).map((m: any) => ({
+          id: uid(), role: m.role, type: m.type, content: m.content, name: m.name,
+          ts: m.ts ? new Date(m.ts).getTime() : Date.now(),
+        })));
+      })
+      .catch(() => {});
+  }, [selectedSession?.id]);
 
   useEffect(() => {
     if (!authed) return;
@@ -582,10 +601,9 @@ export default function App() {
         {/* Canvas view */}
         <div style={{ flex: 1, display: tab === 'canvas' ? 'flex' : 'none', position: 'relative' }}>
           {/* Session cards — floating overlay */}
-          <SessionCards onSelect={(sid) => {
-            setMessages([]);
-            switchSession(sid, { resume: true });
-            setTerminalVisible(true);
+          <SessionCards onSelect={(sid, display) => {
+            setSessionMessages([]);
+            setSelectedSession({ id: sid, display: display || sid.slice(0, 8) });
           }} />
           {/* Canvas iframe — fills full area */}
           <div style={{ flex: 1, position: 'relative' }}>
@@ -650,7 +668,7 @@ export default function App() {
           <TerminalOverlay messages={messages} visible={true} />
           {/* ESC button — bottom-right of terminal, only when open */}
           <div style={{ padding: '4px 12px 6px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
-            <span style={{ marginRight: 8, color: '#444', fontSize: 11, fontFamily: 'Menlo, monospace' }}>
+            <span style={{ marginRight: 8, color: '#888', fontSize: 11, fontFamily: 'Menlo, monospace' }}>
               {isProcessing ? (() => {
                 const words = ['thinking...', 'pondering...', 'wondering...', 'reasoning...', 'considering...', 'analyzing...', 'processing...', 'compacting...'];
                 return words[Math.floor(Date.now() / 4000) % words.length];
@@ -709,7 +727,7 @@ export default function App() {
                 initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: i * 0.06, type: 'spring', stiffness: 400, damping: 20 }}
               >
-                {i > 0 && <div style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', margin: '0 12px' }} />}
+                {i > 0 && <div style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.10)', margin: '0 12px' }} />}
                 <button tabIndex={-1} onClick={item.action} style={{
                   display: 'flex', alignItems: 'center', gap: 12, width: '100%',
                   padding: '11px 16px', border: 'none', cursor: 'pointer', borderRadius: 0,
@@ -725,6 +743,56 @@ export default function App() {
         <Sketch onInsert={handleSketchInsert} onClose={() => setSketchOpen(false)} />,
         document.body
       )}
+
+      {/* Session Terminal — slides in from right */}
+      <AnimatePresence>
+        {selectedSession && (
+          <motion.div
+            key="session-terminal"
+            initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
+            transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+            style={{
+              position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+              backgroundColor: '#0a0a0a', zIndex: 50,
+              display: 'flex', flexDirection: 'column',
+            }}
+          >
+            {/* Header bar */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '12px 12px 8px', paddingTop: 'max(12px, env(safe-area-inset-top))',
+              borderBottom: '1px solid rgba(255,255,255,0.10)',
+              flexShrink: 0,
+            }}>
+              <motion.button
+                whileTap={{ scale: 0.9 }}
+                onClick={() => setSelectedSession(null)}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px',
+                  color: '#999', fontSize: 14, display: 'flex', alignItems: 'center', gap: 4,
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+                Back
+              </motion.button>
+              <span style={{ color: '#ddd', fontSize: 14, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+                {selectedSession.display}
+              </span>
+              <span style={{ color: '#777', fontSize: 11, fontFamily: 'Menlo, monospace' }}>
+                {selectedSession.id.slice(0, 8)}
+              </span>
+            </div>
+
+            {/* Messages — reuse TerminalOverlay */}
+            <TerminalOverlay messages={sessionMessages} visible={true} />
+
+            {/* Bottom status */}
+            <div style={{ padding: '6px 12px', borderTop: '1px solid rgba(255,255,255,0.10)', flexShrink: 0, display: 'flex', justifyContent: 'center' }}>
+              <span style={{ color: '#777', fontSize: 11, fontFamily: 'Menlo, monospace' }}>read-only</span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
