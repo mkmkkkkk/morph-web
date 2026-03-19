@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { connect, send, interrupt, clearSession, setCurrentTab, onMessage, onState, getState, type Message } from './lib/connection';
+import { connect, send, interrupt, clearSession, setCurrentTab, switchSession, fetchSessions, onMessage, onState, getState, type Message } from './lib/connection';
 import Sketch from './components/Sketch';
 
 // Cache-bust canvas.html on each page load (not per render)
@@ -190,17 +190,143 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
   );
 }
 
+// ─── Session Cards (Canvas overlay) ───
+const FIXED_SESSION_ID = 'a0a0a0a0-0e00-4000-a000-000000000002';
+const VIEWED_KEY = 'morph-viewed-sessions';
+
+function getViewed(): Set<string> {
+  try { return new Set(JSON.parse(localStorage.getItem(VIEWED_KEY) || '[]')); } catch { return new Set(); }
+}
+function markViewed(id: string) {
+  const s = getViewed(); s.add(id); localStorage.setItem(VIEWED_KEY, JSON.stringify([...s]));
+}
+
+function SessionCards({ onSelect }: { onSelect: (sessionId: string) => void }) {
+  const [sessions, setSessions] = useState<any[]>([]);
+  const [viewed, setViewed] = useState<Set<string>>(getViewed);
+  const [expanded, setExpanded] = useState(true);
+
+  useEffect(() => {
+    fetchSessions().then(all => {
+      // Filter out fixed session, limit to 7
+      const filtered = all.filter(s => s.id !== FIXED_SESSION_ID).slice(0, 7);
+      setSessions(filtered);
+    });
+  }, []);
+
+  const timeAgo = (ms: number) => {
+    const diff = Date.now() - ms;
+    if (diff < 60000) return 'now';
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}m`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h`;
+    return `${Math.floor(diff / 86400000)}d`;
+  };
+
+  // Color: green=active, yellow=unviewed+inactive, gray=viewed+inactive
+  const dotColor = (s: any) => {
+    if (s.active) return '#30d158';
+    if (!viewed.has(s.id)) return '#ffcc00';
+    return '#555';
+  };
+  const borderColor = (s: any) => {
+    if (s.active) return 'rgba(48,209,88,0.25)';
+    if (!viewed.has(s.id)) return 'rgba(255,204,0,0.2)';
+    return 'rgba(255,255,255,0.04)';
+  };
+
+  const handleSelect = (id: string) => {
+    markViewed(id);
+    setViewed(getViewed());
+    onSelect(id);
+  };
+
+  if (sessions.length === 0) return null;
+
+  const activeCount = sessions.filter(s => s.active).length;
+  const unviewedCount = sessions.filter(s => !s.active && !viewed.has(s.id)).length;
+
+  return (
+    <div style={{ position: 'absolute', top: 200, left: 0, right: 0, zIndex: 2, padding: '0 12px', pointerEvents: 'none' }}>
+      {/* Header — tap to toggle */}
+      <div
+        onClick={() => setExpanded(v => !v)}
+        style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: expanded ? 6 : 0, cursor: 'pointer', pointerEvents: 'auto' }}
+      >
+        <span style={{ color: '#555', fontSize: 11, fontWeight: 600, textTransform: 'uppercase' as const, letterSpacing: 0.5 }}>
+          Sessions ({sessions.length})
+        </span>
+        {activeCount > 0 && <span style={{ fontSize: 9, color: '#30d158' }}>{activeCount} active</span>}
+        {unviewedCount > 0 && <span style={{ fontSize: 9, color: '#ffcc00' }}>{unviewedCount} new</span>}
+        <span style={{ color: '#444', fontSize: 10 }}>{expanded ? '▾' : '▸'}</span>
+      </div>
+
+      {/* Session rows */}
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            style={{ overflow: 'hidden', pointerEvents: 'auto' }}
+          >
+            {sessions.map(s => (
+              <motion.div
+                key={s.id}
+                whileTap={{ scale: 0.98 }}
+                onClick={() => handleSelect(s.id)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '8px 10px', marginBottom: 3,
+                  backgroundColor: 'rgba(28,28,30,0.85)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+                  borderRadius: 10, cursor: 'pointer',
+                  border: `1px solid ${borderColor(s)}`,
+                }}
+              >
+                <div style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: dotColor(s), flexShrink: 0 }} />
+                <span style={{ color: '#ddd', fontSize: 13, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+                  {s.display || s.id.slice(0, 8)}
+                </span>
+                <span style={{ color: '#555', fontSize: 11, flexShrink: 0 }}>{timeAgo(s.updatedAt)}</span>
+              </motion.div>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 // ─── Config Tab ───
 function ConfigTab({ connState, onQuickAction }: { connState: string; onQuickAction: (prompt: string) => void }) {
+  const [sessions, setSessions] = useState<any[]>([]);
   const [activeSessions, setActiveSessions] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
   const token = () => localStorage.getItem('morph-auth') || '';
   const headers = () => ({ 'Authorization': `Bearer ${token()}` });
 
-  const loadActive = async () => {
-    try { const r = await fetch('/v2/claude/active', { headers: headers() }); const d = await r.json(); setActiveSessions(d.sessions || []); } catch {}
+  const loadSessions = async () => {
+    setLoading(true);
+    try {
+      const [sessRes, actRes] = await Promise.all([
+        fetch('/v2/claude/sessions?limit=30', { headers: headers() }),
+        fetch('/v2/claude/active', { headers: headers() }),
+      ]);
+      const sessData = await sessRes.json();
+      const actData = await actRes.json();
+      setSessions(sessData.sessions || []);
+      setActiveSessions(actData.sessions || []);
+    } catch {}
+    setLoading(false);
   };
 
-  useEffect(() => { loadActive(); }, []);
+  useEffect(() => { loadSessions(); }, []);
+
+  const timeAgo = (ms: number) => {
+    const diff = Date.now() - ms;
+    if (diff < 60000) return 'just now';
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+    return `${Math.floor(diff / 86400000)}d ago`;
+  };
 
   return (
     <div style={{ flex: 1, overflowY: 'scroll', padding: 16, paddingTop: 56, minHeight: 0, WebkitOverflowScrolling: 'touch' as any }}>
@@ -223,11 +349,37 @@ function ConfigTab({ connState, onQuickAction }: { connState: string; onQuickAct
         ))}
       </Section>
 
-      <Section title={`Active Sessions (${activeSessions.length})`}>
-        <button onClick={loadActive} style={{ padding: '8px', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, width: '100%', backgroundColor: 'rgba(255,255,255,0.06)', color: '#aaa', marginBottom: 8 }}>Refresh</button>
+      <Section title={<span>Sessions <span style={{ color: '#666', fontWeight: 400, fontSize: 11 }}>{loading ? '...' : `${sessions.length}`}</span></span>}>
+        <button onClick={loadSessions} style={{ padding: '6px', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 12, width: '100%', backgroundColor: 'rgba(255,255,255,0.04)', color: '#666', marginBottom: 8 }}>
+          {loading ? 'Loading...' : 'Refresh'}
+        </button>
+
+        {/* Active sessions first */}
         {activeSessions.map((s: any) => (
-          <div key={s.id} style={{ fontFamily: 'Menlo, monospace', fontSize: 12, color: '#aaa', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-            <span style={{ color: '#30d158' }}>{s.id.slice(0, 8)}</span> {s.cwd} {s.alive ? '●' : '○'}
+          <div key={s.id} style={{ padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#30d158', flexShrink: 0 }} />
+              <span style={{ color: '#fff', fontSize: 13, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+                {s.id.slice(0, 8)} — {s.cwd}
+              </span>
+              <span style={{ color: '#30d158', fontSize: 11 }}>active</span>
+            </div>
+          </div>
+        ))}
+
+        {/* Recent sessions */}
+        {sessions.map((s: any) => (
+          <div key={s.id} style={{ padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: s.active ? '#30d158' : '#555', flexShrink: 0 }} />
+              <span style={{ color: '#e0e0e0', fontSize: 13, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+                {s.display || s.id.slice(0, 8)}
+              </span>
+              <span style={{ color: '#666', fontSize: 11, flexShrink: 0 }}>{timeAgo(s.updatedAt)}</span>
+            </div>
+            <div style={{ fontSize: 11, color: '#555', fontFamily: 'Menlo, monospace', marginTop: 2, marginLeft: 12 }}>
+              {s.id.slice(0, 8)}
+            </div>
           </div>
         ))}
       </Section>
@@ -242,7 +394,7 @@ function ConfigTab({ connState, onQuickAction }: { connState: string; onQuickAct
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, children }: { title: React.ReactNode; children: React.ReactNode }) {
   return (
     <div style={{ marginBottom: 20 }}>
       <div style={{ color: '#8e8e93', fontSize: 13, fontWeight: 600, textTransform: 'uppercase', marginBottom: 8, letterSpacing: 0.5 }}>{title}</div>
@@ -306,7 +458,21 @@ export default function App() {
   const [sketchOpen, setSketchOpen] = useState(false);
   const [canvasLoaded, setCanvasLoaded] = useState(false);
   const [pendingSketch, setPendingSketch] = useState<{ dataUrl: string; bounds: { x: number; y: number; w: number; h: number } } | null>(null);
-  const idleTimer = useRef<ReturnType<typeof setTimeout>>();
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  const idleTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const inputBarRef = useRef<HTMLDivElement>(null);
+
+  // Detect iOS keyboard via visualViewport resize
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const onResize = () => {
+      const ratio = vv.height / window.screen.height;
+      setKeyboardOpen(ratio < 0.75);
+    };
+    vv.addEventListener('resize', onResize);
+    return () => vv.removeEventListener('resize', onResize);
+  }, []);
 
   useEffect(() => {
     if (!authed) return;
@@ -418,17 +584,26 @@ export default function App() {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', maxWidth: 600, margin: '0 auto', width: '100%' }}>
       {/* Content area — tab-specific, always full height */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
-        {/* Canvas iframe */}
+        {/* Canvas view */}
         <div style={{ flex: 1, display: tab === 'canvas' ? 'flex' : 'none', position: 'relative' }}>
-          {!canvasLoaded && (
-            <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0a0a0a', zIndex: 1 }}>
-              <div style={{ width: 120, height: 2, borderRadius: 1, backgroundColor: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
-                <div style={{ width: '40%', height: '100%', backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 1, animation: 'canvasLoad 1.2s ease-in-out infinite' }} />
+          {/* Session cards — floating overlay */}
+          <SessionCards onSelect={(sid) => {
+            setMessages([]);
+            switchSession(sid, { resume: true });
+            setTerminalVisible(true);
+          }} />
+          {/* Canvas iframe — fills full area */}
+          <div style={{ flex: 1, position: 'relative' }}>
+            {!canvasLoaded && (
+              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0a0a0a', zIndex: 1 }}>
+                <div style={{ width: 120, height: 2, borderRadius: 1, backgroundColor: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+                  <div style={{ width: '40%', height: '100%', backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 1, animation: 'canvasLoad 1.2s ease-in-out infinite' }} />
+                </div>
+                <style>{`@keyframes canvasLoad { 0% { transform: translateX(-120%); } 100% { transform: translateX(300%); } }`}</style>
               </div>
-              <style>{`@keyframes canvasLoad { 0% { transform: translateX(-120%); } 100% { transform: translateX(300%); } }`}</style>
-            </div>
-          )}
-          <iframe src={`/canvas.html?v=${BUILD_TS}`} onLoad={() => setCanvasLoaded(true)} style={{ width: '100%', height: '100%', border: 'none', backgroundColor: '#0a0a0a' }} sandbox="allow-scripts allow-same-origin" />
+            )}
+            <iframe src={`/canvas.html?v=${BUILD_TS}`} onLoad={() => setCanvasLoaded(true)} style={{ width: '100%', height: '100%', border: 'none', backgroundColor: '#0a0a0a' }} sandbox="allow-scripts allow-same-origin" />
+          </div>
         </div>
 
         {/* Config content */}
@@ -497,14 +672,16 @@ export default function App() {
       </div>
 
       {/* Shared InputBar — always visible */}
-      <InputBar
-        onSend={handleSend} onStop={interrupt}
-        isProcessing={isProcessing} connected={connState === 'connected'}
-        terminalVisible={terminalVisible} onToggleTerminal={toggleTerminal}
-        hasNew={hasNew} onAttach={handleAttach} onSketch={() => setSketchOpen(true)}
-        pendingSketch={pendingSketch ? pendingSketch.dataUrl : null}
-      />
-      <TabBar tab={tab} onTab={handleTab} />
+      <div ref={inputBarRef}>
+        <InputBar
+          onSend={handleSend} onStop={interrupt}
+          isProcessing={isProcessing} connected={connState === 'connected'}
+          terminalVisible={terminalVisible} onToggleTerminal={toggleTerminal}
+          hasNew={hasNew} onAttach={handleAttach} onSketch={() => setSketchOpen(true)}
+          pendingSketch={pendingSketch ? pendingSketch.dataUrl : null}
+        />
+      </div>
+      {!keyboardOpen && <TabBar tab={tab} onTab={handleTab} />}
       {/* Attach menu — frosted glass popup with Framer Motion */}
       <AnimatePresence>
         {attachMenu && (<>
@@ -520,7 +697,9 @@ export default function App() {
             initial={{ scale: 0.3, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.3, opacity: 0 }}
             transition={{ type: 'spring', stiffness: 500, damping: 25 }}
             style={{
-              position: 'absolute', bottom: 132, left: 12, zIndex: 999,
+              position: 'absolute',
+              bottom: (inputBarRef.current ? inputBarRef.current.getBoundingClientRect().height + (keyboardOpen ? 8 : 36) : 84),
+              left: 12, zIndex: 999,
               backgroundColor: 'rgba(30,30,30,0.85)', backdropFilter: 'blur(40px)', WebkitBackdropFilter: 'blur(40px)',
               borderRadius: 14, padding: '4px 0', minWidth: 200,
               boxShadow: '0 8px 40px rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.08)',
