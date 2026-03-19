@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useMotionValue } from 'framer-motion';
 import { connect, send, interrupt, clearSession, setCurrentTab, switchSession, fetchSessions, onMessage, onState, getState, type Message } from './lib/connection';
 import Sketch from './components/Sketch';
 
@@ -449,6 +449,103 @@ function TabBar({ tab, onTab }: { tab: string; onTab: (t: string) => void }) {
   );
 }
 
+// ─── Session Terminal (slide-in from right, swipe to go back) ───
+function SessionTerminal({ session, messages, onBack, onSendMessage }: {
+  session: { id: string; display: string };
+  messages: Message[];
+  onBack: () => void;
+  onSendMessage: (text: string) => void;
+}) {
+  const [text, setText] = useState('');
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const dragX = useMotionValue(0);
+  const swipeStart = useRef<{ x: number; t: number } | null>(null);
+
+  const handleSend = () => {
+    const t = text.trim();
+    if (!t) return;
+    onSendMessage(t);
+    setText('');
+    if (ref.current) ref.current.style.height = '36px';
+  };
+
+  // Swipe-from-left-edge to go back
+  const onTouchStart = (e: React.TouchEvent) => {
+    const x = e.touches[0].clientX;
+    if (x < 40) swipeStart.current = { x, t: Date.now() };
+  };
+  const onTouchMove = (e: React.TouchEvent) => {
+    if (!swipeStart.current) return;
+    const dx = e.touches[0].clientX - swipeStart.current.x;
+    if (dx > 0) dragX.set(dx);
+  };
+  const onTouchEnd = () => {
+    if (!swipeStart.current) return;
+    const dx = dragX.get();
+    if (dx > 120) { onBack(); }
+    else { dragX.set(0); }
+    swipeStart.current = null;
+  };
+
+  return (
+    <motion.div
+      key="session-terminal"
+      initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
+      transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+      style={{ x: dragX,
+        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+        backgroundColor: '#0a0a0a', zIndex: 50,
+        display: 'flex', flexDirection: 'column',
+      }}
+      onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
+    >
+      {/* Header */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '12px 12px 8px', paddingTop: 'max(12px, env(safe-area-inset-top))',
+        borderBottom: '1px solid rgba(255,255,255,0.10)', flexShrink: 0,
+      }}>
+        <motion.button whileTap={{ scale: 0.9 }} onClick={onBack}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px',
+            color: '#999', fontSize: 14, display: 'flex', alignItems: 'center', gap: 4 }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+          Back
+        </motion.button>
+        <span style={{ color: '#ddd', fontSize: 14, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+          {session.display}
+        </span>
+        <span style={{ color: '#777', fontSize: 11, fontFamily: 'Menlo, monospace' }}>{session.id.slice(0, 8)}</span>
+      </div>
+
+      {/* Messages */}
+      <TerminalOverlay messages={messages} visible={true} />
+
+      {/* Input bar — tinted to distinguish from origin terminal */}
+      <div style={{ borderTop: '1px solid rgba(100,140,255,0.15)', padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+        <div style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#6e8ef7', flexShrink: 0 }} />
+        <textarea ref={ref} value={text}
+          onChange={e => { setText(e.target.value); const el = e.target; el.style.height = '36px'; el.style.height = Math.min(el.scrollHeight, 120) + 'px'; }}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+          placeholder="Message this session..."
+          rows={1} enterKeyHint="send" autoComplete="off"
+          style={{
+            flex: 1, minHeight: 36, maxHeight: 120, resize: 'none',
+            borderRadius: 18, border: '1px solid rgba(100,140,255,0.15)', outline: 'none',
+            padding: '8px 16px', fontSize: 16, lineHeight: '20px',
+            fontFamily: '-apple-system, system-ui, sans-serif', backgroundColor: '#1a1a2e', color: '#fff',
+            WebkitAppearance: 'none' as any,
+          }}
+        />
+        <button tabIndex={-1} onClick={handleSend} disabled={!text.trim()} style={{
+          width: 36, height: 36, borderRadius: 18, border: 'none', flexShrink: 0,
+          backgroundColor: text.trim() ? '#4a6cf7' : '#1a1a2e', cursor: text.trim() ? 'pointer' : 'default',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={text.trim() ? '#fff' : '#555'} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+      </div>
+    </motion.div>
+  );
+}
+
 // ─── App ───
 export default function App() {
   const [authed, setAuthed] = useState(() => !!localStorage.getItem(PASS_KEY));
@@ -757,53 +854,17 @@ export default function App() {
         document.body
       )}
 
-      {/* Session Terminal — slides in from right */}
+      {/* Session Terminal — slides in from right, swipe back to dismiss */}
       <AnimatePresence>
         {selectedSession && (
-          <motion.div
-            key="session-terminal"
-            initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
-            transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-            style={{
-              position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-              backgroundColor: '#0a0a0a', zIndex: 50,
-              display: 'flex', flexDirection: 'column',
+          <SessionTerminal
+            session={selectedSession}
+            messages={sessionMessages}
+            onBack={() => setSelectedSession(null)}
+            onSendMessage={(text) => {
+              switchSession(selectedSession.id, { resume: true, message: text });
             }}
-          >
-            {/* Header bar */}
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 10,
-              padding: '12px 12px 8px', paddingTop: 'max(12px, env(safe-area-inset-top))',
-              borderBottom: '1px solid rgba(255,255,255,0.10)',
-              flexShrink: 0,
-            }}>
-              <motion.button
-                whileTap={{ scale: 0.9 }}
-                onClick={() => setSelectedSession(null)}
-                style={{
-                  background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px',
-                  color: '#999', fontSize: 14, display: 'flex', alignItems: 'center', gap: 4,
-                }}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-                Back
-              </motion.button>
-              <span style={{ color: '#ddd', fontSize: 14, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
-                {selectedSession.display}
-              </span>
-              <span style={{ color: '#777', fontSize: 11, fontFamily: 'Menlo, monospace' }}>
-                {selectedSession.id.slice(0, 8)}
-              </span>
-            </div>
-
-            {/* Messages — reuse TerminalOverlay */}
-            <TerminalOverlay messages={sessionMessages} visible={true} />
-
-            {/* Bottom status */}
-            <div style={{ padding: '6px 12px', borderTop: '1px solid rgba(255,255,255,0.10)', flexShrink: 0, display: 'flex', justifyContent: 'center' }}>
-              <span style={{ color: '#777', fontSize: 11, fontFamily: 'Menlo, monospace' }}>read-only</span>
-            </div>
-          </motion.div>
+          />
         )}
       </AnimatePresence>
     </div>
