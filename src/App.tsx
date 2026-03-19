@@ -97,18 +97,19 @@ function TerminalOverlay({ messages, visible }: { messages: Message[]; visible: 
 }
 
 // ─── Input Bar (matches native: dot + attach + terminal toggle + input + send/stop) ───
-function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, onToggleTerminal, hasNew, onAttach, onSketch, pendingSketch, pendingFile }: {
+function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, onToggleTerminal, hasNew, onAttach, onSketch, pendingSketch, pendingFile, onClearPending }: {
   onSend: (text: string) => void; onStop: () => void; isProcessing: boolean; connected: boolean;
   terminalVisible: boolean; onToggleTerminal: () => void; hasNew: boolean;
   onAttach: () => void;
   onSketch: () => void;
   pendingSketch: string | null;
-  pendingFile: boolean;
+  pendingFile: 'image' | 'file' | null;
+  onClearPending: () => void;
 }) {
   const [text, setText] = useState('');
   const ref = useRef<HTMLTextAreaElement>(null);
 
-  const canSend = text.trim() || pendingSketch || pendingFile;
+  const canSend = !!(text.trim() || pendingSketch || pendingFile);
   const handleSend = useCallback(() => {
     const t = text.trim();
     if (!t && !pendingSketch && !pendingFile) return;
@@ -139,8 +140,8 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
         }} />
       </button>
 
-      {/* Attach menu button — shows context icon when pending */}
-      <button tabIndex={-1} onClick={onAttach}
+      {/* Attach menu button — tap when pending = clear, otherwise open menu */}
+      <button tabIndex={-1} onClick={(pendingSketch || pendingFile) ? onClearPending : onAttach}
         style={{
           width: 34, height: 34, borderRadius: 17, border: 'none', cursor: 'pointer', flexShrink: 0,
           backgroundColor: (pendingSketch || pendingFile) ? 'rgba(48,209,88,0.2)' : 'rgba(255,255,255,0.08)',
@@ -151,9 +152,11 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
         onTouchEnd={e => (e.currentTarget.style.transform = 'scale(1)')}>
         {pendingSketch
           ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#30d158" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
-          : pendingFile
-            ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#30d158" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
-            : <span style={{ color: '#888', fontSize: 22, lineHeight: '22px' }}>+</span>}
+          : pendingFile === 'image'
+            ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#30d158" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+            : pendingFile === 'file'
+              ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#30d158" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
+              : <span style={{ color: '#888', fontSize: 22, lineHeight: '22px' }}>+</span>}
       </button>
 
       {/* Text input — textarea with auto-grow, Enter=send, Shift+Enter=newline */}
@@ -801,7 +804,8 @@ export default function App() {
           terminalVisible={terminalVisible} onToggleTerminal={toggleTerminal}
           hasNew={hasNew} onAttach={handleAttach} onSketch={() => setSketchOpen(true)}
           pendingSketch={pendingSketch ? pendingSketch.dataUrl : null}
-          pendingFile={!!pendingFile}
+          pendingFile={pendingFile ? (pendingFile.isImage ? 'image' : 'file') : null}
+          onClearPending={() => { setPendingSketch(null); setPendingFile(null); }}
         />
       </div>
       {!keyboardOpen && <TabBar tab={tab} onTab={handleTab} />}
