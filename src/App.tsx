@@ -121,7 +121,7 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
         color: isProcessing ? '#30d158' : hasNew ? '#999' : '#666',
         fontSize: 22, lineHeight: '22px',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}>{terminalVisible ? '⌄' : '›'}</button>
+      }}>{terminalVisible ? '▼' : '▲'}</button>
 
       {/* Attach menu button */}
       <button tabIndex={-1} onClick={onAttach}
