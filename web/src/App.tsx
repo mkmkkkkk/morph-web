@@ -97,14 +97,15 @@ function TerminalOverlay({ messages, visible }: { messages: Message[]; visible: 
 }
 
 // ─── Input Bar (matches native: dot + attach + terminal toggle + input + send/stop) ───
-function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, onToggleTerminal, hasNew, onAttach, onSketch, pendingSketch, pendingFile, onClearPending }: {
+function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, onToggleTerminal, hasNew, onAttach, onSketch, pendingSketch, pendingFile, onClearPending, tint }: {
   onSend: (text: string) => void; onStop: () => void; isProcessing: boolean; connected: boolean;
-  terminalVisible: boolean; onToggleTerminal: () => void; hasNew: boolean;
+  terminalVisible?: boolean; onToggleTerminal?: () => void; hasNew?: boolean;
   onAttach: () => void;
   onSketch: () => void;
   pendingSketch: string | null;
   pendingFile: 'image' | 'file' | null;
   onClearPending: () => void;
+  tint?: 'blue'; // session terminal color
 }) {
   const [text, setText] = useState('');
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -118,27 +119,34 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
     if (ref.current) ref.current.style.height = '36px';
   }, [text, onSend, pendingSketch, pendingFile]);
 
-  const dotColor = connected ? '#30d158' : '#636366';
+  const isBlue = tint === 'blue';
+  const accent = isBlue ? '#6e8ef7' : '#30d158';
+  const dotColor = connected ? accent : '#636366';
+  const inputBg = isBlue ? '#1a1a2e' : '#1c1c1e';
+  const sendBg = isBlue ? '#4a6cf7' : '#333';
+  const borderTint = isBlue ? 'rgba(100,140,255,0.15)' : 'rgba(255,255,255,0.10)';
 
   return (
-    <div style={{ borderTop: '1px solid rgba(255,255,255,0.10)', padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
+    <div style={{ borderTop: `1px solid ${borderTint}`, padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
       {/* Connection dot */}
-      <div style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: dotColor, flexShrink: 0, marginBottom: 0 }} />
+      <div style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: dotColor, flexShrink: 0 }} />
 
-      {/* Terminal toggle — equilateral triangle (side=14px → height=12px) */}
-      <button tabIndex={-1} onClick={onToggleTerminal} style={{
-        width: 34, height: 34, borderRadius: 17, border: 'none', cursor: 'pointer', flexShrink: 0,
-        backgroundColor: 'rgba(255,255,255,0.08)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}>
-        <div style={{
-          width: 0, height: 0,
-          borderLeft: '6px solid transparent', borderRight: '6px solid transparent',
-          ...(terminalVisible
-            ? { borderTop: `10px solid ${isProcessing ? '#30d158' : hasNew ? '#999' : '#666'}` }
-            : { borderBottom: `10px solid ${isProcessing ? '#30d158' : hasNew ? '#999' : '#666'}` }),
-        }} />
-      </button>
+      {/* Terminal toggle — only on main bar */}
+      {onToggleTerminal && (
+        <button tabIndex={-1} onClick={onToggleTerminal} style={{
+          width: 34, height: 34, borderRadius: 17, border: 'none', cursor: 'pointer', flexShrink: 0,
+          backgroundColor: 'rgba(255,255,255,0.08)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div style={{
+            width: 0, height: 0,
+            borderLeft: '6px solid transparent', borderRight: '6px solid transparent',
+            ...(terminalVisible
+              ? { borderTop: `10px solid ${isProcessing ? accent : hasNew ? '#999' : '#888'}` }
+              : { borderBottom: `10px solid ${isProcessing ? accent : hasNew ? '#999' : '#888'}` }),
+          }} />
+        </button>
+      )}
 
       {/* Attach menu button — tap when pending = clear, otherwise open menu */}
       <button tabIndex={-1} onClick={(pendingSketch || pendingFile) ? onClearPending : onAttach}
@@ -170,23 +178,23 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
         onKeyDown={e => {
           if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
         }}
-        placeholder="Message Claude Code..."
+        placeholder={isBlue ? "Message this session..." : "Message Claude Code..."}
         rows={1}
         enterKeyHint="send"
         autoComplete="off"
         style={{
           flex: 1, minHeight: 36, maxHeight: 120, resize: 'none',
-          borderRadius: 18, border: 'none', outline: 'none',
+          borderRadius: 18, border: isBlue ? `1px solid ${borderTint}` : 'none', outline: 'none',
           padding: '8px 16px', fontSize: 16, lineHeight: '20px',
-          fontFamily: '-apple-system, system-ui, sans-serif', backgroundColor: '#1c1c1e', color: '#fff',
+          fontFamily: '-apple-system, system-ui, sans-serif', backgroundColor: inputBg, color: '#fff',
           WebkitAppearance: 'none' as any,
         }}
       />
 
-      {/* Send button — always visible */}
+      {/* Send button */}
       <button tabIndex={-1} onClick={handleSend} disabled={!canSend} style={{
         width: 36, height: 36, borderRadius: 18, border: 'none', flexShrink: 0,
-        backgroundColor: canSend ? '#333' : '#1c1c1e', cursor: canSend ? 'pointer' : 'default',
+        backgroundColor: canSend ? sendBg : inputBg, cursor: canSend ? 'pointer' : 'default',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
       }}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={canSend ? '#fff' : '#666'} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
     </div>
@@ -453,29 +461,22 @@ function TabBar({ tab, onTab }: { tab: string; onTab: (t: string) => void }) {
 }
 
 // ─── Session Terminal (slide-in from right, swipe to go back) ───
-function SessionTerminal({ session, messages, onBack, onSendMessage }: {
+function SessionTerminal({ session, messages, onBack, onSend }: {
   session: { id: string; display: string };
   messages: Message[];
   onBack: () => void;
-  onSendMessage: (text: string) => void;
+  onSend: (text: string) => void;
 }) {
-  const [text, setText] = useState('');
-  const ref = useRef<HTMLTextAreaElement>(null);
   const dragX = useMotionValue(0);
-  const swipeStart = useRef<{ x: number; t: number } | null>(null);
+  const swipeStart = useRef<{ x: number } | null>(null);
+  const [sessionSketch, setSessionSketch] = useState<{ dataUrl: string; bounds: { x: number; y: number; w: number; h: number } } | null>(null);
+  const [sessionFile, setSessionFile] = useState<{ path: string; isImage: boolean } | null>(null);
+  const [sessionSketchOpen, setSessionSketchOpen] = useState(false);
+  const [sessionAttachMenu, setSessionAttachMenu] = useState(false);
 
-  const handleSend = () => {
-    const t = text.trim();
-    if (!t) return;
-    onSendMessage(t);
-    setText('');
-    if (ref.current) ref.current.style.height = '36px';
-  };
-
-  // Swipe-from-left-edge to go back
   const onTouchStart = (e: React.TouchEvent) => {
     const x = e.touches[0].clientX;
-    if (x < 40) swipeStart.current = { x, t: Date.now() };
+    if (x < 40) swipeStart.current = { x };
   };
   const onTouchMove = (e: React.TouchEvent) => {
     if (!swipeStart.current) return;
@@ -484,10 +485,50 @@ function SessionTerminal({ session, messages, onBack, onSendMessage }: {
   };
   const onTouchEnd = () => {
     if (!swipeStart.current) return;
-    const dx = dragX.get();
-    if (dx > 120) { onBack(); }
-    else { dragX.set(0); }
+    if (dragX.get() > 120) onBack();
+    else dragX.set(0);
     swipeStart.current = null;
+  };
+
+  const handleSessionSend = async (text: string) => {
+    let prefix = '';
+    if (sessionSketch) {
+      const b64 = sessionSketch.dataUrl.split(',')[1];
+      const { x, y, w, h } = sessionSketch.bounds;
+      try {
+        const token = localStorage.getItem('morph-auth') || '';
+        const res = await fetch('/v2/claude/upload', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: `sketch-${Date.now()}.png`, base64: b64, mime: 'image/png' }),
+        });
+        const data = await res.json();
+        if (data.path) prefix += `[Sketch annotation at screen position: x=${Math.round(x)}%, y=${Math.round(y)}%, w=${Math.round(w)}%, h=${Math.round(h)}%]\nImage: ${data.path}\n`;
+      } catch {}
+      setSessionSketch(null);
+    }
+    if (sessionFile) {
+      prefix += sessionFile.isImage ? `Look at this image: ${sessionFile.path}\n` : `Read this file: ${sessionFile.path}\n`;
+      setSessionFile(null);
+    }
+    onSend(prefix ? (prefix + (text ? `\n${text}` : '')).trim() : text);
+  };
+
+  const uploadSessionFile = (accept: string) => {
+    setSessionAttachMenu(false);
+    const input = document.createElement('input');
+    input.type = 'file'; input.accept = accept;
+    input.onchange = async (e: any) => {
+      const file = e.target?.files?.[0]; if (!file) return;
+      const b64: string = await new Promise(r => { const rd = new FileReader(); rd.onload = () => r((rd.result as string).split(',')[1]); rd.readAsDataURL(file); });
+      try {
+        const token = localStorage.getItem('morph-auth') || '';
+        const res = await fetch('/v2/claude/upload', { method: 'POST', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ filename: file.name, base64: b64, mime: file.type }) });
+        const data = await res.json();
+        if (data.path) setSessionFile({ path: data.path, isImage: file.type.startsWith('image/') });
+      } catch {}
+    };
+    input.click();
   };
 
   return (
@@ -495,22 +536,19 @@ function SessionTerminal({ session, messages, onBack, onSendMessage }: {
       key="session-terminal"
       initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
       transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-      style={{ x: dragX,
-        position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-        backgroundColor: '#0a0a0a', zIndex: 50,
-        display: 'flex', flexDirection: 'column',
-      }}
+      style={{ x: dragX, position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+        backgroundColor: '#0a0a0a', zIndex: 50, display: 'flex', flexDirection: 'column' }}
       onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
     >
       {/* Header */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 10,
         padding: '12px 12px 8px', paddingTop: 'max(12px, env(safe-area-inset-top))',
-        borderBottom: '1px solid rgba(255,255,255,0.10)', flexShrink: 0,
+        borderBottom: '1px solid rgba(100,140,255,0.15)', flexShrink: 0,
       }}>
         <motion.button whileTap={{ scale: 0.9 }} onClick={onBack}
           style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px',
-            color: '#999', fontSize: 14, display: 'flex', alignItems: 'center', gap: 4 }}>
+            color: '#6e8ef7', fontSize: 14, display: 'flex', alignItems: 'center', gap: 4 }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
           Back
         </motion.button>
@@ -523,28 +561,54 @@ function SessionTerminal({ session, messages, onBack, onSendMessage }: {
       {/* Messages */}
       <TerminalOverlay messages={messages} visible={true} />
 
-      {/* Input bar — tinted to distinguish from origin terminal */}
-      <div style={{ borderTop: '1px solid rgba(100,140,255,0.15)', padding: '6px 10px', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-        <div style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#6e8ef7', flexShrink: 0 }} />
-        <textarea ref={ref} value={text}
-          onChange={e => { setText(e.target.value); const el = e.target; el.style.height = '36px'; el.style.height = Math.min(el.scrollHeight, 120) + 'px'; }}
-          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-          placeholder="Message this session..."
-          rows={1} enterKeyHint="send" autoComplete="off"
-          style={{
-            flex: 1, minHeight: 36, maxHeight: 120, resize: 'none',
-            borderRadius: 18, border: '1px solid rgba(100,140,255,0.15)', outline: 'none',
-            padding: '8px 16px', fontSize: 16, lineHeight: '20px',
-            fontFamily: '-apple-system, system-ui, sans-serif', backgroundColor: '#1a1a2e', color: '#fff',
-            WebkitAppearance: 'none' as any,
-          }}
-        />
-        <button tabIndex={-1} onClick={handleSend} disabled={!text.trim()} style={{
-          width: 36, height: 36, borderRadius: 18, border: 'none', flexShrink: 0,
-          backgroundColor: text.trim() ? '#4a6cf7' : '#1a1a2e', cursor: text.trim() ? 'pointer' : 'default',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={text.trim() ? '#fff' : '#555'} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
-      </div>
+      {/* Shared InputBar — blue tint */}
+      <InputBar
+        onSend={handleSessionSend} onStop={() => {}}
+        isProcessing={false} connected={true}
+        onAttach={() => setSessionAttachMenu(v => !v)}
+        onSketch={() => setSessionSketchOpen(true)}
+        pendingSketch={sessionSketch ? sessionSketch.dataUrl : null}
+        pendingFile={sessionFile ? (sessionFile.isImage ? 'image' : 'file') : null}
+        onClearPending={() => { setSessionSketch(null); setSessionFile(null); }}
+        tint="blue"
+      />
+
+      {/* Session attach menu */}
+      <AnimatePresence>
+        {sessionAttachMenu && (<>
+          <motion.div key="s-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }} onClick={() => setSessionAttachMenu(false)}
+            style={{ position: 'fixed', inset: 0, zIndex: 998 }} />
+          <motion.div key="s-menu" initial={{ scale: 0.3, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.3, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 500, damping: 25 }}
+            style={{ position: 'absolute', bottom: 60, left: 12, zIndex: 999,
+              backgroundColor: 'rgba(30,30,50,0.9)', backdropFilter: 'blur(40px)', WebkitBackdropFilter: 'blur(40px)',
+              borderRadius: 14, padding: '4px 0', minWidth: 200,
+              boxShadow: '0 8px 40px rgba(0,0,0,0.6)', border: '1px solid rgba(100,140,255,0.15)',
+              transformOrigin: 'bottom left' }}>
+            {[
+              { label: 'Attach File', icon: (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>), action: () => uploadSessionFile('image/*,.pdf,.md,.txt,.csv,.json,.py,.js,.ts,.jsx,.tsx') },
+              { label: 'Sketch', icon: (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>), action: () => { setSessionAttachMenu(false); setSessionSketchOpen(true); } },
+            ].map((item, i) => (
+              <div key={item.label}>
+                {i > 0 && <div style={{ height: 1, backgroundColor: 'rgba(100,140,255,0.10)', margin: '0 12px' }} />}
+                <button tabIndex={-1} onClick={item.action} style={{
+                  display: 'flex', alignItems: 'center', gap: 12, width: '100%',
+                  padding: '11px 16px', border: 'none', cursor: 'pointer',
+                  backgroundColor: 'transparent', color: '#e0e0e0',
+                  fontSize: 15, textAlign: 'left', fontFamily: '-apple-system, system-ui, sans-serif',
+                }}><span style={{ color: '#6e8ef7', display: 'flex' }}>{item.icon}</span> {item.label}</button>
+              </div>
+            ))}
+          </motion.div>
+        </>)}
+      </AnimatePresence>
+
+      {/* Session sketch overlay */}
+      {sessionSketchOpen && createPortal(
+        <Sketch onInsert={(dataUrl, bounds) => { setSessionSketchOpen(false); setSessionSketch({ dataUrl, bounds }); }} onClose={() => setSessionSketchOpen(false)} />,
+        document.body
+      )}
     </motion.div>
   );
 }
@@ -865,7 +929,7 @@ export default function App() {
             session={selectedSession}
             messages={sessionMessages}
             onBack={() => setSelectedSession(null)}
-            onSendMessage={(text) => {
+            onSend={(text) => {
               switchSession(selectedSession.id, { resume: true, message: text });
             }}
           />
