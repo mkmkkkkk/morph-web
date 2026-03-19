@@ -97,23 +97,25 @@ function TerminalOverlay({ messages, visible }: { messages: Message[]; visible: 
 }
 
 // ─── Input Bar (matches native: dot + attach + terminal toggle + input + send/stop) ───
-function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, onToggleTerminal, hasNew, onAttach, onSketch, pendingSketch }: {
+function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, onToggleTerminal, hasNew, onAttach, onSketch, pendingSketch, pendingFile }: {
   onSend: (text: string) => void; onStop: () => void; isProcessing: boolean; connected: boolean;
   terminalVisible: boolean; onToggleTerminal: () => void; hasNew: boolean;
   onAttach: () => void;
   onSketch: () => void;
   pendingSketch: string | null;
+  pendingFile: boolean;
 }) {
   const [text, setText] = useState('');
   const ref = useRef<HTMLTextAreaElement>(null);
 
+  const canSend = text.trim() || pendingSketch || pendingFile;
   const handleSend = useCallback(() => {
     const t = text.trim();
-    if (!t) return;
-    onSend(t);
+    if (!t && !pendingSketch && !pendingFile) return;
+    onSend(t || '');
     setText('');
     if (ref.current) ref.current.style.height = '36px';
-  }, [text, onSend]);
+  }, [text, onSend, pendingSketch, pendingFile]);
 
   const dotColor = connected ? '#30d158' : '#636366';
 
@@ -137,18 +139,21 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
         }} />
       </button>
 
-      {/* Attach menu button — spring tap animation */}
+      {/* Attach menu button — shows context icon when pending */}
       <button tabIndex={-1} onClick={onAttach}
         style={{
           width: 34, height: 34, borderRadius: 17, border: 'none', cursor: 'pointer', flexShrink: 0,
-          backgroundColor: pendingSketch ? 'rgba(48,209,88,0.2)' : 'rgba(255,255,255,0.08)',
-          color: pendingSketch ? '#30d158' : '#666', fontSize: 22, lineHeight: '22px',
+          backgroundColor: (pendingSketch || pendingFile) ? 'rgba(48,209,88,0.2)' : 'rgba(255,255,255,0.08)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           transition: 'transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1)',
         }}
         onTouchStart={e => (e.currentTarget.style.transform = 'scale(1.3)')}
         onTouchEnd={e => (e.currentTarget.style.transform = 'scale(1)')}>
-        {pendingSketch ? '✓' : '+'}
+        {pendingSketch
+          ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#30d158" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+          : pendingFile
+            ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#30d158" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
+            : <span style={{ color: '#888', fontSize: 22, lineHeight: '22px' }}>+</span>}
       </button>
 
       {/* Text input — textarea with auto-grow, Enter=send, Shift+Enter=newline */}
@@ -167,20 +172,20 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
         enterKeyHint="send"
         autoComplete="off"
         style={{
-          flex: 1, minHeight: 36, maxHeight: 120, resize: 'none', overflow: 'hidden',
+          flex: 1, minHeight: 36, maxHeight: 120, resize: 'none',
           borderRadius: 18, border: 'none', outline: 'none',
           padding: '8px 16px', fontSize: 16, lineHeight: '20px',
           fontFamily: '-apple-system, system-ui, sans-serif', backgroundColor: '#1c1c1e', color: '#fff',
-          WebkitAppearance: 'none' as any, WebkitUserSelect: 'text' as any,
+          WebkitAppearance: 'none' as any,
         }}
       />
 
       {/* Send button — always visible */}
-      <button tabIndex={-1} onClick={handleSend} disabled={!text.trim()} style={{
+      <button tabIndex={-1} onClick={handleSend} disabled={!canSend} style={{
         width: 36, height: 36, borderRadius: 18, border: 'none', flexShrink: 0,
-        backgroundColor: text.trim() ? '#333' : '#1c1c1e', cursor: text.trim() ? 'pointer' : 'default',
+        backgroundColor: canSend ? '#333' : '#1c1c1e', cursor: canSend ? 'pointer' : 'default',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={text.trim() ? '#fff' : '#444'} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+      }}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={canSend ? '#fff' : '#666'} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
     </div>
   );
 }
@@ -454,6 +459,7 @@ export default function App() {
   const [sketchOpen, setSketchOpen] = useState(false);
   const [canvasLoaded, setCanvasLoaded] = useState(false);
   const [pendingSketch, setPendingSketch] = useState<{ dataUrl: string; bounds: { x: number; y: number; w: number; h: number } } | null>(null);
+  const [pendingFile, setPendingFile] = useState<{ path: string; isImage: boolean } | null>(null);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [selectedSession, setSelectedSession] = useState<{ id: string; display: string } | null>(null);
   const [sessionMessages, setSessionMessages] = useState<Message[]>([]);
@@ -526,9 +532,11 @@ export default function App() {
   const handleTab = (t: string) => { setTab(t); setCurrentTab(t); if (t === 'config') setTerminalVisible(false); };
 
   const handleSend = async (text: string) => {
-    if (text === '/clear') { setMessages([]); setIsProcessing(false); clearSession(); setPendingSketch(null); return; }
+    if (text === '/clear') { setMessages([]); setIsProcessing(false); clearSession(); setPendingSketch(null); setPendingFile(null); return; }
 
-    // If there's a pending sketch, upload it first and prepend to message
+    let prefix = '';
+
+    // Pending sketch → upload and prepend
     if (pendingSketch) {
       const b64 = pendingSketch.dataUrl.split(',')[1];
       const { x, y, w, h } = pendingSketch.bounds;
@@ -541,16 +549,19 @@ export default function App() {
         });
         const data = await res.json();
         if (data.path) {
-          const sketchContext = `[Sketch annotation at screen position: x=${Math.round(x)}%, y=${Math.round(y)}%, w=${Math.round(w)}%, h=${Math.round(h)}%]\nImage: ${data.path}`;
-          send(sketchContext + (text ? `\n\n${text}` : ''));
-          setPendingSketch(null);
-          return;
+          prefix += `[Sketch annotation at screen position: x=${Math.round(x)}%, y=${Math.round(y)}%, w=${Math.round(w)}%, h=${Math.round(h)}%]\nImage: ${data.path}\n`;
         }
       } catch {}
       setPendingSketch(null);
     }
 
-    send(text);
+    // Pending file → prepend
+    if (pendingFile) {
+      prefix += pendingFile.isImage ? `Look at this image: ${pendingFile.path}\n` : `Read this file: ${pendingFile.path}\n`;
+      setPendingFile(null);
+    }
+
+    send(prefix ? (prefix + (text ? `\n${text}` : '')).trim() : text);
   };
 
   const [attachMenu, setAttachMenu] = useState(false);
@@ -579,7 +590,8 @@ export default function App() {
         });
         const data = await res.json();
         if (data.path) {
-          send(file.type.startsWith('image/') ? `Look at this image: ${data.path}` : `Read this file: ${data.path}`);
+          // Store as pending — user types prompt before sending
+          setPendingFile({ path: data.path, isImage: file.type.startsWith('image/') });
         }
       } catch {}
     };
@@ -692,6 +704,7 @@ export default function App() {
           terminalVisible={terminalVisible} onToggleTerminal={toggleTerminal}
           hasNew={hasNew} onAttach={handleAttach} onSketch={() => setSketchOpen(true)}
           pendingSketch={pendingSketch ? pendingSketch.dataUrl : null}
+          pendingFile={!!pendingFile}
         />
       </div>
       {!keyboardOpen && <TabBar tab={tab} onTab={handleTab} />}
