@@ -48,3 +48,9 @@ You are running as a **Morph Web session** — a mobile remote terminal for the 
 - Vite dev server on port 8081, Cloudflare tunnel to `morph.mkyang.ai`
 - Relay on port 3001, Vite proxies `/v1` and `/v2` to relay
 - Terminal is a draggable bottom sheet (not a tab) — shared across Canvas + Config
+
+### Dev Workflow
+- **Vite dev server**: `npx vite --port 8081 --host 0.0.0.0` (from `morph/web/`)
+- **刷新方法**: React 改动 → Vite HMR 自动推；`public/` 静态文件（canvas.html）→ 已有 `?v=` cache-bust，用户刷新页面即可
+- **重启 Vite = 刷新一切**: 改完代码后 kill 旧进程 + 重启 Vite，客户端自动重连拿新代码
+- **改 canvas.html 不需要额外操作** — BUILD_TS 每次页面加载生成新时间戳
