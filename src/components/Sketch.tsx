@@ -10,7 +10,7 @@ interface SketchProps {
 export default function Sketch({ onInsert, onClose }: SketchProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [tool, setTool] = useState<Tool>('pen');
-  const [color, setColor] = useState('#ff453a');
+  const [color, setColor] = useState('#e07070');
   const lineWidth = 3;
   const drawing = useRef(false);
   const lastPos = useRef({ x: 0, y: 0 });
@@ -18,6 +18,10 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
   const snapshot = useRef<ImageData | null>(null);
   // Track bounding box of all strokes (in percentage of canvas)
   const allPoints = useRef<{ x: number; y: number }[]>([]);
+  // Draggable toolbar
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const dragState = useRef({ dragging: false, offsetX: 0, offsetY: 0 });
+  const [toolbarPos, setToolbarPos] = useState<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -121,6 +125,25 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
     onInsert(canvas.toDataURL('image/png'), bounds);
   };
 
+  const onDragStart = useCallback((e: React.TouchEvent) => {
+    const t = e.touches[0];
+    const tb = toolbarRef.current;
+    if (!tb) return;
+    const rect = tb.getBoundingClientRect();
+    dragState.current = { dragging: true, offsetX: t.clientX - rect.left, offsetY: t.clientY - rect.top };
+  }, []);
+
+  const onDragMove = useCallback((e: React.TouchEvent) => {
+    if (!dragState.current.dragging) return;
+    e.stopPropagation();
+    const t = e.touches[0];
+    const x = Math.max(0, Math.min(window.innerWidth - 200, t.clientX - dragState.current.offsetX));
+    const y = Math.max(0, Math.min(window.innerHeight - 100, t.clientY - dragState.current.offsetY));
+    setToolbarPos({ x, y });
+  }, []);
+
+  const onDragEnd = useCallback(() => { dragState.current.dragging = false; }, []);
+
   const handleClear = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -130,7 +153,7 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
     allPoints.current = [];
   };
 
-  const colors = ['#ff453a', '#ffcc00', '#30d158', '#64d2ff', '#ffffff'];
+  const colors = ['#c8c8c8', '#e07070', '#70b880', '#6899cc', '#d4a853'];
 
   const toolBtn = (id: Tool, label: string) => (
     <button key={id} tabIndex={-1} onClick={() => setTool(id)} style={{
@@ -155,41 +178,41 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
         onMouseLeave={endDraw}
       />
 
-      {/* Bottom toolbar */}
-      <div style={{
-        padding: '10px 12px', backgroundColor: 'rgba(28,28,30,0.95)', backdropFilter: 'blur(12px)',
-        borderTop: '1px solid rgba(255,255,255,0.1)',
-        display: 'flex', flexDirection: 'column', gap: 10,
+      {/* Floating draggable toolbar */}
+      <div ref={toolbarRef} style={{
+        position: 'fixed',
+        ...(toolbarPos ? { left: toolbarPos.x, top: toolbarPos.y } : { bottom: 24, left: '50%', transform: 'translateX(-50%)' }),
+        display: 'flex', alignItems: 'center', gap: 4,
+        padding: '6px 10px', borderRadius: 20,
+        backgroundColor: 'rgba(17,17,17,0.95)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+        border: '1px solid rgba(255,255,255,0.08)',
+        boxShadow: '0 12px 40px rgba(0,0,0,0.7)',
+        zIndex: 1001, touchAction: 'none',
       }}>
-        {/* Tools + Colors row */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center' }}>
-          {toolBtn('pen', '✏')}
-          {toolBtn('rect', '▢')}
-          {toolBtn('arrow', '→')}
-          <span style={{ width: 1, height: 24, backgroundColor: 'rgba(255,255,255,0.1)', margin: '0 2px' }} />
-          {colors.map(c => (
-            <div key={c} onClick={() => setColor(c)} style={{
-              width: 28, height: 28, borderRadius: 14, backgroundColor: c, cursor: 'pointer',
-              border: color === c ? '2px solid #fff' : '2px solid rgba(255,255,255,0.1)',
-            }} />
-          ))}
+        {/* Drag handle — bar above toolbar */}
+        <div
+          onTouchStart={onDragStart} onTouchMove={onDragMove} onTouchEnd={onDragEnd}
+          style={{ position: 'absolute', top: -20, left: 0, right: 0, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'grab', touchAction: 'none' }}
+        >
+          <div style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.25)' }} />
         </div>
 
-        {/* Action buttons */}
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button tabIndex={-1} onClick={onClose} style={{
-            flex: 1, padding: '12px', borderRadius: 10, border: 'none', cursor: 'pointer',
-            backgroundColor: 'rgba(255,255,255,0.08)', color: '#aaa', fontSize: 15,
-          }}>Cancel</button>
-          <button tabIndex={-1} onClick={handleClear} style={{
-            flex: 1, padding: '12px', borderRadius: 10, border: 'none', cursor: 'pointer',
-            backgroundColor: 'rgba(255,255,255,0.08)', color: '#aaa', fontSize: 15,
-          }}>Clear</button>
-          <button tabIndex={-1} onClick={handleInsert} style={{
-            flex: 1, padding: '12px', borderRadius: 10, border: 'none', cursor: 'pointer',
-            backgroundColor: '#30d158', color: '#000', fontSize: 15, fontWeight: 600,
-          }}>Insert</button>
-        </div>
+        <button tabIndex={-1} onClick={onClose} style={{ padding: '7px 10px', border: 'none', borderRadius: 12, background: 'transparent', color: '#555', fontSize: 16, cursor: 'pointer', fontWeight: 600 }}>&times;</button>
+        <span style={{ width: 1, height: 20, backgroundColor: 'rgba(255,255,255,0.06)' }} />
+        {colors.map(c => (
+          <div key={c} onClick={() => setColor(c)} style={{
+            width: 20, height: 20, borderRadius: 10, backgroundColor: c, cursor: 'pointer',
+            border: color === c ? '2px solid rgba(255,255,255,0.5)' : '2px solid rgba(255,255,255,0.06)',
+            boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+          }} />
+        ))}
+        <span style={{ width: 1, height: 20, backgroundColor: 'rgba(255,255,255,0.06)' }} />
+        {toolBtn('pen', '✏')}
+        {toolBtn('rect', '▢')}
+        {toolBtn('arrow', '→')}
+        <span style={{ width: 1, height: 20, backgroundColor: 'rgba(255,255,255,0.06)' }} />
+        <button tabIndex={-1} onClick={handleClear} style={{ padding: '7px 10px', border: 'none', borderRadius: 12, background: 'transparent', color: '#b0903a', fontSize: 13, cursor: 'pointer', fontWeight: 600, fontFamily: 'Menlo, SF Mono, monospace' }}>clear</button>
+        <button tabIndex={-1} onClick={handleInsert} style={{ padding: '7px 14px', border: 'none', borderRadius: 14, background: '#30d158', color: '#0a0a0a', fontSize: 13, cursor: 'pointer', fontWeight: 700, fontFamily: 'Menlo, SF Mono, monospace' }}>send</button>
       </div>
     </div>
   );
