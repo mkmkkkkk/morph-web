@@ -1,7 +1,7 @@
 import { io, Socket } from 'socket.io-client';
 
 const RELAY_URL = window.location.origin; // same origin (morph.mkyang.ai)
-const FIXED_SESSION = 'ba99d3d6-b59a-4cc6-910f-610663a10e69';
+const FIXED_SESSION = 'a0a0a0a0-0e00-4000-a000-000000000002';
 function getToken() { return localStorage.getItem('morph-auth') || ''; }
 
 export interface Message {
@@ -125,7 +125,14 @@ export async function connect(): Promise<void> {
     const res = await fetch(`${RELAY_URL}/v2/claude/send`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: 'Connected from Morph Web. Ready.', sessionId: FIXED_SESSION, cwd: '/workspace' }),
+      body: JSON.stringify({
+        message: `This is Morph Web — a mobile terminal for the CEO to interact with Claude Code remotely.
+You are a CTO-level AI assistant. Working directory: /workspace. You have full access to the codebase.
+The CEO may also be running a separate Claude Code session on the desktop terminal — they share the same /workspace files.
+Be concise. Follow CLAUDE.md instructions. Ready for tasks.`,
+        sessionId: FIXED_SESSION,
+        cwd: '/workspace',
+      }),
     });
     const data = await res.json();
     if (data.error) throw new Error(data.error);
