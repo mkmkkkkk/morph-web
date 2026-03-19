@@ -186,11 +186,20 @@
     }
 
     #sketch-drag-handle {
-      color: #555; font-size: 16px; cursor: grab;
-      padding: 4px 6px; line-height: 1;
+      display: flex; align-items: center; justify-content: center;
+      width: 100%; height: 28px; cursor: grab;
       touch-action: none; user-select: none; -webkit-user-select: none;
+      position: absolute; top: -24px; left: 0; right: 0;
+      padding: 4px 0;
+      z-index: 502;
     }
-    #sketch-drag-handle:active { cursor: grabbing; color: #888; }
+    #sketch-drag-handle::before {
+      content: ''; display: block;
+      width: 36px; height: 4px; border-radius: 2px;
+      background: rgba(255,255,255,0.25);
+    }
+    #sketch-drag-handle:active { cursor: grabbing; }
+    #sketch-drag-handle:active::before { background: rgba(255,255,255,0.45); }
 
     /* Sketch mode indicator — top label */
     #sketch-label {
@@ -225,7 +234,7 @@
     <canvas id="sketch-canvas"></canvas>
     <div id="sketch-label">SKETCH</div>
     <div id="sketch-toolbar">
-      <div id="sketch-drag-handle">⠿</div>
+      <div id="sketch-drag-handle"></div>
       <button class="sketch-btn close" onclick="_sketchClose()">&times;</button>
       <div class="sketch-sep"></div>
       <div class="sketch-colors">
@@ -525,6 +534,7 @@
     var _toolbarOffsetX = 0;
     var _toolbarOffsetY = 0;
 
+    var _toolbarDragInited = false;
     function _toolbarInitDrag() {
       var tb = document.getElementById('sketch-toolbar');
       var handle = document.getElementById('sketch-drag-handle');
@@ -534,6 +544,9 @@
       tb.style.bottom = 'auto';
       tb.style.top = rect.top + 'px';
       tb.style.transform = 'none';
+
+      if (_toolbarDragInited) return;
+      _toolbarDragInited = true;
 
       handle.addEventListener('touchstart', function(e) {
         e.preventDefault();
