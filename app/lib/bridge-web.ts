@@ -40,9 +40,10 @@ export class MorphBridge {
     this.iframeRef = iframeRef;
     this.handlers = handlers;
 
-    // Listen for postMessage from iframe
+    // Listen for postMessage from iframe — validate origin
     this.messageHandler = (event: MessageEvent) => {
-      // Only accept messages from our iframe
+      // Only accept messages from same origin (our iframe)
+      if (event.origin !== window.location.origin) return;
       if (typeof event.data !== 'string') return;
       this.handleMessage(event.data);
     };
@@ -98,7 +99,7 @@ export class MorphBridge {
     const iframe = this.iframeRef.current;
     if (iframe?.contentWindow) {
       // Use postMessage to send to iframe
-      iframe.contentWindow.postMessage(message, '*');
+      iframe.contentWindow.postMessage(message, window.location.origin);
     }
   }
 

@@ -55,7 +55,7 @@ const MessageRow = React.memo(function MessageRow({ msg }: { msg: Message }) {
   switch (msg.type) {
     case 'text':
       return msg.role === 'user'
-        ? <div style={{ ...mono, color: '#30d158', marginBottom: 3 }}>&gt; {msg.content}</div>
+        ? <div style={{ ...mono, color: '#30d158', marginBottom: 3, opacity: msg.pending ? 0.5 : 1 }}>&gt; {msg.content}</div>
         : <div style={{ ...mono, color: '#e0e0e0', marginBottom: 3, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{msg.content}</div>;
     case 'thinking':
       return <Collapsible label="thinking" preview={msg.content.slice(0, 60)} content={msg.content} color="#636366" />;
@@ -567,6 +567,7 @@ function SessionTerminal({ session, messages, onBack, onSend, keyboardOpen }: {
       <InputBar
         onSend={handleSessionSend} onStop={() => {}}
         isProcessing={false} connected={true}
+        terminalVisible={true} onToggleTerminal={() => {}}
         onAttach={() => setSessionAttachMenu(v => !v)}
         onSketch={() => setSessionSketchOpen(true)}
         pendingSketch={sessionSketch ? sessionSketch.dataUrl : null}
@@ -668,6 +669,16 @@ export default function App() {
     const MAX_MESSAGES = 500;
     const unsub1 = onMessage((msg) => {
       setMessages(prev => {
+        // If this is a confirmation of a pending message, update it in-place
+        if (msg.role === 'user' && msg.pending === false) {
+          const idx = prev.findIndex(m => m.id === msg.id && m.pending);
+          if (idx !== -1) {
+            const next = [...prev];
+            next[idx] = { ...next[idx], pending: false };
+            return next;
+          }
+          return prev; // already confirmed or not found
+        }
         const next = [...prev, msg];
         return next.length > MAX_MESSAGES ? next.slice(-MAX_MESSAGES) : next;
       });

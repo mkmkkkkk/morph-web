@@ -251,7 +251,7 @@
       if (window.ReactNativeWebView) {
         window.ReactNativeWebView.postMessage(msg);
       } else if (window.parent !== window) {
-        window.parent.postMessage(msg, '*');
+        window.parent.postMessage(msg, window.location.origin);
       }
     }
 
@@ -290,7 +290,10 @@
       }
     }
 
-    window.addEventListener('message', function(e) { _handleNativeMessage(e.data); });
+    window.addEventListener('message', function(e) {
+      if (e.origin !== window.location.origin) return;
+      _handleNativeMessage(e.data);
+    });
     window._morphReceive = _handleNativeMessage;
 
     // === COMPONENTS ===
