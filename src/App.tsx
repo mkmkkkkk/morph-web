@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, useMotionValue } from 'framer-motion';
-import { connect, send, interrupt, clearSession, setCurrentTab, switchSession, fetchSessions, onMessage, onState, getState, type Message } from './lib/connection';
+import { connect, send, interrupt, clearSession, setCurrentTab, switchSession, fetchSessions, onMessage, onState, getState, sendToSession, resumeSession, subscribeSessionMessages, unsubscribeSessionMessages, type Message } from './lib/connection';
 import Sketch from './components/Sketch';
 
 // Cache-bust canvas.html on each page load (not per render)
@@ -51,7 +51,7 @@ function Collapsible({ label, preview, content, color }: { label: string; previe
 
 // ─── Message Row ───
 const MessageRow = React.memo(function MessageRow({ msg }: { msg: Message }) {
-  const mono = { fontFamily: 'Menlo, monospace', fontSize: 14, lineHeight: '20px', overflow: 'hidden' as const, maxWidth: '100%' } as const;
+  const mono = { fontFamily: 'Menlo, monospace', fontSize: 14, lineHeight: '20px', overflow: 'hidden' as const, maxWidth: '100%', userSelect: 'text' as const, WebkitUserSelect: 'text' as any } as const;
   switch (msg.type) {
     case 'text':
       return msg.role === 'user'
@@ -84,6 +84,7 @@ function TerminalOverlay({ messages, visible }: { messages: Message[]; visible: 
       display: 'flex', flexDirection: 'column-reverse',
       borderTop: '1px solid rgba(255,255,255,0.08)', backgroundColor: '#0a0a0a',
       WebkitOverflowScrolling: 'touch' as any,
+      userSelect: 'text', WebkitUserSelect: 'text' as any,
     }}>
       {/* column-reverse: browser natively anchors scroll to bottom. Inner div keeps message order correct. */}
       <div style={{ padding: '8px 12px' }}>
@@ -471,6 +472,12 @@ function SessionTerminal({ session, messages, onBack, onSend, keyboardOpen }: {
 }) {
   const dragX = useMotionValue(0);
   const swipeStart = useRef<{ x: number } | null>(null);
+
+  // Allow left-edge swipe when session terminal is open
+  useEffect(() => {
+    (window as any).__allowLeftSwipe = true;
+    return () => { (window as any).__allowLeftSwipe = false; };
+  }, []);
   const [sessionSketch, setSessionSketch] = useState<{ dataUrl: string; bounds: { x: number; y: number; w: number; h: number } } | null>(null);
   const [sessionFile, setSessionFile] = useState<{ path: string; isImage: boolean } | null>(null);
   const [sessionSketchOpen, setSessionSketchOpen] = useState(false);
@@ -563,11 +570,10 @@ function SessionTerminal({ session, messages, onBack, onSend, keyboardOpen }: {
       {/* Messages */}
       <TerminalOverlay messages={messages} visible={true} />
 
-      {/* Shared InputBar — blue tint */}
+      {/* Shared InputBar — blue tint, no terminal toggle (header has Back) */}
       <InputBar
         onSend={handleSessionSend} onStop={() => {}}
         isProcessing={false} connected={true}
-        terminalVisible={true} onToggleTerminal={() => {}}
         onAttach={() => setSessionAttachMenu(v => !v)}
         onSketch={() => setSessionSketchOpen(true)}
         pendingSketch={sessionSketch ? sessionSketch.dataUrl : null}
@@ -648,7 +654,7 @@ export default function App() {
     return () => vv.removeEventListener('resize', onResize);
   }, []);
 
-  // Load history when a session is selected
+  // Load history + subscribe to live updates when a session is selected
   useEffect(() => {
     if (!selectedSession) return;
     const token = localStorage.getItem('morph-auth') || '';
@@ -662,6 +668,11 @@ export default function App() {
         })));
       })
       .catch(() => {});
+    // Subscribe socket to this session for live updates
+    subscribeSessionMessages(selectedSession.id, (msg) => {
+      setSessionMessages(prev => [...prev, msg]);
+    });
+    return () => { unsubscribeSessionMessages(); };
   }, [selectedSession?.id]);
 
   useEffect(() => {
@@ -697,12 +708,12 @@ export default function App() {
   }, [authed]);
 
   const [terminalVisible, setTerminalVisible] = useState(false);
-  const [terminalHeight, setTerminalHeight] = useState(70); // percentage
+  const [terminalHeight, setTerminalHeight] = useState(40); // percentage
   const [hasNew, setHasNew] = useState(false);
   const prevCount = useRef(0);
   const dragging = useRef(false);
   const dragStartY = useRef(0);
-  const dragStartH = useRef(70);
+  const dragStartH = useRef(40);
 
   useEffect(() => {
     if (messages.length > prevCount.current && !terminalVisible && isProcessing) setHasNew(true);
@@ -851,7 +862,7 @@ export default function App() {
               setTerminalHeight(Math.max(20, Math.min(95, newH)));
             }}
             onTouchEnd={() => {
-              if (terminalHeight < 25) { setTerminalVisible(false); setTerminalHeight(70); }
+              if (terminalHeight < 25) { setTerminalVisible(false); setTerminalHeight(40); }
               dragging.current = false;
             }}
             style={{
@@ -950,8 +961,32 @@ export default function App() {
             session={selectedSession}
             messages={sessionMessages}
             onBack={() => setSelectedSession(null)}
-            onSend={(text) => {
-              switchSession(selectedSession.id, { resume: true, message: text });
+            onSend={async (text) => {
+              // Show user message immediately
+              const msgId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+              setSessionMessages(prev => [...prev, { id: msgId, role: 'user', type: 'text', content: text, ts: Date.now(), pending: true }]);
+              try {
+                // Check if session is alive
+                const token = localStorage.getItem('morph-auth') || '';
+                const checkRes = await fetch('/v2/claude/active', { headers: { 'Authorization': `Bearer ${token}` } });
+                const checkData = await checkRes.json();
+                const alive = (checkData.sessions || []).find((s: any) => s.id === selectedSession.id && s.alive);
+                if (alive) {
+                  await sendToSession(selectedSession.id, text);
+                } else {
+                  const newSid = await resumeSession(selectedSession.id, text);
+                  // Update subscription if session ID changed
+                  if (newSid !== selectedSession.id) {
+                    subscribeSessionMessages(newSid, (msg) => {
+                      setSessionMessages(prev => [...prev, msg]);
+                    });
+                  }
+                }
+                // Confirm sent
+                setSessionMessages(prev => prev.map(m => m.id === msgId ? { ...m, pending: false } : m));
+              } catch (err: any) {
+                setSessionMessages(prev => [...prev, { id: `${Date.now()}`, role: 'system', type: 'error', content: err.message || 'Send failed', ts: Date.now() }]);
+              }
             }}
             keyboardOpen={keyboardOpen}
           />

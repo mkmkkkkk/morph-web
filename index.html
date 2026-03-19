@@ -42,8 +42,11 @@
     }, { passive: false });
 
     // Disable iOS back/forward swipe gesture (left/right edge)
+    // Session terminal sets window.__allowLeftSwipe = true to enable swipe-back
     document.addEventListener('touchstart', function(e) {
       var x = e.touches[0].clientX;
+      // Allow left-edge swipe when session terminal is open
+      if (x < 25 && window.__allowLeftSwipe) return;
       if (x < 25 || x > window.innerWidth - 25) e.preventDefault();
     }, { passive: false });
 
