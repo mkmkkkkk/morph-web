@@ -75,6 +75,8 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
     return { x: (t as any).clientX - rect.left, y: (t as any).clientY - rect.top };
   };
 
+  const currentStrokePoints = useRef(0);
+
   const startDraw = useCallback((e: React.TouchEvent | React.MouseEvent) => {
     e.preventDefault();
     drawing.current = true;
@@ -82,9 +84,11 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
     lastPos.current = pos;
     startPos.current = pos;
     allPoints.current.push(pos);
-    // Save state for undo before this stroke
+    currentStrokePoints.current = 1;
+    // Save state for undo before this stroke (cap at 10 to avoid memory bomb on high-DPI)
     const canvas = canvasRef.current!;
     const ctx = canvas.getContext('2d')!;
+    if (strokeHistory.current.length >= 10) strokeHistory.current.shift();
     strokeHistory.current.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
     if (tool !== 'pen') {
       snapshot.current = ctx.getImageData(0, 0, canvas.width, canvas.height);
@@ -98,6 +102,7 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
     const ctx = canvas.getContext('2d')!;
     const pos = getPos(e);
     allPoints.current.push(pos);
+    currentStrokePoints.current++;
 
     ctx.strokeStyle = color;
     ctx.lineWidth = lineWidth;
@@ -138,6 +143,8 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
       const pos = getPos(e);
       shapeEndpoints.current.push(startPos.current, pos);
     }
+    strokePointCounts.current.push(currentStrokePoints.current);
+    currentStrokePoints.current = 0;
     drawing.current = false;
     snapshot.current = null;
   }, [tool]);
@@ -169,12 +176,20 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
   };
 
 
+  // Track point counts per stroke for proper undo
+  const strokePointCounts = useRef<number[]>([]);
+
   const handleUndo = () => {
     const canvas = canvasRef.current;
     if (!canvas || strokeHistory.current.length === 0) return;
     const ctx = canvas.getContext('2d')!;
     const prev = strokeHistory.current.pop()!;
     ctx.putImageData(prev, 0, 0);
+    // Remove points added by the undone stroke
+    const count = strokePointCounts.current.pop() || 0;
+    if (count > 0) allPoints.current.splice(-count);
+    // Remove shape endpoints (2 per shape stroke)
+    if (shapeEndpoints.current.length >= 2) shapeEndpoints.current.splice(-2);
   };
 
   const handleClear = () => {

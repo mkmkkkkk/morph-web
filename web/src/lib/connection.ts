@@ -105,9 +105,10 @@ export async function connect(): Promise<void> {
     // Wait for socket to actually connect
     await new Promise<void>((resolve) => {
       if (socket?.connected) { resolve(); return; }
-      const onConnect = () => { socket?.off('connect', onConnect); resolve(); };
-      socket?.on('connect', onConnect);
-      setTimeout(resolve, 3000); // timeout fallback
+      let resolved = false;
+      const done = () => { if (resolved) return; resolved = true; socket?.off('connect', done); clearTimeout(t); resolve(); };
+      socket?.on('connect', done);
+      const t = setTimeout(done, 3000); // timeout fallback
     });
 
     // Check if fixed session is already alive
@@ -144,6 +145,8 @@ Be concise. Follow CLAUDE.md instructions. Ready for tasks.`,
     });
     const data = await res.json();
     if (data.error) throw new Error(data.error);
+    // Re-subscribe after spawn — the pre-spawn subscribe was dropped because session wasn't active yet
+    socket?.emit('direct-subscribe', { sessionId: FIXED_SESSION });
   } catch (err: any) {
     setState('error');
     emit({ id: uid(), role: 'system', type: 'error', content: err.message, ts: Date.now() });
@@ -185,6 +188,8 @@ export function send(text: string) {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ message: text, sessionId }),
+  }).then(res => {
+    if (!res.ok) emit({ id: uid(), role: 'system', type: 'error', content: `Send failed (${res.status})`, ts: Date.now() });
   }).catch(() => {
     socket?.emit('direct-send', { sessionId, message: text });
   });
