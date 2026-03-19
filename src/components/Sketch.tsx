@@ -19,6 +19,8 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
   const snapshot = useRef<ImageData | null>(null);
   // Track bounding box of all strokes (in percentage of canvas)
   const allPoints = useRef<{ x: number; y: number }[]>([]);
+  // Track shape endpoints for rect/arrow (start + end per shape)
+  const shapeEndpoints = useRef<{ x: number; y: number }[]>([]);
   // Stroke history for undo — save canvas state before each stroke
   const strokeHistory = useRef<ImageData[]>([]);
   // Toolbar state
@@ -41,7 +43,6 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
     const h = screenH.current;
     canvas.width = w * dpr;
     canvas.height = h * dpr;
-    // Explicitly size canvas to full screen (including safe areas)
     canvas.style.width = w + 'px';
     canvas.style.height = h + 'px';
     const ctx = canvas.getContext('2d')!;
@@ -49,6 +50,22 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
     ctx.clearRect(0, 0, w, h);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
+
+    // Disable iOS back swipe gesture while sketch is open
+    document.documentElement.style.touchAction = 'none';
+    document.documentElement.style.overscrollBehavior = 'none';
+    // Block edge swipe by intercepting touches near left edge
+    const blockEdge = (e: TouchEvent) => {
+      const x = e.touches[0]?.clientX ?? 999;
+      if (x < 30) e.preventDefault();
+    };
+    document.addEventListener('touchstart', blockEdge, { passive: false });
+
+    return () => {
+      document.documentElement.style.touchAction = '';
+      document.documentElement.style.overscrollBehavior = '';
+      document.removeEventListener('touchstart', blockEdge);
+    };
   }, []);
 
   const getPos = (e: React.TouchEvent | React.MouseEvent) => {
@@ -115,10 +132,15 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
     }
   }, [tool, color]);
 
-  const endDraw = useCallback(() => {
+  const endDraw = useCallback((e: React.TouchEvent | React.MouseEvent) => {
+    if (drawing.current && (tool === 'rect' || tool === 'arrow')) {
+      // Record final endpoint for shape bounds
+      const pos = getPos(e);
+      shapeEndpoints.current.push(startPos.current, pos);
+    }
     drawing.current = false;
     snapshot.current = null;
-  }, []);
+  }, [tool]);
 
   const handleInsert = () => {
     const canvas = canvasRef.current;
@@ -127,7 +149,10 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
     const sw = screenW.current;
     const sh = screenH.current;
 
-    const pts = allPoints.current;
+    // Use shape endpoints (rect/arrow) if available, otherwise use all freehand points
+    const pts = shapeEndpoints.current.length > 0
+      ? [...allPoints.current, ...shapeEndpoints.current]
+      : allPoints.current;
     if (pts.length === 0) { onClose(); return; }
     const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
     const minX = Math.min(...xs), maxX = Math.max(...xs);
@@ -159,6 +184,7 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
     const rect = canvas.getBoundingClientRect();
     ctx.clearRect(0, 0, rect.width, rect.height);
     allPoints.current = [];
+    shapeEndpoints.current = [];
     strokeHistory.current = [];
   };
 

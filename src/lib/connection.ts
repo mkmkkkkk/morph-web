@@ -212,6 +212,67 @@ export function stop() {
   setState('disconnected');
 }
 
+export async function switchSession(newSessionId: string, opts?: { resume?: boolean; message?: string }) {
+  // Clear current messages — caller should handle UI reset
+  sessionId = newSessionId;
+
+  // Subscribe socket to new session
+  if (socket?.connected) {
+    socket.emit('direct-subscribe', { sessionId: newSessionId });
+  }
+
+  // Check if session is already active
+  try {
+    const checkRes = await fetch(`${RELAY_URL}/v2/claude/active`, { headers: { 'Authorization': `Bearer ${getToken()}` } });
+    const checkData = await checkRes.json();
+    const alive = (checkData.sessions || []).find((s: any) => s.id === newSessionId && s.alive);
+
+    // Load history
+    try {
+      const histRes = await fetch(`${RELAY_URL}/v2/claude/history/${newSessionId}?limit=30`, { headers: { 'Authorization': `Bearer ${getToken()}` } });
+      const histData = await histRes.json();
+      for (const msg of (histData.messages || [])) {
+        emit({ id: uid(), role: msg.role, type: msg.type, content: msg.content, name: msg.name, ts: msg.ts ? new Date(msg.ts).getTime() : Date.now() });
+      }
+    } catch {}
+
+    if (alive) return; // Already running
+
+    if (opts?.resume) {
+      // Resume existing session
+      const res = await fetch(`${RELAY_URL}/v2/claude/resume`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resumeFrom: newSessionId, message: opts.message, cwd: '/workspace' }),
+      });
+      const data = await res.json();
+      if (data.sessionId) {
+        sessionId = data.sessionId;
+        socket?.emit('direct-subscribe', { sessionId: data.sessionId });
+      }
+    } else {
+      // Start fresh with this session ID
+      const res = await fetch(`${RELAY_URL}/v2/claude/send`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: opts?.message || 'Continue from where you left off.', sessionId: newSessionId, cwd: '/workspace' }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+    }
+  } catch (err: any) {
+    emit({ id: uid(), role: 'system', type: 'error', content: err.message, ts: Date.now() });
+  }
+}
+
+export async function fetchSessions(): Promise<any[]> {
+  try {
+    const res = await fetch(`${RELAY_URL}/v2/claude/sessions?limit=20`, { headers: { 'Authorization': `Bearer ${getToken()}` } });
+    const data = await res.json();
+    return data.sessions || [];
+  } catch { return []; }
+}
+
 export function onMessage(fn: Listener) { msgListeners.add(fn); return () => { msgListeners.delete(fn); }; }
 export function onState(fn: StateListener) { stateListeners.add(fn); return () => { stateListeners.delete(fn); }; }
 export function getState() { return state; }
