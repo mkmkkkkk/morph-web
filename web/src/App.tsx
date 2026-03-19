@@ -2,6 +2,9 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { connect, send, interrupt, clearSession, setCurrentTab, onMessage, onState, getState, type Message } from './lib/connection';
 import Sketch from './components/Sketch';
 
+// Cache-bust canvas.html on each page load (not per render)
+const BUILD_TS = Date.now().toString(36);
+
 // ─── Password Gate ───
 const PASS_KEY = 'morph-auth';
 
@@ -390,7 +393,7 @@ export default function App() {
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
         {/* Canvas iframe */}
         <div style={{ flex: 1, display: tab === 'canvas' ? 'flex' : 'none' }}>
-          <iframe src="/canvas.html" style={{ width: '100%', height: '100%', border: 'none', backgroundColor: '#0a0a0a' }} sandbox="allow-scripts allow-same-origin" loading="lazy" />
+          <iframe src={`/canvas.html?v=${BUILD_TS}`} style={{ width: '100%', height: '100%', border: 'none', backgroundColor: '#0a0a0a' }} sandbox="allow-scripts allow-same-origin" loading="lazy" />
         </div>
 
         {/* Config content */}
