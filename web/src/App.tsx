@@ -255,7 +255,7 @@ function Row({ label, value, valueColor }: { label: string; value: string; value
 const tabs = [{ id: 'canvas', label: 'Canvas' }, { id: 'config', label: 'Config' }];
 function TabBar({ tab, onTab }: { tab: string; onTab: (t: string) => void }) {
   return (
-    <div style={{ display: 'flex', borderTop: '1px solid rgba(255,255,255,0.06)', paddingBottom: 4, flexShrink: 0, position: 'relative' }}>
+    <div style={{ display: 'flex', borderTop: '1px solid rgba(255,255,255,0.06)', paddingBottom: 'max(4px, env(safe-area-inset-bottom))', flexShrink: 0, position: 'relative', backgroundColor: '#0a0a0a' }}>
       {/* Sliding indicator */}
       <motion.div
         layoutId="tab-indicator"
