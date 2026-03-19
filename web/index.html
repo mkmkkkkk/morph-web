@@ -25,14 +25,16 @@
     document.documentElement.style.setProperty('--real-h', screenH + 'px');
     document.getElementById('root').style.height = screenH + 'px';
 
-    // Block iOS rubber-band on body/html (doesn't affect scrollable children)
+    // Block iOS rubber-band on body/html (doesn't affect scrollable children or inputs)
     document.addEventListener('touchmove', function(e) {
       var t = e.target;
+      // Always allow touch in input/textarea (cursor, selection)
+      if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA') return;
       // Allow scroll inside elements with overflow-y: scroll/auto
       while (t && t !== document.body) {
         var style = window.getComputedStyle(t);
         if (style.overflowY === 'scroll' || style.overflowY === 'auto') {
-          if (t.scrollHeight > t.clientHeight) return; // scrollable — allow
+          if (t.scrollHeight > t.clientHeight) return;
         }
         t = t.parentElement;
       }
