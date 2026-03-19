@@ -214,16 +214,25 @@ function markViewed(id: string) {
   const s = getViewed(); s.add(id); localStorage.setItem(VIEWED_KEY, JSON.stringify([...s]));
 }
 
+// Pin persistence
+function getPinned(): Set<string> { try { return new Set(JSON.parse(localStorage.getItem('morph-pinned') || '[]')); } catch { return new Set(); } }
+function togglePin(id: string) { const p = getPinned(); if (p.has(id)) p.delete(id); else p.add(id); localStorage.setItem('morph-pinned', JSON.stringify([...p])); return p; }
+
 function SessionCards({ onSelect }: { onSelect: (sessionId: string, display?: string) => void }) {
   const [sessions, setSessions] = useState<any[]>([]);
   const [viewed, setViewed] = useState<Set<string>>(getViewed);
+  const [pinned, setPinned] = useState<Set<string>>(getPinned);
   const [expanded, setExpanded] = useState(true);
 
   useEffect(() => {
     fetchSessions().then(all => {
-      // Filter out fixed session, limit to 7
-      const filtered = all.filter(s => s.id !== FIXED_SESSION_ID).slice(0, 7);
-      setSessions(filtered);
+      const pins = getPinned();
+      // Filter out fixed session
+      const filtered = all.filter(s => s.id !== FIXED_SESSION_ID);
+      // Pinned sessions always shown, unpinned limited to fill up to 6 total
+      const pinnedSessions = filtered.filter(s => pins.has(s.id));
+      const unpinned = filtered.filter(s => !pins.has(s.id)).slice(0, 6 - pinnedSessions.length);
+      setSessions([...pinnedSessions, ...unpinned]);
     });
   }, []);
 
@@ -260,14 +269,14 @@ function SessionCards({ onSelect }: { onSelect: (sessionId: string, display?: st
   const unviewedCount = sessions.filter(s => !s.active && !viewed.has(s.id)).length;
 
   return (
-    <div style={{ position: 'absolute', top: 200, left: 0, right: 0, zIndex: 2, padding: '0 12px', pointerEvents: 'none' }}>
+    <div style={{ position: 'absolute', top: 90, left: 0, right: 0, zIndex: 2, padding: '0 8px', pointerEvents: 'none' }}>
       {/* Header — tap to toggle */}
       <div
         onClick={() => setExpanded(v => !v)}
         style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: expanded ? 6 : 0, cursor: 'pointer', pointerEvents: 'auto' }}
       >
         <span style={{ color: '#777', fontSize: 11, fontWeight: 600, textTransform: 'uppercase' as const, letterSpacing: 0.5 }}>
-          Sessions ({sessions.length})
+          /workspace ({sessions.length})
         </span>
         {activeCount > 0 && <span style={{ fontSize: 9, color: '#30d158' }}>{activeCount} active</span>}
         {unviewedCount > 0 && <span style={{ fontSize: 9, color: '#ffcc00' }}>{unviewedCount} new</span>}
@@ -289,17 +298,21 @@ function SessionCards({ onSelect }: { onSelect: (sessionId: string, display?: st
                 onClick={() => handleSelect(s.id)}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 8,
-                  padding: '8px 10px', marginBottom: 3,
+                  padding: '12px 10px', marginBottom: 4,
                   backgroundColor: 'rgba(28,28,30,0.85)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
                   borderRadius: 10, cursor: 'pointer',
                   border: `1px solid ${borderColor(s)}`,
                 }}
               >
                 <div style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: dotColor(s), flexShrink: 0 }} />
+                {pinned.has(s.id) && <span style={{ fontSize: 9, color: '#888', flexShrink: 0 }}>📌</span>}
                 <span style={{ color: '#ddd', fontSize: 13, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
                   {s.display || s.id.slice(0, 8)}
                 </span>
                 <span style={{ color: '#777', fontSize: 11, flexShrink: 0 }}>{timeAgo(s.updatedAt)}</span>
+                <span onClick={(e) => { e.stopPropagation(); setPinned(togglePin(s.id)); }} style={{ fontSize: 14, color: pinned.has(s.id) ? '#ffcc00' : '#555', cursor: 'pointer', padding: '8px 10px', margin: '-8px -10px -8px 0', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {pinned.has(s.id) ? '★' : '☆'}
+                </span>
               </motion.div>
             ))}
           </motion.div>
