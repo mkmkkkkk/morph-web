@@ -36,7 +36,7 @@ function Collapsible({ label, preview, content, color }: { label: string; previe
   const [open, setOpen] = useState(false);
   return (
     <div style={{ marginBottom: 2, overflow: 'hidden', maxWidth: '100%' }}>
-      <div onClick={() => setOpen(!open)} style={{ cursor: 'pointer', color, fontSize: 12, fontFamily: 'Menlo, monospace', lineHeight: '18px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <div onClick={() => setOpen(!open)} style={{ cursor: 'pointer', color, fontSize: 13, fontFamily: 'Menlo, monospace', lineHeight: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {open ? '▾' : '▸'} {label}{!open && preview ? `: ${preview}` : ''}
       </div>
       {open && <pre style={{ color: '#888', fontSize: 12, fontFamily: 'Menlo, monospace', lineHeight: '17px', marginLeft: 16, whiteSpace: 'pre-wrap', wordBreak: 'break-all', overflow: 'hidden', maxWidth: '100%', margin: 0, marginLeft: 16 }}>{content}</pre>}
@@ -46,7 +46,7 @@ function Collapsible({ label, preview, content, color }: { label: string; previe
 
 // ─── Message Row ───
 function MessageRow({ msg }: { msg: Message }) {
-  const mono = { fontFamily: 'Menlo, monospace', fontSize: 12, lineHeight: '18px', overflow: 'hidden' as const, maxWidth: '100%' } as const;
+  const mono = { fontFamily: 'Menlo, monospace', fontSize: 14, lineHeight: '20px', overflow: 'hidden' as const, maxWidth: '100%' } as const;
   switch (msg.type) {
     case 'text':
       return msg.role === 'user'
@@ -110,11 +110,11 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
   const dotColor = connected ? '#30d158' : '#636366';
 
   return (
-    <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', padding: '8px 10px', display: 'flex', alignItems: 'flex-end', gap: 6 }}>
+    <div style={{ borderTop: '1px solid rgba(255,255,255,0.06)', padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
       {/* Connection dot */}
-      <div style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: dotColor, flexShrink: 0 }} />
+      <div style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: dotColor, flexShrink: 0, marginBottom: 0 }} />
 
-      {/* Terminal toggle — CSS equilateral triangle */}
+      {/* Terminal toggle — equilateral triangle (side=14px → height=12px) */}
       <button tabIndex={-1} onClick={onToggleTerminal} style={{
         width: 34, height: 34, borderRadius: 17, border: 'none', cursor: 'pointer', flexShrink: 0,
         backgroundColor: 'rgba(255,255,255,0.08)',
@@ -122,10 +122,10 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
       }}>
         <div style={{
           width: 0, height: 0,
-          borderLeft: '7px solid transparent', borderRight: '7px solid transparent',
+          borderLeft: '6px solid transparent', borderRight: '6px solid transparent',
           ...(terminalVisible
-            ? { borderTop: `12px solid ${isProcessing ? '#30d158' : hasNew ? '#999' : '#666'}` }
-            : { borderBottom: `12px solid ${isProcessing ? '#30d158' : hasNew ? '#999' : '#666'}` }),
+            ? { borderTop: `10px solid ${isProcessing ? '#30d158' : hasNew ? '#999' : '#666'}` }
+            : { borderBottom: `10px solid ${isProcessing ? '#30d158' : hasNew ? '#999' : '#666'}` }),
         }} />
       </button>
 
@@ -144,7 +144,6 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
       <textarea ref={ref} value={text}
         onChange={e => {
           setText(e.target.value);
-          // Auto-grow: reset then expand
           const el = e.target;
           el.style.height = '36px';
           el.style.height = Math.min(el.scrollHeight, 120) + 'px';
@@ -165,15 +164,6 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
         }}
       />
 
-      {/* Stop button — always visible, red when processing */}
-      <button tabIndex={-1} onClick={onStop} style={{
-        width: 36, height: 36, borderRadius: 18, border: 'none', cursor: 'pointer',
-        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-        backgroundColor: isProcessing ? '#ff3b30' : 'rgba(255,255,255,0.06)',
-      }}>
-        <div style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: isProcessing ? '#fff' : '#444' }} />
-      </button>
-
       {/* Send button — always visible */}
       <button tabIndex={-1} onClick={handleSend} disabled={!text.trim()} style={{
         width: 36, height: 36, borderRadius: 18, border: 'none', flexShrink: 0,
@@ -185,8 +175,7 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
 }
 
 // ─── Config Tab ───
-function ConfigTab({ connState }: { connState: string }) {
-  const [sessions, setSessions] = useState<any[]>([]);
+function ConfigTab({ connState, onQuickAction }: { connState: string; onQuickAction: (prompt: string) => void }) {
   const [activeSessions, setActiveSessions] = useState<any[]>([]);
   const token = () => localStorage.getItem('morph-auth') || '';
   const headers = () => ({ 'Authorization': `Bearer ${token()}` });
@@ -194,15 +183,11 @@ function ConfigTab({ connState }: { connState: string }) {
   const loadActive = async () => {
     try { const r = await fetch('/v2/claude/active', { headers: headers() }); const d = await r.json(); setActiveSessions(d.sessions || []); } catch {}
   };
-  const loadHistory = async () => {
-    try { const r = await fetch('/v2/claude/sessions', { headers: headers() }); const d = await r.json(); setSessions((d.sessions || []).slice(0, 20)); } catch {}
-  };
 
   useEffect(() => { loadActive(); }, []);
 
   return (
-    <div style={{ flex: 1, overflowY: 'auto', padding: 16, WebkitOverflowScrolling: 'touch' as any }}>
-      <div style={{ fontSize: 20, fontWeight: 600, marginBottom: 16 }}>Config</div>
+    <div style={{ flex: 1, overflowY: 'scroll', padding: 16, paddingTop: 56, minHeight: 0, WebkitOverflowScrolling: 'touch' as any }}>
 
       <Section title="Connection">
         <Row label="Status" value={connState} valueColor={connState === 'connected' ? '#30d158' : '#ff453a'} />
@@ -213,9 +198,9 @@ function ConfigTab({ connState }: { connState: string }) {
         {[
           { label: 'Status Check', prompt: 'Give me a brief status update on current work.' },
           { label: 'Git Status', prompt: 'Run git status and summarize.' },
-          { label: 'Build Dashboard', prompt: 'Build me a live dashboard component.' },
+          { label: 'Run Heartbeat', prompt: 'Run heartbeat check and report any overdue jobs.' },
         ].map(a => (
-          <button key={a.label} onClick={() => send(a.prompt)} style={{
+          <button key={a.label} onClick={() => onQuickAction(a.prompt)} style={{
             padding: '10px 0', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 14, width: '100%', textAlign: 'center',
             backgroundColor: 'rgba(255,255,255,0.06)', color: '#fff', marginBottom: 4,
           }}>{a.label}</button>
@@ -227,15 +212,6 @@ function ConfigTab({ connState }: { connState: string }) {
         {activeSessions.map((s: any) => (
           <div key={s.id} style={{ fontFamily: 'Menlo, monospace', fontSize: 12, color: '#aaa', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
             <span style={{ color: '#30d158' }}>{s.id.slice(0, 8)}</span> {s.cwd} {s.alive ? '●' : '○'}
-          </div>
-        ))}
-      </Section>
-
-      <Section title="Session History">
-        <button onClick={loadHistory} style={{ padding: '8px', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, width: '100%', backgroundColor: 'rgba(255,255,255,0.06)', color: '#aaa', marginBottom: 8 }}>Load History</button>
-        {sessions.map((s: any) => (
-          <div key={s.id} style={{ fontFamily: 'Menlo, monospace', fontSize: 12, color: '#666', padding: '4px 0' }}>
-            {s.id.slice(0, 8)}... {s.size ? `${(s.size / 1024).toFixed(0)}KB` : ''}
           </div>
         ))}
       </Section>
@@ -272,12 +248,18 @@ function Row({ label, value, valueColor }: { label: string; value: string; value
 function TabBar({ tab, onTab }: { tab: string; onTab: (t: string) => void }) {
   return (
     <div style={{ display: 'flex', borderTop: '1px solid rgba(255,255,255,0.06)', paddingBottom: 4, flexShrink: 0 }}>
-      {[{ id: 'canvas', icon: '◇', label: 'Canvas' }, { id: 'config', icon: '⚙', label: 'Config' }].map(t => (
+      {[{ id: 'canvas', label: 'Canvas' }, { id: 'config', label: 'Config' }].map(t => (
         <button key={t.id} tabIndex={-1} onClick={() => onTab(t.id)} style={{
           flex: 1, padding: '8px 0 4px', border: 'none', cursor: 'pointer', backgroundColor: 'transparent',
           color: tab === t.id ? '#fff' : '#636366', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
         }}>
-          <span style={{ fontSize: 20 }}>{t.icon}</span>
+          <span style={{ display: 'flex' }}>
+            {t.id === 'canvas' ? (
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M9 3v18"/></svg>
+            ) : (
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 00.73 2.73l.15.1a2 2 0 011 1.72v.51a2 2 0 01-1 1.74l-.15.09a2 2 0 00-.73 2.73l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 00-.73-2.73l-.15-.08a2 2 0 01-1-1.74v-.5a2 2 0 011-1.74l.15-.09a2 2 0 00.73-2.73l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+            )}
+          </span>
           <span style={{ fontSize: 10 }}>{t.label}</span>
         </button>
       ))}
@@ -412,8 +394,12 @@ export default function App() {
         </div>
 
         {/* Config content */}
-        <div style={{ flex: 1, display: tab === 'config' ? 'flex' : 'none' }}>
-          <ConfigTab connState={connState} />
+        <div style={{ flex: 1, display: tab === 'config' ? 'flex' : 'none', overflow: 'hidden', flexDirection: 'column' }}>
+          <ConfigTab connState={connState} onQuickAction={(prompt) => {
+            send(prompt);
+            setTab('canvas'); setCurrentTab('canvas');
+            setTerminalVisible(true);
+          }} />
         </div>
 
         {/* Terminal sheet — slides up from bottom, draggable height */}
@@ -454,6 +440,21 @@ export default function App() {
             <div style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.25)' }} />
           </div>
           <TerminalOverlay messages={messages} visible={true} />
+          {/* ESC button — bottom-right of terminal, only when open */}
+          <div style={{ padding: '4px 12px 6px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+            <span style={{ marginRight: 8, color: '#444', fontSize: 11, fontFamily: 'Menlo, monospace' }}>
+              {isProcessing ? (() => {
+                const words = ['thinking...', 'pondering...', 'wondering...', 'reasoning...', 'considering...', 'analyzing...', 'processing...'];
+                return words[Math.floor(Date.now() / 4000) % words.length];
+              })() : 'idle'}
+            </span>
+            <button tabIndex={-1} onClick={interrupt} style={{
+              padding: '3px 10px', borderRadius: 5, cursor: 'pointer', flexShrink: 0,
+              border: isProcessing ? '1px solid rgba(255,59,48,0.4)' : '1px solid rgba(255,255,255,0.1)',
+              backgroundColor: isProcessing ? 'rgba(255,59,48,0.15)' : 'transparent',
+              color: isProcessing ? '#ff453a' : '#555', fontSize: 11, fontFamily: 'Menlo, monospace',
+            }}>ESC</button>
+          </div>
         </div>
       </div>
 
@@ -466,29 +467,32 @@ export default function App() {
         pendingSketch={pendingSketch ? pendingSketch.dataUrl : null}
       />
       <TabBar tab={tab} onTab={handleTab} />
-      {/* Attach menu popup */}
-      {attachMenu && (
+      {/* Attach menu — frosted glass popup */}
+      {attachMenu && (<>
+        <div onClick={() => setAttachMenu(false)} style={{ position: 'fixed', inset: 0, zIndex: 998 }} />
         <div style={{
           position: 'absolute', bottom: 100, left: 12, zIndex: 999,
-          backgroundColor: 'rgba(44,44,46,0.95)', backdropFilter: 'blur(12px)',
-          borderRadius: 12, padding: 4, minWidth: 180,
-          boxShadow: '0 8px 30px rgba(0,0,0,0.5)', border: '1px solid rgba(255,255,255,0.1)',
+          backgroundColor: 'rgba(30,30,30,0.85)', backdropFilter: 'blur(40px)', WebkitBackdropFilter: 'blur(40px)',
+          borderRadius: 14, padding: '4px 0', minWidth: 200,
+          boxShadow: '0 8px 40px rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.08)',
         }}>
           {[
-            { label: 'Photo Library', icon: '🖼', action: () => uploadFile('image/*') },
-            { label: 'File', icon: '📄', action: () => uploadFile('*/*') },
-            { label: 'Sketch', icon: '✏', action: () => { setAttachMenu(false); setSketchOpen(true); } },
-            { label: 'Cancel', icon: '✕', action: () => setAttachMenu(false) },
-          ].map(item => (
-            <button key={item.label} tabIndex={-1} onClick={item.action} style={{
-              display: 'flex', alignItems: 'center', gap: 10, width: '100%',
-              padding: '12px 14px', border: 'none', cursor: 'pointer', borderRadius: 8,
-              backgroundColor: 'transparent', color: item.label === 'Cancel' ? '#999' : '#fff',
-              fontSize: 15, textAlign: 'left',
-            }}>{item.icon} {item.label}</button>
+            { label: 'Photo Library', icon: (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>), action: () => uploadFile('image/*') },
+            { label: 'File', icon: (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg>), action: () => uploadFile('*/*') },
+            { label: 'Sketch', icon: (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 19l7-7 3 3-7 7H12v-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/></svg>), action: () => { setAttachMenu(false); setSketchOpen(true); } },
+          ].map((item, i) => (
+            <div key={item.label}>
+              {i > 0 && <div style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', margin: '0 12px' }} />}
+              <button tabIndex={-1} onClick={item.action} style={{
+                display: 'flex', alignItems: 'center', gap: 12, width: '100%',
+                padding: '11px 16px', border: 'none', cursor: 'pointer', borderRadius: 0,
+                backgroundColor: 'transparent', color: '#e0e0e0',
+                fontSize: 15, textAlign: 'left', fontFamily: '-apple-system, system-ui, sans-serif',
+              }}><span style={{ color: '#999', display: 'flex' }}>{item.icon}</span> {item.label}</button>
+            </div>
           ))}
         </div>
-      )}
+      </>)}
       {sketchOpen && <Sketch onInsert={handleSketchInsert} onClose={() => setSketchOpen(false)} />}
     </div>
   );
