@@ -185,6 +185,13 @@
       margin: 0 2px;
     }
 
+    #sketch-drag-handle {
+      color: #555; font-size: 16px; cursor: grab;
+      padding: 4px 6px; line-height: 1;
+      touch-action: none; user-select: none; -webkit-user-select: none;
+    }
+    #sketch-drag-handle:active { cursor: grabbing; color: #888; }
+
     /* Sketch mode indicator — top label */
     #sketch-label {
       position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
@@ -218,14 +225,15 @@
     <canvas id="sketch-canvas"></canvas>
     <div id="sketch-label">SKETCH</div>
     <div id="sketch-toolbar">
+      <div id="sketch-drag-handle">⠿</div>
       <button class="sketch-btn close" onclick="_sketchClose()">&times;</button>
       <div class="sketch-sep"></div>
       <div class="sketch-colors">
-        <div class="sketch-color active" data-color="#ffffff" style="background:#ffffff"></div>
-        <div class="sketch-color" data-color="#ff453a" style="background:#ff453a"></div>
-        <div class="sketch-color" data-color="#30d158" style="background:#30d158"></div>
-        <div class="sketch-color" data-color="#007aff" style="background:#007aff"></div>
-        <div class="sketch-color" data-color="#ffcc00" style="background:#ffcc00"></div>
+        <div class="sketch-color active" data-color="#c8c8c8" style="background:#c8c8c8"></div>
+        <div class="sketch-color" data-color="#e07070" style="background:#e07070"></div>
+        <div class="sketch-color" data-color="#70b880" style="background:#70b880"></div>
+        <div class="sketch-color" data-color="#6899cc" style="background:#6899cc"></div>
+        <div class="sketch-color" data-color="#d4a853" style="background:#d4a853"></div>
       </div>
       <div class="sketch-sep"></div>
       <button class="sketch-btn undo" onclick="_sketchUndo()">undo</button>
@@ -246,7 +254,7 @@
     var _sketchActive = false;
     var _sketchCtx = null;
     var _sketchDrawing = false;
-    var _sketchColor = '#ffffff';
+    var _sketchColor = '#c8c8c8';
     var _sketchHistory = []; // array of ImageData for undo
     var _sketchStrokes = []; // array of { color, points: [{x,y}] } for AI
     var _sketchCurrentStroke = null;
@@ -519,16 +527,15 @@
 
     function _toolbarInitDrag() {
       var tb = document.getElementById('sketch-toolbar');
-      // Reset transform — position with left/bottom instead
+      var handle = document.getElementById('sketch-drag-handle');
+      // Reset transform — position with left/top instead
       var rect = tb.getBoundingClientRect();
       tb.style.left = rect.left + 'px';
       tb.style.bottom = 'auto';
       tb.style.top = rect.top + 'px';
       tb.style.transform = 'none';
 
-      tb.addEventListener('touchstart', function(e) {
-        // Only drag from the toolbar background, not buttons
-        if (e.target.closest('.sketch-btn, .sketch-color')) return;
+      handle.addEventListener('touchstart', function(e) {
         e.preventDefault();
         e.stopPropagation();
         _toolbarDragging = true;
@@ -538,7 +545,7 @@
         _toolbarOffsetY = t.clientY - rect.top;
       }, { passive: false });
 
-      tb.addEventListener('touchmove', function(e) {
+      handle.addEventListener('touchmove', function(e) {
         if (!_toolbarDragging) return;
         e.preventDefault();
         e.stopPropagation();
@@ -553,7 +560,7 @@
         tb.style.top = y + 'px';
       }, { passive: false });
 
-      tb.addEventListener('touchend', function(e) {
+      handle.addEventListener('touchend', function(e) {
         if (_toolbarDragging) {
           e.stopPropagation();
           _toolbarDragging = false;
