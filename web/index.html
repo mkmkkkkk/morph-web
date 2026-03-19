@@ -13,17 +13,58 @@
   <style>@font-face { font-family: 'CloisterBlack'; src: url('/CloisterBlack.ttf'); }</style>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { margin: 0; padding: 0; background: #0a0a0a; overflow: hidden; height: var(--real-h, 100%); }
-    #root { height: var(--real-h, 100%); width: 100%; background: #0a0a0a; color: #fff; font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; overflow: hidden; }
+    html, body { margin: 0; padding: 0; background: #0a0a0a; overflow: hidden; height: var(--real-h, 100%); overscroll-behavior: none; }
+    #root { height: var(--real-h, 100%); width: 100%; background: #0a0a0a; color: #fff; font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; overflow: hidden; overscroll-behavior: none; }
   </style>
 </head>
 <body>
   <div id="root"></div>
   <script>
     // Use actual screen height — CSS viewport units don't include iOS safe area
-    var h = window.screen.height;
-    document.documentElement.style.setProperty('--real-h', h + 'px');
-    document.getElementById('root').style.height = h + 'px';
+    var screenH = window.screen.height;
+    document.documentElement.style.setProperty('--real-h', screenH + 'px');
+    document.getElementById('root').style.height = screenH + 'px';
+
+    // Block iOS rubber-band on body/html (doesn't affect scrollable children)
+    document.addEventListener('touchmove', function(e) {
+      var t = e.target;
+      // Allow scroll inside elements with overflow-y: scroll/auto
+      while (t && t !== document.body) {
+        var style = window.getComputedStyle(t);
+        if (style.overflowY === 'scroll' || style.overflowY === 'auto') {
+          if (t.scrollHeight > t.clientHeight) return; // scrollable — allow
+        }
+        t = t.parentElement;
+      }
+      e.preventDefault();
+    }, { passive: false });
+
+    // Disable iOS back/forward swipe gesture (left/right edge)
+    document.addEventListener('touchstart', function(e) {
+      var x = e.touches[0].clientX;
+      if (x < 25 || x > window.innerWidth - 25) e.preventDefault();
+    }, { passive: false });
+
+    // Keyboard handling — resize root to visual viewport when keyboard opens
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', function() {
+        var vvh = window.visualViewport.height;
+        var root = document.getElementById('root');
+        // Keyboard open: visualViewport shrinks significantly
+        if (vvh < screenH * 0.75) {
+          root.style.height = vvh + 'px';
+          // Pin to bottom of visual viewport
+          root.style.position = 'fixed';
+          root.style.bottom = '0';
+          root.style.top = 'auto';
+        } else {
+          root.style.height = screenH + 'px';
+          root.style.position = '';
+          root.style.bottom = '';
+          root.style.top = '';
+        }
+      });
+    }
   </script>
   <script type="module" src="/src/main.tsx"></script>
 </body>
