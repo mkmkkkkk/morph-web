@@ -1,4 +1,5 @@
 import { useRef, useState, useCallback, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 type Tool = 'pen' | 'rect' | 'arrow';
 
@@ -18,10 +19,8 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
   const snapshot = useRef<ImageData | null>(null);
   // Track bounding box of all strokes (in percentage of canvas)
   const allPoints = useRef<{ x: number; y: number }[]>([]);
-  // Draggable toolbar
+  // Toolbar state
   const toolbarRef = useRef<HTMLDivElement>(null);
-  const dragState = useRef({ dragging: false, offsetX: 0, offsetY: 0 });
-  const [toolbarPos, setToolbarPos] = useState<{ x: number; y: number } | null>(null);
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
@@ -126,38 +125,6 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
     onInsert(canvas.toDataURL('image/png'), bounds);
   };
 
-  // Native touch listeners to bypass React event delegation (canvas intercepts React events)
-  useEffect(() => {
-    const handle = document.getElementById('sketch-drag-handle');
-    if (!handle) return;
-    const onStart = (e: TouchEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const t = e.touches[0];
-      const tb = toolbarRef.current;
-      if (!tb) return;
-      const rect = tb.getBoundingClientRect();
-      dragState.current = { dragging: true, offsetX: t.clientX - rect.left, offsetY: t.clientY - rect.top };
-    };
-    const onMove = (e: TouchEvent) => {
-      if (!dragState.current.dragging) return;
-      e.preventDefault();
-      e.stopPropagation();
-      const t = e.touches[0];
-      const x = Math.max(0, Math.min(window.innerWidth - 200, t.clientX - dragState.current.offsetX));
-      const y = Math.max(0, Math.min(window.innerHeight - 100, t.clientY - dragState.current.offsetY));
-      setToolbarPos({ x, y });
-    };
-    const onEnd = () => { dragState.current.dragging = false; };
-    handle.addEventListener('touchstart', onStart, { passive: false });
-    handle.addEventListener('touchmove', onMove, { passive: false });
-    handle.addEventListener('touchend', onEnd);
-    return () => {
-      handle.removeEventListener('touchstart', onStart);
-      handle.removeEventListener('touchmove', onMove);
-      handle.removeEventListener('touchend', onEnd);
-    };
-  }, []);
 
   const handleClear = () => {
     const canvas = canvasRef.current;
@@ -179,12 +146,7 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
   );
 
   return (
-    <div style={{
-      position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', flexDirection: 'column',
-      animation: 'sketchIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both',
-      transformOrigin: 'bottom left',
-    }}>
-      <style>{`@keyframes sketchIn { from { transform: scale(0.85); opacity: 0; } to { transform: scale(1); opacity: 1; } }`}</style>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', flexDirection: 'column' }}>
       {/* Transparent canvas overlay */}
       <canvas
         ref={canvasRef}
@@ -198,63 +160,81 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
         onMouseLeave={endDraw}
       />
 
-      {/* Floating draggable toolbar */}
-      <div ref={toolbarRef} style={{
-        position: 'fixed',
-        ...(toolbarPos ? { left: toolbarPos.x, top: toolbarPos.y } : { top: '72%', left: '50%', transform: 'translate(-50%, -50%)' }),
-        display: 'flex', flexDirection: 'column', alignItems: 'stretch',
-        width: 220, borderRadius: 16,
-        backgroundColor: 'rgba(28,28,30,0.92)', backdropFilter: 'blur(40px)', WebkitBackdropFilter: 'blur(40px)',
-        border: '1px solid rgba(255,255,255,0.1)',
-        boxShadow: '0 12px 40px rgba(0,0,0,0.6)',
-        zIndex: 1001, touchAction: 'none', overflow: 'hidden',
-      }}>
+      {/* Floating draggable toolbar — Framer Motion drag */}
+      <motion.div ref={toolbarRef}
+        drag dragMomentum={false}
+        dragConstraints={{ left: 0, right: window.innerWidth - 220, top: 0, bottom: window.innerHeight - 100 }}
+        initial={{ y: 0, scale: 0.8, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+        style={{
+          position: 'fixed', top: '68%', left: 'calc(50% - 110px)',
+          display: 'flex', flexDirection: 'column', alignItems: 'stretch',
+          width: 220, borderRadius: 16,
+          backgroundColor: 'rgba(28,28,30,0.92)', backdropFilter: 'blur(40px)', WebkitBackdropFilter: 'blur(40px)',
+          border: '1px solid rgba(255,255,255,0.1)',
+          boxShadow: '0 12px 40px rgba(0,0,0,0.6)',
+          zIndex: 1001, touchAction: 'none', overflow: 'hidden',
+        }}
+      >
         {/* Drag handle — tap to collapse, drag to move */}
-        <div id="sketch-drag-handle" onClick={() => setCollapsed(c => !c)} style={{
+        <div onClick={() => setCollapsed(c => !c)} style={{
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          height: 28, cursor: 'grab', touchAction: 'none',
+          height: 28, cursor: 'grab',
           borderBottom: collapsed ? 'none' : '1px solid rgba(255,255,255,0.06)',
         }}>
-          <div style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.2)' }} />
+          <motion.div
+            animate={{ width: collapsed ? 24 : 36, backgroundColor: collapsed ? 'rgba(255,255,255,0.35)' : 'rgba(255,255,255,0.2)' }}
+            style={{ height: 4, borderRadius: 2 }}
+          />
         </div>
 
-        {!collapsed && (<>
-          {/* Row 1: Colors + Tools */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '8px 12px' }}>
-            {colors.map(c => (
-              <div key={c} onClick={() => setColor(c)} style={{
-                width: 22, height: 22, borderRadius: 11, backgroundColor: c, cursor: 'pointer',
-                border: color === c ? '2px solid rgba(255,255,255,0.6)' : '2px solid rgba(255,255,255,0.08)',
-                boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
-                transition: 'border-color 0.15s',
-              }} />
-            ))}
-            <span style={{ width: 1, height: 20, backgroundColor: 'rgba(255,255,255,0.08)', margin: '0 2px' }} />
-            {toolBtn('pen', '✏')}
-            {toolBtn('rect', '▢')}
-            {toolBtn('arrow', '→')}
-          </div>
+        <AnimatePresence>
+          {!collapsed && (
+            <motion.div
+              key="toolbar-content"
+              initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+              style={{ overflow: 'hidden' }}
+            >
+              {/* Row 1: Colors + Tools */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '8px 12px' }}>
+                {colors.map(c => (
+                  <motion.div key={c} whileTap={{ scale: 0.85 }} onClick={() => setColor(c)} style={{
+                    width: 22, height: 22, borderRadius: 11, backgroundColor: c, cursor: 'pointer',
+                    border: color === c ? '2px solid rgba(255,255,255,0.6)' : '2px solid rgba(255,255,255,0.08)',
+                    boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                    transition: 'border-color 0.15s',
+                  }} />
+                ))}
+                <span style={{ width: 1, height: 20, backgroundColor: 'rgba(255,255,255,0.08)', margin: '0 2px' }} />
+                {toolBtn('pen', '✏')}
+                {toolBtn('rect', '▢')}
+                {toolBtn('arrow', '→')}
+              </div>
 
-          {/* Row 2: Close / Clear / Insert */}
-          <div style={{ display: 'flex', gap: 6, padding: '0 10px 10px' }}>
-            <button tabIndex={-1} onClick={onClose} style={{
-              flex: 1, padding: '10px 0', borderRadius: 10, border: 'none', cursor: 'pointer',
-              backgroundColor: 'rgba(255,255,255,0.06)', color: '#999', fontSize: 14,
-              fontFamily: '-apple-system, system-ui, sans-serif',
-            }}>Cancel</button>
-            <button tabIndex={-1} onClick={handleClear} style={{
-              flex: 1, padding: '10px 0', borderRadius: 10, border: 'none', cursor: 'pointer',
-              backgroundColor: 'rgba(255,255,255,0.06)', color: '#b0903a', fontSize: 14,
-              fontFamily: '-apple-system, system-ui, sans-serif',
-            }}>Clear</button>
-            <button tabIndex={-1} onClick={handleInsert} style={{
-              flex: 1, padding: '10px 0', borderRadius: 10, border: 'none', cursor: 'pointer',
-              backgroundColor: '#30d158', color: '#0a0a0a', fontSize: 14, fontWeight: 600,
-              fontFamily: '-apple-system, system-ui, sans-serif',
-            }}>Insert</button>
-          </div>
-        </>)}
-      </div>
+              {/* Row 2: Close / Clear / Insert */}
+              <div style={{ display: 'flex', gap: 6, padding: '0 10px 10px' }}>
+                <motion.button tabIndex={-1} whileTap={{ scale: 0.93 }} onClick={onClose} style={{
+                  flex: 1, padding: '10px 0', borderRadius: 10, border: 'none', cursor: 'pointer',
+                  backgroundColor: 'rgba(255,255,255,0.06)', color: '#999', fontSize: 14,
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                }}>Cancel</motion.button>
+                <motion.button tabIndex={-1} whileTap={{ scale: 0.93 }} onClick={handleClear} style={{
+                  flex: 1, padding: '10px 0', borderRadius: 10, border: 'none', cursor: 'pointer',
+                  backgroundColor: 'rgba(255,255,255,0.06)', color: '#b0903a', fontSize: 14,
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                }}>Clear</motion.button>
+                <motion.button tabIndex={-1} whileTap={{ scale: 0.93 }} onClick={handleInsert} style={{
+                  flex: 1, padding: '10px 0', borderRadius: 10, border: 'none', cursor: 'pointer',
+                  backgroundColor: '#30d158', color: '#0a0a0a', fontSize: 14, fontWeight: 600,
+                  fontFamily: '-apple-system, system-ui, sans-serif',
+                }}>Insert</motion.button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </motion.div>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { connect, send, interrupt, clearSession, setCurrentTab, onMessage, onState, getState, type Message } from './lib/connection';
 import Sketch from './components/Sketch';
 
@@ -251,14 +252,27 @@ function Row({ label, value, valueColor }: { label: string; value: string; value
 }
 
 // ─── Tab Bar ───
+const tabs = [{ id: 'canvas', label: 'Canvas' }, { id: 'config', label: 'Config' }];
 function TabBar({ tab, onTab }: { tab: string; onTab: (t: string) => void }) {
   return (
-    <div style={{ display: 'flex', borderTop: '1px solid rgba(255,255,255,0.06)', paddingBottom: 4, flexShrink: 0 }}>
-      {[{ id: 'canvas', label: 'Canvas' }, { id: 'config', label: 'Config' }].map(t => (
-        <button key={t.id} tabIndex={-1} onClick={() => onTab(t.id)} style={{
-          flex: 1, padding: '8px 0 4px', border: 'none', cursor: 'pointer', backgroundColor: 'transparent',
-          color: tab === t.id ? '#fff' : '#636366', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
-        }}>
+    <div style={{ display: 'flex', borderTop: '1px solid rgba(255,255,255,0.06)', paddingBottom: 4, flexShrink: 0, position: 'relative' }}>
+      {/* Sliding indicator */}
+      <motion.div
+        layoutId="tab-indicator"
+        style={{
+          position: 'absolute', top: 0, height: 2, width: '50%', backgroundColor: '#fff', borderRadius: 1,
+        }}
+        animate={{ x: tab === 'canvas' ? 0 : '100%' }}
+        transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+      />
+      {tabs.map(t => (
+        <motion.button key={t.id} tabIndex={-1} onClick={() => onTab(t.id)}
+          whileTap={{ scale: 0.92 }}
+          style={{
+            flex: 1, padding: '8px 0 4px', border: 'none', cursor: 'pointer', backgroundColor: 'transparent',
+            color: tab === t.id ? '#fff' : '#636366', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+            transition: 'color 0.2s',
+          }}>
           <span style={{ display: 'flex' }}>
             {t.id === 'canvas' ? (
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M9 3v18"/></svg>
@@ -267,7 +281,7 @@ function TabBar({ tab, onTab }: { tab: string; onTab: (t: string) => void }) {
             )}
           </span>
           <span style={{ fontSize: 10 }}>{t.label}</span>
-        </button>
+        </motion.button>
       ))}
     </div>
   );
@@ -482,38 +496,62 @@ export default function App() {
         pendingSketch={pendingSketch ? pendingSketch.dataUrl : null}
       />
       <TabBar tab={tab} onTab={handleTab} />
-      {/* Attach menu — frosted glass popup with spring animation */}
-      {attachMenu && (<>
-        <div onClick={() => setAttachMenu(false)} style={{ position: 'fixed', inset: 0, zIndex: 998 }} />
-        <div style={{
-          position: 'absolute', bottom: 100, left: 12, zIndex: 999,
-          backgroundColor: 'rgba(30,30,30,0.85)', backdropFilter: 'blur(40px)', WebkitBackdropFilter: 'blur(40px)',
-          borderRadius: 14, padding: '4px 0', minWidth: 200,
-          boxShadow: '0 8px 40px rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.08)',
-          transformOrigin: 'bottom left',
-          animation: 'popIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) both',
-        }}>
-          <style>{`
-            @keyframes popIn { from { transform: scale(0.3); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-            @keyframes sketchIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-          `}</style>
-          {[
-            { label: 'Attach File', icon: (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>), action: () => uploadFile('image/*,.pdf,.md,.txt,.csv,.json,.py,.js,.ts,.jsx,.tsx') },
-            { label: 'Sketch', icon: (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 19l7-7 3 3-7 7H12v-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/></svg>), action: () => { setAttachMenu(false); setSketchOpen(true); } },
-          ].map((item, i) => (
-            <div key={item.label}>
-              {i > 0 && <div style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', margin: '0 12px' }} />}
-              <button tabIndex={-1} onClick={item.action} style={{
-                display: 'flex', alignItems: 'center', gap: 12, width: '100%',
-                padding: '11px 16px', border: 'none', cursor: 'pointer', borderRadius: 0,
-                backgroundColor: 'transparent', color: '#e0e0e0',
-                fontSize: 15, textAlign: 'left', fontFamily: '-apple-system, system-ui, sans-serif',
-              }}><span style={{ color: '#999', display: 'flex' }}>{item.icon}</span> {item.label}</button>
-            </div>
-          ))}
-        </div>
-      </>)}
-      {sketchOpen && <Sketch onInsert={handleSketchInsert} onClose={() => setSketchOpen(false)} />}
+      {/* Attach menu — frosted glass popup with Framer Motion */}
+      <AnimatePresence>
+        {attachMenu && (<>
+          <motion.div
+            key="attach-backdrop"
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            onClick={() => setAttachMenu(false)}
+            style={{ position: 'fixed', inset: 0, zIndex: 998 }}
+          />
+          <motion.div
+            key="attach-menu"
+            initial={{ scale: 0.3, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.3, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 500, damping: 25 }}
+            style={{
+              position: 'absolute', bottom: 100, left: 12, zIndex: 999,
+              backgroundColor: 'rgba(30,30,30,0.85)', backdropFilter: 'blur(40px)', WebkitBackdropFilter: 'blur(40px)',
+              borderRadius: 14, padding: '4px 0', minWidth: 200,
+              boxShadow: '0 8px 40px rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.08)',
+              transformOrigin: 'bottom left',
+            }}
+          >
+            {[
+              { label: 'Attach File', icon: (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>), action: () => uploadFile('image/*,.pdf,.md,.txt,.csv,.json,.py,.js,.ts,.jsx,.tsx') },
+              { label: 'Sketch', icon: (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 19l7-7 3 3-7 7H12v-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/></svg>), action: () => { setAttachMenu(false); setSketchOpen(true); } },
+            ].map((item, i) => (
+              <motion.div key={item.label}
+                initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: i * 0.06, type: 'spring', stiffness: 400, damping: 20 }}
+              >
+                {i > 0 && <div style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.06)', margin: '0 12px' }} />}
+                <button tabIndex={-1} onClick={item.action} style={{
+                  display: 'flex', alignItems: 'center', gap: 12, width: '100%',
+                  padding: '11px 16px', border: 'none', cursor: 'pointer', borderRadius: 0,
+                  backgroundColor: 'transparent', color: '#e0e0e0',
+                  fontSize: 15, textAlign: 'left', fontFamily: '-apple-system, system-ui, sans-serif',
+                }}><span style={{ color: '#999', display: 'flex' }}>{item.icon}</span> {item.label}</button>
+              </motion.div>
+            ))}
+          </motion.div>
+        </>)}
+      </AnimatePresence>
+      <AnimatePresence>
+        {sketchOpen && (
+          <motion.div
+            key="sketch-overlay"
+            initial={{ scale: 0.85, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.9, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 400, damping: 28 }}
+            style={{ position: 'fixed', inset: 0, zIndex: 1000, transformOrigin: 'bottom left' }}
+          >
+            <Sketch onInsert={handleSketchInsert} onClose={() => setSketchOpen(false)} />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
