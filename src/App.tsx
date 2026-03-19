@@ -665,8 +665,12 @@ export default function App() {
 
   useEffect(() => {
     if (!authed) return;
+    const MAX_MESSAGES = 500;
     const unsub1 = onMessage((msg) => {
-      setMessages(prev => [...prev, msg]);
+      setMessages(prev => {
+        const next = [...prev, msg];
+        return next.length > MAX_MESSAGES ? next.slice(-MAX_MESSAGES) : next;
+      });
       if (msg.role === 'agent' || msg.type === 'tool' || msg.type === 'thinking') setIsProcessing(true);
       // Only stop processing on explicit done/exit signals
       if (msg.type === 'status' && msg.content.includes('done')) setIsProcessing(false);
@@ -678,7 +682,7 @@ export default function App() {
     });
     const unsub2 = onState(setConnState);
     connect();
-    return () => { unsub1(); unsub2(); };
+    return () => { unsub1(); unsub2(); clearTimeout(idleTimer.current); };
   }, [authed]);
 
   const [terminalVisible, setTerminalVisible] = useState(false);
