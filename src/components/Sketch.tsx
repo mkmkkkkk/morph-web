@@ -125,24 +125,38 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
     onInsert(canvas.toDataURL('image/png'), bounds);
   };
 
-  const onDragStart = useCallback((e: React.TouchEvent) => {
-    const t = e.touches[0];
-    const tb = toolbarRef.current;
-    if (!tb) return;
-    const rect = tb.getBoundingClientRect();
-    dragState.current = { dragging: true, offsetX: t.clientX - rect.left, offsetY: t.clientY - rect.top };
+  // Native touch listeners to bypass React event delegation (canvas intercepts React events)
+  useEffect(() => {
+    const handle = document.getElementById('sketch-drag-handle');
+    if (!handle) return;
+    const onStart = (e: TouchEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const t = e.touches[0];
+      const tb = toolbarRef.current;
+      if (!tb) return;
+      const rect = tb.getBoundingClientRect();
+      dragState.current = { dragging: true, offsetX: t.clientX - rect.left, offsetY: t.clientY - rect.top };
+    };
+    const onMove = (e: TouchEvent) => {
+      if (!dragState.current.dragging) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const t = e.touches[0];
+      const x = Math.max(0, Math.min(window.innerWidth - 200, t.clientX - dragState.current.offsetX));
+      const y = Math.max(0, Math.min(window.innerHeight - 100, t.clientY - dragState.current.offsetY));
+      setToolbarPos({ x, y });
+    };
+    const onEnd = () => { dragState.current.dragging = false; };
+    handle.addEventListener('touchstart', onStart, { passive: false });
+    handle.addEventListener('touchmove', onMove, { passive: false });
+    handle.addEventListener('touchend', onEnd);
+    return () => {
+      handle.removeEventListener('touchstart', onStart);
+      handle.removeEventListener('touchmove', onMove);
+      handle.removeEventListener('touchend', onEnd);
+    };
   }, []);
-
-  const onDragMove = useCallback((e: React.TouchEvent) => {
-    if (!dragState.current.dragging) return;
-    e.stopPropagation();
-    const t = e.touches[0];
-    const x = Math.max(0, Math.min(window.innerWidth - 200, t.clientX - dragState.current.offsetX));
-    const y = Math.max(0, Math.min(window.innerHeight - 100, t.clientY - dragState.current.offsetY));
-    setToolbarPos({ x, y });
-  }, []);
-
-  const onDragEnd = useCallback(() => { dragState.current.dragging = false; }, []);
 
   const handleClear = () => {
     const canvas = canvasRef.current;
@@ -189,14 +203,18 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
         boxShadow: '0 12px 40px rgba(0,0,0,0.7)',
         zIndex: 1001, touchAction: 'none',
       }}>
-        {/* Drag handle — bar above toolbar */}
-        <div
-          onTouchStart={onDragStart} onTouchMove={onDragMove} onTouchEnd={onDragEnd}
-          style={{ position: 'absolute', top: -20, left: 0, right: 0, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'grab', touchAction: 'none' }}
-        >
-          <div style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.25)' }} />
+        {/* Drag handle — visible grip inside toolbar */}
+        <div id="sketch-drag-handle" style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          width: 28, height: 28, cursor: 'grab', touchAction: 'none',
+          borderRadius: 8, background: 'rgba(255,255,255,0.06)',
+        }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <div style={{ width: 12, height: 2, borderRadius: 1, backgroundColor: 'rgba(255,255,255,0.3)' }} />
+            <div style={{ width: 12, height: 2, borderRadius: 1, backgroundColor: 'rgba(255,255,255,0.3)' }} />
+          </div>
         </div>
-
+        <span style={{ width: 1, height: 20, backgroundColor: 'rgba(255,255,255,0.06)' }} />
         <button tabIndex={-1} onClick={onClose} style={{ padding: '5px 6px', border: 'none', borderRadius: 10, background: 'transparent', color: '#555', fontSize: 15, cursor: 'pointer', fontWeight: 600 }}>&times;</button>
         <span style={{ width: 1, height: 20, backgroundColor: 'rgba(255,255,255,0.06)' }} />
         {colors.map(c => (
