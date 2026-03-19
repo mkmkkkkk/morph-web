@@ -1,6 +1,7 @@
 import { io, Socket } from 'socket.io-client';
 
 const RELAY_URL = window.location.origin; // same origin (morph.mkyang.ai)
+const FIXED_SESSION = 'ba99d3d6-b59a-4cc6-910f-610663a10e69';
 function getToken() { return localStorage.getItem('morph-auth') || ''; }
 
 export interface Message {
@@ -41,6 +42,9 @@ function parseOutput(data: any): Message[] {
   const d = data?.data;
   if (!d) return [];
   const msgs: Message[] = [];
+
+  // Skip partial/streaming events — only render complete messages
+  if (d.type === 'stream_event') return [];
 
   if (d.type === 'assistant') {
     const content = d.message?.content || [];
@@ -86,42 +90,81 @@ function connectSocket(): void {
 export async function connect(): Promise<void> {
   setState('connecting');
   try {
-    // Try to reuse existing session from localStorage
-    const savedSession = sessionStorage.getItem('morph-session');
-    if (savedSession) {
-      // Check if it's still alive
-      const checkRes = await fetch(`${RELAY_URL}/v2/claude/active`, { headers: { 'Authorization': `Bearer ${getToken()}` } });
-      const checkData = await checkRes.json();
-      const alive = (checkData.sessions || []).find((s: any) => s.id === savedSession && s.alive);
-      if (alive) {
-        sessionId = savedSession;
-        // Skip spawning, just reconnect Socket.IO
-        connectSocket();
-        return;
+    sessionId = FIXED_SESSION;
+
+    // Connect Socket.IO FIRST and subscribe — so we catch replay messages
+    connectSocket();
+    // Wait for socket to actually connect
+    await new Promise<void>((resolve) => {
+      if (socket?.connected) { resolve(); return; }
+      const onConnect = () => { socket?.off('connect', onConnect); resolve(); };
+      socket?.on('connect', onConnect);
+      setTimeout(resolve, 3000); // timeout fallback
+    });
+
+    // Check if fixed session is already alive
+    const checkRes = await fetch(`${RELAY_URL}/v2/claude/active`, { headers: { 'Authorization': `Bearer ${getToken()}` } });
+    const checkData = await checkRes.json();
+    const alive = (checkData.sessions || []).find((s: any) => s.id === FIXED_SESSION && s.alive);
+
+    // Load history from session JSONL
+    try {
+      const histRes = await fetch(`${RELAY_URL}/v2/claude/history/${FIXED_SESSION}?limit=30`, { headers: { 'Authorization': `Bearer ${getToken()}` } });
+      const histData = await histRes.json();
+      for (const msg of (histData.messages || [])) {
+        emit({ id: uid(), role: msg.role, type: msg.type, content: msg.content, name: msg.name, ts: msg.ts ? new Date(msg.ts).getTime() : Date.now() });
       }
+    } catch {}
+
+    if (alive) {
+      // Already running — socket is connected, history loaded
+      return;
     }
 
-    // No saved session or it's dead — spawn new one
+    // Spawn new Claude with fixed session ID (socket already listening)
     const res = await fetch(`${RELAY_URL}/v2/claude/send`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: 'Connected from Morph Web. Ready.', cwd: '/workspace' }),
+      body: JSON.stringify({ message: 'Connected from Morph Web. Ready.', sessionId: FIXED_SESSION, cwd: '/workspace' }),
     });
     const data = await res.json();
     if (data.error) throw new Error(data.error);
-    sessionId = data.sessionId;
-    sessionStorage.setItem('morph-session', sessionId);
-    connectSocket();
   } catch (err: any) {
     setState('error');
     emit({ id: uid(), role: 'system', type: 'error', content: err.message, ts: Date.now() });
   }
 }
 
+export function clearSession() {
+  // Kill current process + start fresh
+  if (sessionId) {
+    fetch(`${RELAY_URL}/v2/claude/stop`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId }),
+    }).catch(() => {});
+  }
+  socket?.close();
+  socket = null;
+  sessionId = null;
+  setState('disconnected');
+  // Reconnect with fresh process
+  setTimeout(() => connect(), 500);
+}
+
+let _currentTab = 'canvas';
+export function setCurrentTab(tab: string) { _currentTab = tab; }
+
 export function send(text: string) {
   if (!sessionId) return;
-  // Show user message immediately
+  // Show user message immediately (display without context prefix)
   emit({ id: uid(), role: 'user', type: 'text', content: text, ts: Date.now() });
+
+  // Inject page context so Claude knows where the user is
+  const ctx = _currentTab === 'config'
+    ? '[User is on the Config page (settings, sessions, quick actions). They may be asking about configuration or system management.]\n\n'
+    : '';
+  text = ctx + text;
 
   fetch(`${RELAY_URL}/v2/claude/send`, {
     method: 'POST',
