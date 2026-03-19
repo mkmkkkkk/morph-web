@@ -181,8 +181,8 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
       {/* Floating draggable toolbar */}
       <div ref={toolbarRef} style={{
         position: 'fixed',
-        ...(toolbarPos ? { left: toolbarPos.x, top: toolbarPos.y } : { bottom: 24, left: '50%', transform: 'translateX(-50%)' }),
-        display: 'flex', alignItems: 'center', gap: 3, flexWrap: 'wrap', maxWidth: 'calc(100vw - 32px)',
+        ...(toolbarPos ? { left: toolbarPos.x, top: toolbarPos.y } : { top: '75%', left: '50%', transform: 'translate(-50%, -50%)' }),
+        display: 'flex', alignItems: 'center', gap: 3, maxWidth: 'calc(100vw - 32px)',
         padding: '6px 8px', borderRadius: 20,
         backgroundColor: 'rgba(17,17,17,0.95)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
         border: '1px solid rgba(255,255,255,0.08)',
