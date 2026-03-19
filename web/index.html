@@ -50,6 +50,14 @@
       if (x < 25 || x > window.innerWidth - 25) e.preventDefault();
     }, { passive: false });
 
+    // Lock browser history — prevent back/forward navigation entirely
+    // Push a dummy state so there's nothing to go "back" to
+    history.pushState(null, '', location.href);
+    window.addEventListener('popstate', function() {
+      // Re-push state to trap the user on this page
+      history.pushState(null, '', location.href);
+    });
+
     // Keyboard handling — resize root to visual viewport when keyboard opens
     if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', function() {
