@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { connect, send, interrupt, clearSession, setCurrentTab, onMessage, onState, getState, type Message } from './lib/connection';
 import Sketch from './components/Sketch';
@@ -43,13 +44,13 @@ function Collapsible({ label, preview, content, color }: { label: string; previe
       <div onClick={() => setOpen(!open)} style={{ cursor: 'pointer', color, fontSize: 13, fontFamily: 'Menlo, monospace', lineHeight: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {open ? '▾' : '▸'} {label}{!open && preview ? `: ${preview}` : ''}
       </div>
-      {open && <pre style={{ color: '#888', fontSize: 12, fontFamily: 'Menlo, monospace', lineHeight: '17px', marginLeft: 16, whiteSpace: 'pre-wrap', wordBreak: 'break-all', overflow: 'hidden', maxWidth: '100%', margin: 0, marginLeft: 16 }}>{content}</pre>}
+      {open && <pre style={{ color, opacity: 0.7, fontSize: 13, fontFamily: 'Menlo, monospace', lineHeight: '20px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', overflow: 'hidden', maxWidth: '100%', margin: 0, marginLeft: 16 }}>{content}</pre>}
     </div>
   );
 }
 
 // ─── Message Row ───
-function MessageRow({ msg }: { msg: Message }) {
+const MessageRow = React.memo(function MessageRow({ msg }: { msg: Message }) {
   const mono = { fontFamily: 'Menlo, monospace', fontSize: 14, lineHeight: '20px', overflow: 'hidden' as const, maxWidth: '100%' } as const;
   switch (msg.type) {
     case 'text':
@@ -57,24 +58,32 @@ function MessageRow({ msg }: { msg: Message }) {
         ? <div style={{ ...mono, color: '#30d158', marginBottom: 3 }}>&gt; {msg.content}</div>
         : <div style={{ ...mono, color: '#e0e0e0', marginBottom: 3, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{msg.content}</div>;
     case 'thinking':
-      return <Collapsible label="thinking" preview={msg.content.slice(0, 60)} content={msg.content} color="#8e8e93" />;
+      return <Collapsible label="thinking" preview={msg.content.slice(0, 60)} content={msg.content} color="#636366" />;
     case 'tool':
-      return <Collapsible label={msg.name || 'tool'} preview={msg.content.slice(0, 80).replace(/\n/g, ' ')} content={msg.content} color="#8e8e93" />;
+      return <Collapsible label={msg.name || 'tool'} preview={msg.content.slice(0, 80).replace(/\n/g, ' ')} content={msg.content} color="#636366" />;
     case 'tool_result':
-      return <Collapsible label="result" preview={msg.content.slice(0, 80).replace(/\n/g, ' ')} content={msg.content.length > 2000 ? msg.content.slice(0, 2000) + '\n...' : msg.content} color="#64d2ff" />;
+      return <Collapsible label="result" preview={msg.content.slice(0, 80).replace(/\n/g, ' ')} content={msg.content.length > 2000 ? msg.content.slice(0, 2000) + '\n...' : msg.content} color="#48484a" />;
     case 'status':
-      return <div style={{ ...mono, color: '#555', textAlign: 'center', marginTop: 4, marginBottom: 4 }}>{msg.content}</div>;
+      return msg.content.length > 120
+        ? <Collapsible label="status" preview={msg.content.slice(0, 80).replace(/\n/g, ' ')} content={msg.content} color="#555" />
+        : <div style={{ ...mono, color: '#555', textAlign: 'center', marginTop: 4, marginBottom: 4 }}>{msg.content}</div>;
     case 'error':
-      return <div style={{ ...mono, color: '#ff453a', marginBottom: 3 }}>{msg.content}</div>;
+      return msg.content.length > 120
+        ? <Collapsible label="error" preview={msg.content.slice(0, 80).replace(/\n/g, ' ')} content={msg.content} color="#ff453a" />
+        : <div style={{ ...mono, color: '#ff453a', marginBottom: 3 }}>{msg.content}</div>;
     default: return null;
   }
-}
+});
 
 // ─── Terminal Overlay (toggle-able, sits above input bar) ───
 function TerminalOverlay({ messages, visible }: { messages: Message[]; visible: boolean }) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const lastLen = useRef(0);
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+    // Use 'auto' for rapid bursts (multiple messages in <500ms), 'smooth' for single messages
+    const rapid = messages.length - lastLen.current > 1;
+    lastLen.current = messages.length;
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: rapid ? 'auto' : 'smooth' });
   }, [messages.length]);
 
   if (!visible) return null;
@@ -473,7 +482,7 @@ export default function App() {
           <div style={{ padding: '4px 12px 6px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
             <span style={{ marginRight: 8, color: '#444', fontSize: 11, fontFamily: 'Menlo, monospace' }}>
               {isProcessing ? (() => {
-                const words = ['thinking...', 'pondering...', 'wondering...', 'reasoning...', 'considering...', 'analyzing...', 'processing...'];
+                const words = ['thinking...', 'pondering...', 'wondering...', 'reasoning...', 'considering...', 'analyzing...', 'processing...', 'compacting...'];
                 return words[Math.floor(Date.now() / 4000) % words.length];
               })() : 'idle'}
             </span>
@@ -511,7 +520,7 @@ export default function App() {
             initial={{ scale: 0.3, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.3, opacity: 0 }}
             transition={{ type: 'spring', stiffness: 500, damping: 25 }}
             style={{
-              position: 'absolute', bottom: 100, left: 12, zIndex: 999,
+              position: 'absolute', bottom: 132, left: 12, zIndex: 999,
               backgroundColor: 'rgba(30,30,30,0.85)', backdropFilter: 'blur(40px)', WebkitBackdropFilter: 'blur(40px)',
               borderRadius: 14, padding: '4px 0', minWidth: 200,
               boxShadow: '0 8px 40px rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.08)',
@@ -538,20 +547,10 @@ export default function App() {
           </motion.div>
         </>)}
       </AnimatePresence>
-      <AnimatePresence>
-        {sketchOpen && (
-          <motion.div
-            key="sketch-overlay"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
-            style={{ position: 'fixed', inset: 0, zIndex: 1000 }}
-          >
-            <Sketch onInsert={handleSketchInsert} onClose={() => setSketchOpen(false)} />
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {sketchOpen && createPortal(
+        <Sketch onInsert={handleSketchInsert} onClose={() => setSketchOpen(false)} />,
+        document.body
+      )}
     </div>
   );
 }

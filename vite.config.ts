@@ -20,8 +20,8 @@ export default defineConfig({
     host: '0.0.0.0',
     allowedHosts: ['morph.mkyang.ai'],
     proxy: {
-      '/v1': { target: 'http://localhost:3001', ws: true },
-      '/v2': { target: 'http://localhost:3001' },
+      '/v1': { target: 'http://127.0.0.1:3001', ws: true, changeOrigin: true },
+      '/v2': { target: 'http://127.0.0.1:3001', changeOrigin: true },
     },
   },
 });

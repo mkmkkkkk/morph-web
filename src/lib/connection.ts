@@ -43,8 +43,8 @@ function parseOutput(data: any): Message[] {
   if (!d) return [];
   const msgs: Message[] = [];
 
-  // Skip partial/streaming events — only render complete messages
-  if (d.type === 'stream_event') return [];
+  // Skip partial/streaming and user echo events
+  if (d.type === 'stream_event' || d.type === 'user') return [];
 
   if (d.type === 'assistant') {
     const content = d.message?.content || [];
@@ -65,6 +65,14 @@ function parseOutput(data: any): Message[] {
     msgs.push({ id: uid(), role: 'system', type: 'status', content: d.subtype === 'success' ? '--- done ---' : `--- ${d.subtype} ---`, ts: Date.now() });
   } else if (d.type === 'error') {
     msgs.push({ id: uid(), role: 'system', type: 'error', content: d.error || d.message || 'Unknown error', ts: Date.now() });
+  } else if (d.type === 'system') {
+    // System events: compacting, permission requests, etc.
+    const text = typeof d.message === 'string' ? d.message : (d.subtype || d.event || JSON.stringify(d));
+    msgs.push({ id: uid(), role: 'system', type: 'status', content: text, ts: Date.now() });
+  } else if (d.type) {
+    // Catch-all for unknown event types — surface them so nothing is silently lost
+    const detail = typeof d.message === 'string' ? d.message : (d.subtype || '');
+    msgs.push({ id: uid(), role: 'system', type: 'status', content: `[${d.type}] ${detail}`.trim(), ts: Date.now() });
   }
   return msgs;
 }
