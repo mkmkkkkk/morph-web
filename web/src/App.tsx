@@ -132,14 +132,17 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
         }} />
       </button>
 
-      {/* Attach menu button */}
+      {/* Attach menu button — spring tap animation */}
       <button tabIndex={-1} onClick={onAttach}
         style={{
           width: 34, height: 34, borderRadius: 17, border: 'none', cursor: 'pointer', flexShrink: 0,
           backgroundColor: pendingSketch ? 'rgba(48,209,88,0.2)' : 'rgba(255,255,255,0.08)',
           color: pendingSketch ? '#30d158' : '#666', fontSize: 22, lineHeight: '22px',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
+          transition: 'transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1)',
+        }}
+        onTouchStart={e => (e.currentTarget.style.transform = 'scale(1.3)')}
+        onTouchEnd={e => (e.currentTarget.style.transform = 'scale(1)')}>
         {pendingSketch ? '✓' : '+'}
       </button>
 
@@ -479,7 +482,7 @@ export default function App() {
         pendingSketch={pendingSketch ? pendingSketch.dataUrl : null}
       />
       <TabBar tab={tab} onTab={handleTab} />
-      {/* Attach menu — frosted glass popup */}
+      {/* Attach menu — frosted glass popup with spring animation */}
       {attachMenu && (<>
         <div onClick={() => setAttachMenu(false)} style={{ position: 'fixed', inset: 0, zIndex: 998 }} />
         <div style={{
@@ -487,7 +490,13 @@ export default function App() {
           backgroundColor: 'rgba(30,30,30,0.85)', backdropFilter: 'blur(40px)', WebkitBackdropFilter: 'blur(40px)',
           borderRadius: 14, padding: '4px 0', minWidth: 200,
           boxShadow: '0 8px 40px rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.08)',
+          transformOrigin: 'bottom left',
+          animation: 'popIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) both',
         }}>
+          <style>{`
+            @keyframes popIn { from { transform: scale(0.3); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+            @keyframes sketchIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+          `}</style>
           {[
             { label: 'Attach File', icon: (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>), action: () => uploadFile('image/*,.pdf,.md,.txt,.csv,.json,.py,.js,.ts,.jsx,.tsx') },
             { label: 'Sketch', icon: (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 19l7-7 3 3-7 7H12v-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/></svg>), action: () => { setAttachMenu(false); setSketchOpen(true); } },
