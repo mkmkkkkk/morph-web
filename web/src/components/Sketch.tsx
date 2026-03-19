@@ -166,11 +166,11 @@ export default function Sketch({ onInsert, onClose }: SketchProps) {
 
 
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 1000 }}>
-      {/* Transparent canvas overlay — covers entire screen */}
+    <div style={{ position: 'fixed', top: 0, left: 0, width: screenW.current, height: screenH.current, zIndex: 1000 }}>
+      {/* Transparent canvas overlay — covers entire screen including safe area */}
       <canvas
         ref={canvasRef}
-        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', touchAction: 'none', cursor: 'crosshair', backgroundColor: 'rgba(0,0,0,0.15)' }}
+        style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', touchAction: 'none', cursor: 'crosshair', backgroundColor: 'rgba(0,0,0,0.15)' }}
         onTouchStart={startDraw}
         onTouchMove={moveDraw}
         onTouchEnd={endDraw}
