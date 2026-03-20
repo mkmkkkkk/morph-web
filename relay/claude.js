@@ -437,6 +437,75 @@ export function registerClaudeAPI(app, io, authMiddleware) {
     return { sessions };
   });
 
+  // ─── REST: Generate session title via Haiku ───
+
+  app.post('/v2/claude/title', { preHandler: authMiddleware }, async (request) => {
+    const { sessionId } = request.body || {};
+    if (!sessionId) return { error: 'sessionId required' };
+
+    // Read last 10 messages from session history
+    const projectId = resolve('/workspace').replace(/[\\\/.:]/g, '-');
+    const claudeDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
+    const sessionFile = join(claudeDir, 'projects', projectId, `${sessionId}.jsonl`);
+
+    let snippet = '';
+    try {
+      const raw = readFileSync(sessionFile, 'utf-8');
+      const lines = raw.split('\n').filter(l => l.trim());
+      const recent = lines.slice(-20);
+      for (const line of recent) {
+        try {
+          const obj = JSON.parse(line);
+          if (obj.type === 'user' && obj.message?.content) {
+            const text = typeof obj.message.content === 'string'
+              ? obj.message.content : obj.message.content.map(c => c.text || '').join('');
+            if (text) snippet += `User: ${text.slice(0, 100)}\n`;
+          } else if (obj.type === 'assistant' && obj.message?.content) {
+            for (const block of obj.message.content) {
+              if (block.type === 'text' && block.text) {
+                snippet += `Assistant: ${block.text.slice(0, 100)}\n`;
+              }
+            }
+          }
+        } catch {}
+      }
+    } catch {
+      return { error: 'session_not_found' };
+    }
+
+    if (!snippet.trim()) return { title: sessionId.slice(0, 8) };
+
+    // Call Haiku for a short title
+    try {
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) {
+        const userLine = snippet.split('\n').find(l => l.startsWith('User: '));
+        return { title: userLine?.replace('User: ', '').slice(0, 30) || sessionId.slice(0, 8) };
+      }
+
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'claude-3-haiku-20240307',
+          max_tokens: 20,
+          messages: [{ role: 'user', content: `Give this coding session a 2-5 word title. No quotes, no punctuation. Just the title.\n\n${snippet.slice(0, 500)}` }],
+        }),
+      });
+
+      if (!resp.ok) return { title: snippet.split('\n')[0]?.replace('User: ', '').slice(0, 30) || sessionId.slice(0, 8) };
+      const data = await resp.json();
+      const title = data.content?.[0]?.text?.trim() || sessionId.slice(0, 8);
+      return { title };
+    } catch {
+      return { title: snippet.split('\n')[0]?.replace('User: ', '').slice(0, 30) || sessionId.slice(0, 8) };
+    }
+  });
+
   // ─── REST: Claude usage (session + weekly utilization) ───
 
   app.get('/v2/claude/usage', { preHandler: authMiddleware }, async () => {
