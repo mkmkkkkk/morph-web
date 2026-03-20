@@ -672,8 +672,10 @@ function SessionTerminal({ session, messages, onBack, onSend, keyboardOpen }: {
       transition={{ type: 'tween', duration: 0.25, ease: 'easeInOut' }}
       style={{ x: dragX, position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
         backgroundColor: '#0a0a0a', zIndex: 50, display: 'flex', flexDirection: 'column' }}
-      onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
     >
+      {/* Narrow left-edge zone for swipe-back — keeps touch handlers off the message area */}
+      <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
+        style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 40, zIndex: 51 }} />
       {/* Header */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 10,
@@ -762,6 +764,7 @@ export default function App() {
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [selectedSession, setSelectedSession] = useState<{ id: string; display: string } | null>(null);
   const [sessionMessages, setSessionMessages] = useState<Message[]>([]);
+  const liveSessionIdRef = useRef<string | null>(null); // tracks active process ID after resume;
   const idleTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const inputBarRef = useRef<HTMLDivElement>(null);
 
@@ -809,6 +812,7 @@ export default function App() {
   // When a session is selected, load from cache instantly, then subscribe for live updates
   useEffect(() => {
     if (!selectedSession) return;
+    liveSessionIdRef.current = selectedSession.id; // reset live ID on new session open
     // Instant load from cache
     const cached = sessionCache.current.get(selectedSession.id);
     if (cached) {
@@ -824,7 +828,8 @@ export default function App() {
             id: uid(), role: m.role, type: m.type, content: m.content, name: m.name,
             ts: m.ts ? new Date(m.ts).getTime() : Date.now(),
           }));
-          setSessionMessages(msgs);
+          // Merge: don't replace pending user messages already in state
+          setSessionMessages(prev => prev.length === 0 ? msgs : [...msgs, ...prev.filter(m => m.pending)]);
           sessionCache.current.set(selectedSession.id, msgs);
         })
         .catch(() => {});
@@ -862,6 +867,13 @@ export default function App() {
     });
     return () => { unsubscribeSessionMessages(); };
   }, [selectedSession?.id]);
+
+  // Keep sessionCache in sync so re-entry shows latest messages
+  useEffect(() => {
+    if (selectedSession && sessionMessages.length > 0) {
+      sessionCache.current.set(selectedSession.id, sessionMessages);
+    }
+  }, [sessionMessages, selectedSession?.id]);
 
   useEffect(() => {
     if (!authed) return;
@@ -1030,20 +1042,22 @@ export default function App() {
         </div>
       </div>
 
-      {/* Shared InputBar — always visible */}
-      <div ref={inputBarRef}>
-        <InputBar
-          onSend={handleSend} onStop={interrupt}
-          isProcessing={isProcessing} connected={connState === 'connected'}
-          terminalVisible={terminalVisible} onToggleTerminal={toggleTerminal}
-          hasNew={hasNew} onAttach={mainFlow.toggleAttach} onSketch={() => mainFlow.setSketchOpen(true)}
-          pendingSketch={mainFlow.pendingSketch ? mainFlow.pendingSketch.dataUrl : null}
-          pendingFile={mainFlow.pendingFile ? (mainFlow.pendingFile.isImage ? 'image' : 'file') : null}
-          onClearPending={mainFlow.clearPending}
-          keyboardOpen={keyboardOpen}
-        />
-      </div>
-      {!keyboardOpen && <TabBar tab={tab} onTab={handleTab} />}
+      {/* Shared InputBar — hidden when session terminal is open */}
+      {!selectedSession && (
+        <div ref={inputBarRef}>
+          <InputBar
+            onSend={handleSend} onStop={interrupt}
+            isProcessing={isProcessing} connected={connState === 'connected'}
+            terminalVisible={terminalVisible} onToggleTerminal={toggleTerminal}
+            hasNew={hasNew} onAttach={mainFlow.toggleAttach} onSketch={() => mainFlow.setSketchOpen(true)}
+            pendingSketch={mainFlow.pendingSketch ? mainFlow.pendingSketch.dataUrl : null}
+            pendingFile={mainFlow.pendingFile ? (mainFlow.pendingFile.isImage ? 'image' : 'file') : null}
+            onClearPending={mainFlow.clearPending}
+            keyboardOpen={keyboardOpen}
+          />
+        </div>
+      )}
+      {!keyboardOpen && !selectedSession && <TabBar tab={tab} onTab={handleTab} />}
       {/* Attach menu — frosted glass popup with Framer Motion */}
       <AnimatePresence>
         {mainFlow.attachMenu && (<>
@@ -1105,15 +1119,17 @@ export default function App() {
               const msgId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
               setSessionMessages(prev => [...prev, { id: msgId, role: 'user', type: 'text', content: text, ts: Date.now(), pending: true }]);
               try {
-                // Check if session is alive
+                // Use live session ID (updated after resume) to avoid spawning new process on every send
+                const liveId = liveSessionIdRef.current || selectedSession.id;
                 const token = localStorage.getItem('morph-auth') || '';
                 const checkRes = await fetch('/v2/claude/active', { headers: { 'Authorization': `Bearer ${token}` } });
                 const checkData = await checkRes.json();
-                const alive = (checkData.sessions || []).find((s: any) => s.id === selectedSession.id && s.alive);
+                const alive = (checkData.sessions || []).find((s: any) => s.id === liveId && s.alive);
                 if (alive) {
-                  await sendToSession(selectedSession.id, text);
+                  await sendToSession(liveId, text);
                 } else {
                   const newSid = await resumeSession(selectedSession.id, text);
+                  liveSessionIdRef.current = newSid; // track resumed process ID for subsequent sends
                   // Update subscription if session ID changed (subscribeSessionMessages auto-cleans old)
                   if (newSid !== selectedSession.id) {
                     subscribeSessionMessages(newSid, (msg) => {
