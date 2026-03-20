@@ -289,7 +289,7 @@ function getPinned(envId: string): Set<string> { try { return new Set(JSON.parse
 function togglePin(envId: string, id: string) { const p = getPinned(envId); if (p.has(id)) p.delete(id); else p.add(id); localStorage.setItem(`morph-pinned-${envId}`, JSON.stringify([...p])); return p; }
 
 // Environment config — stored in localStorage, add more via Config tab
-type EnvConfig = { id: string; label: string; relayUrl: string; maxSessions: number };
+type EnvConfig = { id: string; label: string; relayUrl: string; token?: string; maxSessions: number };
 const DEFAULT_ENV: EnvConfig = { id: 'workspace', label: '/workspace', relayUrl: '', maxSessions: 6 };
 function getEnvironments(): EnvConfig[] {
   try { const stored = JSON.parse(localStorage.getItem('morph-environments') || 'null'); return stored || [DEFAULT_ENV]; }
@@ -306,7 +306,7 @@ const timeAgo = (ms: number) => {
 };
 
 // Reusable environment group — renders session cards for one environment
-function EnvironmentGroup({ env, onSelect }: { env: EnvConfig; onSelect: (sessionId: string, display?: string, relayUrl?: string) => void }) {
+function EnvironmentGroup({ env, onSelect }: { env: EnvConfig; onSelect: (sessionId: string, display?: string, relayUrl?: string, relayToken?: string) => void }) {
   const [sessions, setSessions] = useState<any[]>([]);
   const [viewed, setViewed] = useState<Set<string>>(getViewed);
   const [pinned, setPinned] = useState<Set<string>>(() => getPinned(env.id));
@@ -314,7 +314,7 @@ function EnvironmentGroup({ env, onSelect }: { env: EnvConfig; onSelect: (sessio
 
   useEffect(() => {
     const base = env.relayUrl || '';
-    const token = localStorage.getItem('morph-auth') || '';
+    const token = env.token || localStorage.getItem('morph-auth') || '';
     fetch(`${base}/v2/claude/sessions?limit=30`, { headers: { 'Authorization': `Bearer ${token}` } })
       .then(r => r.json())
       .then(d => {
@@ -343,7 +343,7 @@ function EnvironmentGroup({ env, onSelect }: { env: EnvConfig; onSelect: (sessio
     markViewed(id);
     setViewed(getViewed());
     const s = sessions.find(x => x.id === id);
-    onSelect(id, s?.display, env.relayUrl);
+    onSelect(id, s?.display, env.relayUrl, env.token);
   };
 
   if (sessions.length === 0) return null;
@@ -470,7 +470,7 @@ function UsageWidget() {
 }
 
 // Canvas overlay — renders all environment groups
-function SessionCards({ onSelect }: { onSelect: (sessionId: string, display?: string, relayUrl?: string) => void }) {
+function SessionCards({ onSelect }: { onSelect: (sessionId: string, display?: string, relayUrl?: string, relayToken?: string) => void }) {
   const envs = getEnvironments();
   return (
     <div style={{ position: 'absolute', top: 90, left: 0, right: 0, zIndex: 2, padding: '0 8px' }}>
@@ -570,6 +570,8 @@ function ConfigTab({ connState, onQuickAction }: { connState: string; onQuickAct
         ))}
       </Section>
 
+      <EnvManagerSection />
+
       <Section title="Account">
         <button onClick={() => { localStorage.removeItem('morph-auth'); location.reload(); }} style={{
           padding: '10px 0', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 14, width: '100%', textAlign: 'center',
@@ -577,6 +579,61 @@ function ConfigTab({ connState, onQuickAction }: { connState: string; onQuickAct
         }}>Logout</button>
       </Section>
     </div>
+  );
+}
+
+function EnvManagerSection() {
+  const [envs, setEnvs] = useState<EnvConfig[]>(getEnvironments);
+  const [adding, setAdding] = useState(false);
+  const [form, setForm] = useState({ label: '', relayUrl: '', token: '' });
+
+  const save = (next: EnvConfig[]) => { saveEnvironments(next); setEnvs(next); };
+
+  const handleAdd = () => {
+    if (!form.relayUrl.trim()) return;
+    const id = `env_${Date.now()}`;
+    save([...envs, { id, label: form.label || form.relayUrl, relayUrl: form.relayUrl.trim(), token: form.token.trim() || undefined, maxSessions: 6 }]);
+    setForm({ label: '', relayUrl: '', token: '' });
+    setAdding(false);
+  };
+
+  const handleRemove = (id: string) => {
+    if (id === 'workspace') return; // can't remove primary
+    save(envs.filter(e => e.id !== id));
+  };
+
+  const inputStyle = {
+    width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.06)', color: '#fff', fontSize: 13, boxSizing: 'border-box' as const,
+    marginBottom: 6, fontFamily: 'Menlo, monospace',
+  };
+
+  return (
+    <Section title="Environments">
+      {envs.map(e => (
+        <div key={e.id} style={{ display: 'flex', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+          <div style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: e.id === 'workspace' ? '#30d158' : '#636AFF', marginRight: 8, flexShrink: 0 }} />
+          <span style={{ flex: 1, color: '#e0e0e0', fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{e.label}</span>
+          {e.id !== 'workspace' && (
+            <button onClick={() => handleRemove(e.id)} style={{ border: 'none', background: 'none', color: '#ff453a', fontSize: 18, cursor: 'pointer', padding: '0 4px', lineHeight: 1 }}>×</button>
+          )}
+        </div>
+      ))}
+
+      {adding ? (
+        <div style={{ marginTop: 10 }}>
+          <input placeholder="Label (e.g. TR Machine)" value={form.label} onChange={e => setForm(f => ({...f, label: e.target.value}))} style={inputStyle} />
+          <input placeholder="Relay URL" value={form.relayUrl} onChange={e => setForm(f => ({...f, relayUrl: e.target.value}))} style={inputStyle} />
+          <input placeholder="Auth Token" type="password" value={form.token} onChange={e => setForm(f => ({...f, token: e.target.value}))} style={inputStyle} />
+          <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
+            <button onClick={() => { setAdding(false); setForm({ label: '', relayUrl: '', token: '' }); }} style={{ flex: 1, padding: '8px 0', border: 'none', borderRadius: 8, cursor: 'pointer', backgroundColor: 'rgba(255,255,255,0.06)', color: '#888', fontSize: 13 }}>Cancel</button>
+            <button onClick={handleAdd} style={{ flex: 1, padding: '8px 0', border: 'none', borderRadius: 8, cursor: 'pointer', backgroundColor: '#636AFF', color: '#fff', fontSize: 13, fontWeight: 600 }}>Add</button>
+          </div>
+        </div>
+      ) : (
+        <button onClick={() => setAdding(true)} style={{ marginTop: 8, width: '100%', padding: '8px 0', border: 'none', borderRadius: 8, cursor: 'pointer', backgroundColor: 'rgba(99,106,255,0.15)', color: '#636AFF', fontSize: 13 }}>+ Add Environment</button>
+      )}
+    </Section>
   );
 }
 
@@ -762,7 +819,7 @@ export default function App() {
   const [canvasLoaded, setCanvasLoaded] = useState(false);
   const mainFlow = useSendFlow(send);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
-  const [selectedSession, setSelectedSession] = useState<{ id: string; display: string } | null>(null);
+  const [selectedSession, setSelectedSession] = useState<{ id: string; display: string; relayUrl?: string; relayToken?: string } | null>(null);
   const [sessionMessages, setSessionMessages] = useState<Message[]>([]);
   const liveSessionIdRef = useRef<string | null>(null); // tracks active process ID after resume;
   const idleTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -819,8 +876,9 @@ export default function App() {
       setSessionMessages(cached);
     } else {
       // Fallback: fetch if not cached
-      const token = localStorage.getItem('morph-auth') || '';
-      fetch(`/v2/claude/history/${selectedSession.id}?limit=50`, { headers: { 'Authorization': `Bearer ${token}` } })
+      const token = selectedSession.relayToken || localStorage.getItem('morph-auth') || '';
+      const base = selectedSession.relayUrl || '';
+      fetch(`${base}/v2/claude/history/${selectedSession.id}?limit=50`, { headers: { 'Authorization': `Bearer ${token}` } })
         .then(r => r.json())
         .then(d => {
           const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -951,9 +1009,9 @@ export default function App() {
           {/* Usage widget — top right */}
           <UsageWidget />
           {/* Session cards — floating overlay */}
-          <SessionCards onSelect={(sid, display) => {
+          <SessionCards onSelect={(sid, display, relayUrl, relayToken) => {
             setSessionMessages([]);
-            setSelectedSession({ id: sid, display: display || sid.slice(0, 8) });
+            setSelectedSession({ id: sid, display: display || sid.slice(0, 8), relayUrl, relayToken });
           }} />
           {/* Canvas iframe — fills full area */}
           <div style={{ flex: 1, position: 'relative', backgroundColor: '#0a0a0a' }}>
@@ -1121,8 +1179,9 @@ export default function App() {
               try {
                 // Use live session ID (updated after resume) to avoid spawning new process on every send
                 const liveId = liveSessionIdRef.current || selectedSession.id;
-                const token = localStorage.getItem('morph-auth') || '';
-                const checkRes = await fetch('/v2/claude/active', { headers: { 'Authorization': `Bearer ${token}` } });
+                const token = selectedSession.relayToken || localStorage.getItem('morph-auth') || '';
+                const base = selectedSession.relayUrl || '';
+                const checkRes = await fetch(`${base}/v2/claude/active`, { headers: { 'Authorization': `Bearer ${token}` } });
                 const checkData = await checkRes.json();
                 const alive = (checkData.sessions || []).find((s: any) => s.id === liveId && s.alive);
                 if (alive) {
