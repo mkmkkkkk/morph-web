@@ -148,12 +148,8 @@ export async function resumeSession(sid: string, text: string): Promise<string> 
   const newSid = data.sessionId || sid;
   // Auto-subscribe to the new process so we get its output
   if (socket?.connected) socket.emit('direct-subscribe', { sessionId: newSid });
-  // Migrate listeners from old sid to new sid if different
-  if (newSid !== sid && sessionListeners.has(sid)) {
-    const listeners = sessionListeners.get(sid)!;
-    sessionListeners.set(newSid, listeners);
-    sessionListeners.delete(sid);
-  }
+  // Do NOT migrate listeners — caller must re-subscribe to newSid explicitly.
+  // Migration invalidates _sessionUnsub cleanup target, causing duplicate handlers.
   return newSid;
 }
 
