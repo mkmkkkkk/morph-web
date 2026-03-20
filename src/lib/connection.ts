@@ -259,6 +259,14 @@ export function onState(fn: StateListener) { stateListeners.add(fn); return () =
 export function getState() { return state; }
 export function getSessionId() { return FIXED_SESSION; }
 
-// Re-export subscribe as subscribeSessionMessages for backward compat
-export function subscribeSessionMessages(sid: string, cb: Listener) { return subscribe(sid, cb); }
-export function unsubscribeSessionMessages() { /* no-op — cleanup handled by subscribe return */ }
+// Session message subscription — stores cleanup fn for proper unsubscribe
+let _sessionUnsub: (() => void) | null = null;
+export function subscribeSessionMessages(sid: string, cb: Listener) {
+  // Clean up previous subscription first
+  if (_sessionUnsub) { _sessionUnsub(); _sessionUnsub = null; }
+  _sessionUnsub = subscribe(sid, cb);
+  return _sessionUnsub;
+}
+export function unsubscribeSessionMessages() {
+  if (_sessionUnsub) { _sessionUnsub(); _sessionUnsub = null; }
+}

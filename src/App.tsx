@@ -404,7 +404,9 @@ function EnvironmentGroup({ env, onSelect }: { env: EnvConfig; onSelect: (sessio
 
 // ─── Usage Bar Widget (top-right) ───
 function UsageWidget() {
-  const [usage, setUsage] = useState<{ session: { pct: number; resetsAt: string | null }; weekly: { pct: number; resetsAt: string | null } } | null>(null);
+  const [usage, setUsage] = useState<{ session: { pct: number; resetsAt: string | null }; weekly: { pct: number; resetsAt: string | null } } | null>(() => {
+    try { return JSON.parse(localStorage.getItem('morph-usage-cache') || 'null'); } catch { return null; }
+  });
   const [countdown, setCountdown] = useState('');
 
   useEffect(() => {
@@ -412,12 +414,13 @@ function UsageWidget() {
     const load = () => {
       fetch('/v2/claude/usage', { headers: { 'Authorization': `Bearer ${token}` } })
         .then(r => r.json())
-        .then(d => { if (d.session) setUsage(d); })
+        .then(d => { if (d.session) { setUsage(d); localStorage.setItem('morph-usage-cache', JSON.stringify(d)); } })
         .catch(() => {});
     };
-    load();
-    const iv = setInterval(load, 60000);
-    return () => clearInterval(iv);
+    // Delay first load by 3s to avoid 429 on page reload, then every 5 min
+    const t = setTimeout(load, 3000);
+    const iv = setInterval(load, 300000);
+    return () => { clearTimeout(t); clearInterval(iv); };
   }, []);
 
   useEffect(() => {
@@ -827,8 +830,35 @@ export default function App() {
         .catch(() => {});
     }
     // Subscribe socket for live updates
+    let displayRefreshed = false;
     subscribeSessionMessages(selectedSession.id, (msg) => {
-      setSessionMessages(prev => [...prev, msg]);
+      setSessionMessages(prev => {
+        // Streaming: update last agent text in-place
+        if (msg.role === 'agent' && msg.type === 'text') {
+          const lastIdx = prev.length - 1;
+          if (lastIdx >= 0 && prev[lastIdx].role === 'agent' && prev[lastIdx].type === 'text') {
+            const next = [...prev];
+            next[lastIdx] = { ...next[lastIdx], content: msg.content };
+            return next;
+          }
+        }
+        return [...prev, msg];
+      });
+      // After first agent response, generate title via Haiku if missing
+      if (!displayRefreshed && msg.role === 'agent' && msg.type === 'text') {
+        displayRefreshed = true;
+        const token = localStorage.getItem('morph-auth') || '';
+        fetch('/v2/claude/title', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: selectedSession.id }),
+        })
+          .then(r => r.json())
+          .then(d => {
+            if (d.title) setSelectedSession(prev => prev ? { ...prev, display: d.title } : prev);
+          })
+          .catch(() => {});
+      }
     });
     return () => { unsubscribeSessionMessages(); };
   }, [selectedSession?.id]);
@@ -847,6 +877,15 @@ export default function App() {
             return next;
           }
           return prev; // already confirmed or not found
+        }
+        // Streaming: update last agent text message in-place (partial messages)
+        if (msg.role === 'agent' && msg.type === 'text') {
+          const lastIdx = prev.length - 1;
+          if (lastIdx >= 0 && prev[lastIdx].role === 'agent' && prev[lastIdx].type === 'text') {
+            const next = [...prev];
+            next[lastIdx] = { ...next[lastIdx], content: msg.content };
+            return next;
+          }
         }
         const next = [...prev, msg];
         return next.length > MAX_MESSAGES ? next.slice(-MAX_MESSAGES) : next;
@@ -1075,10 +1114,20 @@ export default function App() {
                   await sendToSession(selectedSession.id, text);
                 } else {
                   const newSid = await resumeSession(selectedSession.id, text);
-                  // Update subscription if session ID changed
+                  // Update subscription if session ID changed (subscribeSessionMessages auto-cleans old)
                   if (newSid !== selectedSession.id) {
                     subscribeSessionMessages(newSid, (msg) => {
-                      setSessionMessages(prev => [...prev, msg]);
+                      setSessionMessages(prev => {
+                        if (msg.role === 'agent' && msg.type === 'text') {
+                          const lastIdx = prev.length - 1;
+                          if (lastIdx >= 0 && prev[lastIdx].role === 'agent' && prev[lastIdx].type === 'text') {
+                            const next = [...prev];
+                            next[lastIdx] = { ...next[lastIdx], content: msg.content };
+                            return next;
+                          }
+                        }
+                        return [...prev, msg];
+                      });
                     });
                   }
                 }
