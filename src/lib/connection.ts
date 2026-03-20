@@ -1,8 +1,8 @@
 import { io, Socket } from 'socket.io-client';
 
-const RELAY_URL = window.location.origin;
 const FIXED_SESSION = 'a0a0a0a0-0e00-4000-a000-000000000002';
-function getToken() { return localStorage.getItem('morph-auth') || ''; }
+const PRIMARY = 'primary';
+function uid() { return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`; }
 
 export interface Message {
   id: string;
@@ -15,32 +15,60 @@ export interface Message {
   ts: number;
 }
 
-type Listener = (msg: Message) => void;
-type StateListener = (state: 'disconnected' | 'connecting' | 'connected' | 'error') => void;
-
-let socket: Socket | null = null;
-let state: 'disconnected' | 'connecting' | 'connected' | 'error' = 'disconnected';
-
-const stateListeners = new Set<StateListener>();
-function setState(s: typeof state) { state = s; stateListeners.forEach(fn => fn(s)); }
-function uid() { return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`; }
-
-// ─── Message routing: sessionId → Set<Listener> ───
-// Every terminal (main + session) registers its own listener keyed by session ID.
-// Socket delivers messages to the correct terminal based on the sessionId in the event.
-const sessionListeners = new Map<string, Set<Listener>>();
-
-function routeMessage(sessionId: string, msg: Message) {
-  const listeners = sessionListeners.get(sessionId);
-  if (listeners) listeners.forEach(fn => fn(msg));
+export interface RelayConfig {
+  id: string;    // unique key (e.g. 'primary', 'remote-1')
+  url: string;   // relay base URL
+  token: string; // bearer token
+  label?: string; // display name
 }
 
-/** Subscribe a listener to a specific session's messages */
+type Listener = (msg: Message) => void;
+type StateListener = (state: ConnectionState) => void;
+type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'error';
+
+// ─── Per-relay state ───
+interface RelayConn {
+  config: RelayConfig;
+  socket: Socket | null;
+  state: ConnectionState;
+}
+
+const relayConns = new Map<string, RelayConn>();
+const sessionRelayMap = new Map<string, string>(); // sessionId → relayId
+const sessionListeners = new Map<string, Set<Listener>>();
+const stateListeners = new Set<StateListener>(); // global (tracks primary relay)
+
+// ─── Relay accessors ───
+function primaryToken() { return localStorage.getItem('morph-auth') || ''; }
+
+function ensurePrimary(): RelayConn {
+  if (!relayConns.has(PRIMARY)) {
+    relayConns.set(PRIMARY, {
+      config: { id: PRIMARY, url: window.location.origin, token: primaryToken() },
+      socket: null,
+      state: 'disconnected',
+    });
+  }
+  // Always refresh primary token from localStorage
+  relayConns.get(PRIMARY)!.config.token = primaryToken();
+  return relayConns.get(PRIMARY)!;
+}
+
+function relayFor(sessionId: string): RelayConn {
+  const id = sessionRelayMap.get(sessionId) || PRIMARY;
+  return relayConns.get(id) ?? ensurePrimary();
+}
+
+// ─── Message routing: sessionId → listeners ───
+function routeMessage(sessionId: string, msg: Message) {
+  sessionListeners.get(sessionId)?.forEach(fn => fn(msg));
+}
+
 export function subscribe(sessionId: string, fn: Listener): () => void {
   if (!sessionListeners.has(sessionId)) sessionListeners.set(sessionId, new Set());
   sessionListeners.get(sessionId)!.add(fn);
-  // Tell relay to forward this session's output to our socket
-  if (socket?.connected) socket.emit('direct-subscribe', { sessionId });
+  const relay = relayFor(sessionId);
+  if (relay.socket?.connected) relay.socket.emit('direct-subscribe', { sessionId });
   return () => {
     sessionListeners.get(sessionId)?.delete(fn);
     if (sessionListeners.get(sessionId)?.size === 0) sessionListeners.delete(sessionId);
@@ -79,152 +107,247 @@ function parseOutput(data: any): Message[] {
   return msgs;
 }
 
-// ─── Socket connection (singleton, multiplexed) ───
-function connectSocket(): void {
-  if (socket) { socket.close(); socket = null; }
-  socket = io(RELAY_URL, {
+// ─── Per-relay socket ───
+function connectRelaySocket(relayId: string): void {
+  const conn = relayConns.get(relayId);
+  if (!conn) return;
+  if (conn.socket) { conn.socket.close(); conn.socket = null; }
+
+  const setConnState = (s: ConnectionState) => {
+    conn.state = s;
+    if (relayId === PRIMARY) stateListeners.forEach(fn => fn(s));
+  };
+
+  conn.socket = io(conn.config.url, {
     path: '/v1/updates',
     transports: ['websocket'],
-    auth: { token: getToken(), clientType: 'session-scoped', sessionId: 'direct' },
+    auth: { token: conn.config.token, clientType: 'session-scoped', sessionId: 'direct' },
     reconnection: true,
     reconnectionDelay: 1000,
     reconnectionDelayMax: 5000,
   });
 
-  socket.on('connect', () => {
-    // Re-subscribe all active session listeners on reconnect
-    for (const sid of sessionListeners.keys()) {
-      socket!.emit('direct-subscribe', { sessionId: sid });
+  conn.socket.on('connect', () => {
+    // Re-subscribe all sessions belonging to this relay
+    for (const [sid, rid] of sessionRelayMap.entries()) {
+      if (rid === relayId) conn.socket!.emit('direct-subscribe', { sessionId: sid });
     }
-    setState('connected');
+    // Primary also re-subscribes unmapped sessions (legacy compat)
+    if (relayId === PRIMARY) {
+      for (const sid of sessionListeners.keys()) {
+        if (!sessionRelayMap.has(sid)) conn.socket!.emit('direct-subscribe', { sessionId: sid });
+      }
+    }
+    setConnState('connected');
   });
-  socket.on('disconnect', () => setState('disconnected'));
-  socket.on('connect_error', () => setState('error'));
+  conn.socket.on('disconnect', () => setConnState('disconnected'));
+  conn.socket.on('connect_error', () => setConnState('error'));
 
-  // Route messages by sessionId — supports multiple terminals simultaneously
-  socket.on('claude-output', (data: any) => {
+  conn.socket.on('claude-output', (data: any) => {
     const sid = data?.sessionId;
     const msgs = parseOutput(data);
     if (sid) msgs.forEach(m => routeMessage(sid, m));
   });
-  socket.on('claude-error', (data: any) => {
+  conn.socket.on('claude-error', (data: any) => {
     const sid = data?.sessionId;
     const msg: Message = { id: uid(), role: 'system', type: 'error', content: data.text || 'Error', ts: Date.now() };
     if (sid) routeMessage(sid, msg);
   });
-  socket.on('claude-exit', (data: any) => {
+  conn.socket.on('claude-exit', (data: any) => {
     const sid = data?.sessionId;
     const msg: Message = { id: uid(), role: 'system', type: 'status', content: `--- exit ${data.code} ---`, ts: Date.now() };
     if (sid) routeMessage(sid, msg);
   });
 }
 
-// ─── API helpers (session-agnostic) ───
-async function apiPost(path: string, body: any) {
-  const res = await fetch(`${RELAY_URL}${path}`, {
+// ─── API helpers ───
+async function relayPost(relayId: string, path: string, body: any) {
+  const conn = relayConns.get(relayId) ?? ensurePrimary();
+  const res = await fetch(`${conn.config.url}${path}`, {
     method: 'POST',
-    headers: { 'Authorization': `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
+    headers: { 'Authorization': `Bearer ${conn.config.token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
   return res.json();
 }
 
-async function apiGet(path: string) {
-  const res = await fetch(`${RELAY_URL}${path}`, { headers: { 'Authorization': `Bearer ${getToken()}` } });
+async function relayGet(relayId: string, path: string) {
+  const conn = relayConns.get(relayId) ?? ensurePrimary();
+  const res = await fetch(`${conn.config.url}${path}`, {
+    headers: { 'Authorization': `Bearer ${conn.config.token}` },
+  });
   return res.json();
 }
 
-// ─── Terminal operations (all take explicit sessionId) ───
+// Legacy shims (always hit primary)
+async function apiPost(path: string, body: any) { return relayPost(PRIMARY, path, body); }
+async function apiGet(path: string) { return relayGet(PRIMARY, path); }
 
-/** Send a message to any session */
+// ─── Multi-relay management ───
+
+function loadSavedRelays(): void {
+  try {
+    const saved = JSON.parse(localStorage.getItem('morph-secondary-relays') || '[]') as RelayConfig[];
+    saved.forEach(cfg => {
+      if (!relayConns.has(cfg.id)) {
+        relayConns.set(cfg.id, { config: cfg, socket: null, state: 'disconnected' });
+      }
+      connectRelaySocket(cfg.id);
+    });
+  } catch { /* ignore */ }
+}
+
+function saveRelayConfigs(): void {
+  const secondary = Array.from(relayConns.values())
+    .filter(c => c.config.id !== PRIMARY)
+    .map(c => c.config);
+  localStorage.setItem('morph-secondary-relays', JSON.stringify(secondary));
+}
+
+/** Add and connect a secondary relay. Call from Config UI. */
+export function addRelay(config: RelayConfig): void {
+  if (relayConns.has(config.id)) {
+    // Update token/label if relay already exists
+    relayConns.get(config.id)!.config = config;
+  } else {
+    relayConns.set(config.id, { config, socket: null, state: 'disconnected' });
+  }
+  connectRelaySocket(config.id);
+  saveRelayConfigs();
+}
+
+/** Disconnect and remove a secondary relay. */
+export function removeRelay(id: string): void {
+  if (id === PRIMARY) return;
+  const conn = relayConns.get(id);
+  if (conn?.socket) conn.socket.close();
+  relayConns.delete(id);
+  for (const [sid, rid] of sessionRelayMap.entries()) {
+    if (rid === id) sessionRelayMap.delete(sid);
+  }
+  saveRelayConfigs();
+}
+
+/** Get all relay configs (primary + secondary). */
+export function getRelayConfigs(): RelayConfig[] {
+  return Array.from(relayConns.values()).map(c => c.config);
+}
+
+/** Get connection state for a specific relay. */
+export function getRelayState(id: string): ConnectionState {
+  return relayConns.get(id)?.state ?? 'disconnected';
+}
+
+// ─── Session operations (relay-aware) ───
+
 export async function sendToSession(sid: string, text: string): Promise<void> {
-  const data = await apiPost('/v2/claude/send', { message: text, sessionId: sid, cwd: '/workspace' });
+  const relayId = sessionRelayMap.get(sid) || PRIMARY;
+  const data = await relayPost(relayId, '/v2/claude/send', { message: text, sessionId: sid, cwd: '/workspace' });
   if (data.error) throw new Error(data.error);
 }
 
-/** Resume a session — returns the new process session ID */
 export async function resumeSession(sid: string, text: string): Promise<string> {
-  const data = await apiPost('/v2/claude/resume', { resumeFrom: sid, message: text, cwd: '/workspace' });
+  const relayId = sessionRelayMap.get(sid) || PRIMARY;
+  const data = await relayPost(relayId, '/v2/claude/resume', { resumeFrom: sid, message: text, cwd: '/workspace' });
   const newSid = data.sessionId || sid;
-  // Auto-subscribe to the new process so we get its output
-  if (socket?.connected) socket.emit('direct-subscribe', { sessionId: newSid });
-  // Do NOT migrate listeners — caller must re-subscribe to newSid explicitly.
-  // Migration invalidates _sessionUnsub cleanup target, causing duplicate handlers.
+  const conn = relayConns.get(relayId);
+  if (conn?.socket?.connected) conn.socket.emit('direct-subscribe', { sessionId: newSid });
+  // Track new session → same relay (no listener migration — caller re-subscribes)
+  if (newSid !== sid) sessionRelayMap.set(newSid, relayId);
   return newSid;
 }
 
-/** Interrupt a session */
 export function interruptSession(sid: string) {
-  apiPost('/v2/claude/interrupt', { sessionId: sid }).catch(() => {});
+  const relayId = sessionRelayMap.get(sid) || PRIMARY;
+  relayPost(relayId, '/v2/claude/interrupt', { sessionId: sid }).catch(() => {});
 }
 
-/** Stop a session process */
 export function stopSession(sid: string) {
-  apiPost('/v2/claude/stop', { sessionId: sid }).catch(() => {});
+  const relayId = sessionRelayMap.get(sid) || PRIMARY;
+  relayPost(relayId, '/v2/claude/stop', { sessionId: sid }).catch(() => {});
 }
 
-/** Check if a session is alive */
 export async function isSessionAlive(sid: string): Promise<boolean> {
-  const data = await apiGet('/v2/claude/active');
+  const relayId = sessionRelayMap.get(sid) || PRIMARY;
+  const data = await relayGet(relayId, '/v2/claude/active');
   return (data.sessions || []).some((s: any) => s.id === sid && s.alive);
 }
 
-/** Load session history */
 export async function loadHistory(sid: string, limit = 50): Promise<Message[]> {
-  const data = await apiGet(`/v2/claude/history/${sid}?limit=${limit}`);
+  const relayId = sessionRelayMap.get(sid) || PRIMARY;
+  const data = await relayGet(relayId, `/v2/claude/history/${sid}?limit=${limit}`);
   return (data.messages || []).map((m: any) => ({
     id: uid(), role: m.role, type: m.type, content: m.content, name: m.name,
     ts: m.ts ? new Date(m.ts).getTime() : Date.now(),
   }));
 }
 
-/** List all sessions */
+/** Fetch sessions from primary relay only (legacy compat). */
 export async function fetchSessions(): Promise<any[]> {
   const data = await apiGet('/v2/claude/sessions?limit=20');
   return data.sessions || [];
 }
 
-// ─── Main terminal convenience (wraps generic functions for FIXED_SESSION) ───
+/** Fetch sessions from ALL relays, tagged with relayId + relayLabel. */
+export async function fetchAllSessions(): Promise<any[]> {
+  const relayIds = Array.from(relayConns.keys());
+  const results = await Promise.allSettled(
+    relayIds.map(async (relayId) => {
+      const conn = relayConns.get(relayId)!;
+      const data = await relayGet(relayId, '/v2/claude/sessions?limit=30');
+      const sessions = data.sessions || [];
+      sessions.forEach((s: any) => {
+        s.relayId = relayId;
+        s.relayLabel = relayId === PRIMARY ? null : (conn.config.label || relayId);
+        sessionRelayMap.set(s.id, relayId);
+      });
+      return sessions;
+    })
+  );
+  return results.flatMap(r => r.status === 'fulfilled' ? r.value : []);
+}
+
+// ─── Main terminal (wraps primary + FIXED_SESSION) ───
 
 let _currentTab = 'canvas';
 export function setCurrentTab(tab: string) { _currentTab = tab; }
 
-/** Connect main terminal — socket + history + spawn if needed */
 export async function connect(): Promise<void> {
-  setState('connecting');
+  const primary = ensurePrimary();
+  primary.state = 'connecting';
+  stateListeners.forEach(fn => fn('connecting'));
+
   try {
-    connectSocket();
+    connectRelaySocket(PRIMARY);
     await new Promise<void>((resolve) => {
-      if (socket?.connected) { resolve(); return; }
+      if (primary.socket?.connected) { resolve(); return; }
       let resolved = false;
-      const done = () => { if (resolved) return; resolved = true; socket?.off('connect', done); clearTimeout(t); resolve(); };
-      socket?.on('connect', done);
+      const done = () => { if (resolved) return; resolved = true; primary.socket?.off('connect', done); clearTimeout(t); resolve(); };
+      primary.socket?.on('connect', done);
       const t = setTimeout(done, 3000);
     });
 
-    // Load history and emit to main terminal listeners
     const history = await loadHistory(FIXED_SESSION, 30);
     history.forEach(msg => routeMessage(FIXED_SESSION, msg));
 
-    // Spawn if not alive
     if (!(await isSessionAlive(FIXED_SESSION))) {
       await apiPost('/v2/claude/send', {
-        message: `This is Morph Web — a mobile terminal for the CEO to interact with Claude Code remotely.
-You are a CTO-level AI assistant. Working directory: /workspace. You have full access to the codebase.
-The CEO may also be running a separate Claude Code session on the desktop terminal — they share the same /workspace files.
-Be concise. Follow CLAUDE.md instructions. Ready for tasks.`,
+        message: `This is Morph Web — a mobile terminal for the CEO to interact with Claude Code remotely.\nYou are a CTO-level AI assistant. Working directory: /workspace. You have full access to the codebase.\nThe CEO may also be running a separate Claude Code session on the desktop terminal — they share the same /workspace files.\nBe concise. Follow CLAUDE.md instructions. Ready for tasks.`,
         sessionId: FIXED_SESSION,
         cwd: '/workspace',
       });
-      if (socket?.connected) socket.emit('direct-subscribe', { sessionId: FIXED_SESSION });
+      if (primary.socket?.connected) primary.socket.emit('direct-subscribe', { sessionId: FIXED_SESSION });
     }
+
+    // Connect secondary relays saved from previous session
+    loadSavedRelays();
   } catch (err: any) {
-    setState('error');
+    primary.state = 'error';
+    stateListeners.forEach(fn => fn('error'));
     routeMessage(FIXED_SESSION, { id: uid(), role: 'system', type: 'error', content: err.message, ts: Date.now() });
   }
 }
 
-/** Send to main terminal */
 export function send(text: string) {
   const msgId = uid();
   routeMessage(FIXED_SESSION, { id: msgId, role: 'user', type: 'text', content: text, ts: Date.now(), pending: true });
@@ -234,31 +357,28 @@ export function send(text: string) {
     : '';
   sendToSession(FIXED_SESSION, ctx + text)
     .then(() => routeMessage(FIXED_SESSION, { id: msgId, role: 'user', type: 'text', content: text, ts: Date.now(), pending: false }))
-    .catch(() => socket?.emit('direct-send', { sessionId: FIXED_SESSION, message: ctx + text }));
+    .catch(() => ensurePrimary().socket?.emit('direct-send', { sessionId: FIXED_SESSION, message: ctx + text }));
 }
 
-/** Interrupt main terminal */
 export function interrupt() { interruptSession(FIXED_SESSION); }
 
-/** Clear main terminal — stop + respawn */
 export function clearSession() {
   stopSession(FIXED_SESSION);
-  socket?.close();
-  socket = null;
-  setState('disconnected');
+  const primary = ensurePrimary();
+  if (primary.socket) { primary.socket.close(); primary.socket = null; }
+  primary.state = 'disconnected';
+  stateListeners.forEach(fn => fn('disconnected'));
   setTimeout(() => connect(), 500);
 }
 
 // ─── Legacy compat ───
 export function onMessage(fn: Listener) { return subscribe(FIXED_SESSION, fn); }
 export function onState(fn: StateListener) { stateListeners.add(fn); return () => { stateListeners.delete(fn); }; }
-export function getState() { return state; }
+export function getState(): ConnectionState { return ensurePrimary().state; }
 export function getSessionId() { return FIXED_SESSION; }
 
-// Session message subscription — stores cleanup fn for proper unsubscribe
 let _sessionUnsub: (() => void) | null = null;
 export function subscribeSessionMessages(sid: string, cb: Listener) {
-  // Clean up previous subscription first
   if (_sessionUnsub) { _sessionUnsub(); _sessionUnsub = null; }
   _sessionUnsub = subscribe(sid, cb);
   return _sessionUnsub;
