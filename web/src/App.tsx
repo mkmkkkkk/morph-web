@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, useMotionValue } from 'framer-motion';
-import { connect, send, interrupt, clearSession, setCurrentTab, switchSession, fetchSessions, onMessage, onState, getState, sendToSession, resumeSession, subscribeSessionMessages, unsubscribeSessionMessages, type Message } from './lib/connection';
+import { connect, send, interrupt, clearSession, setCurrentTab, fetchSessions, onMessage, onState, getState, sendToSession, resumeSession, isSessionAlive, loadHistory, subscribe, subscribeSessionMessages, unsubscribeSessionMessages, type Message } from './lib/connection';
 import Sketch from './components/Sketch';
 
 // Cache-bust canvas.html on each page load (not per render)
@@ -106,7 +106,7 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
   pendingSketch: string | null;
   pendingFile: 'image' | 'file' | null;
   onClearPending: () => void;
-  tint?: 'blue'; // session terminal color
+  tint?: 'amber'; // session terminal color
   keyboardOpen?: boolean;
 }) {
   const [text, setText] = useState('');
@@ -121,12 +121,12 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
     if (ref.current) ref.current.style.height = '36px';
   }, [text, onSend, pendingSketch, pendingFile]);
 
-  const isBlue = tint === 'blue';
-  const accent = isBlue ? '#6e8ef7' : '#30d158';
-  const dotColor = connected ? accent : '#636366';
-  const inputBg = isBlue ? '#1a1a2e' : '#1c1c1e';
-  const sendBg = isBlue ? '#4a6cf7' : '#333';
-  const borderTint = isBlue ? 'rgba(100,140,255,0.15)' : 'rgba(255,255,255,0.10)';
+  const isSession = tint === 'amber';
+  const accent = isSession ? '#e0a030' : '#30d158';
+  const dotColor = connected ? '#30d158' : '#636366'; // always green for online
+  const inputBg = isSession ? '#1e1c14' : '#1c1c1e';
+  const sendBg = isSession ? '#b8860b' : '#333';
+  const borderTint = isSession ? 'rgba(224,160,48,0.15)' : 'rgba(255,255,255,0.10)';
 
   return (
     <div style={{ borderTop: `1px solid ${borderTint}`, padding: keyboardOpen ? '8px 10px 2px' : '6px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -180,13 +180,13 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
         onKeyDown={e => {
           if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
         }}
-        placeholder={isBlue ? "Message this session..." : "Message Claude Code..."}
+        placeholder={isSession ? "Message this session..." : "Message Claude Code..."}
         rows={1}
         enterKeyHint="send"
         autoComplete="off"
         style={{
           flex: 1, minHeight: 36, maxHeight: 120, resize: 'none',
-          borderRadius: 18, border: isBlue ? `1px solid ${borderTint}` : 'none', outline: 'none',
+          borderRadius: 18, border: isSession ? `1px solid ${borderTint}` : 'none', outline: 'none',
           padding: '8px 16px', fontSize: 16, lineHeight: '20px',
           fontFamily: '-apple-system, system-ui, sans-serif', backgroundColor: inputBg, color: '#fff',
           WebkitAppearance: 'none' as any,
@@ -509,11 +509,9 @@ function SessionTerminal({ session, messages, onBack, onSend, keyboardOpen }: {
   const dragX = useMotionValue(0);
   const swipeStart = useRef<{ x: number } | null>(null);
 
-  // Allow left-edge swipe when session terminal is open
-  useEffect(() => {
-    (window as any).__allowLeftSwipe = true;
-    return () => { (window as any).__allowLeftSwipe = false; };
-  }, []);
+  // Swipe-back handled entirely by React touch handlers below.
+  // Do NOT set __allowLeftSwipe — that would trigger iOS native back gesture (white flash).
+  // Instead, we capture left-edge touches directly on the session terminal div.
   const [sessionSketch, setSessionSketch] = useState<{ dataUrl: string; bounds: { x: number; y: number; w: number; h: number } } | null>(null);
   const [sessionFile, setSessionFile] = useState<{ path: string; isImage: boolean } | null>(null);
   const [sessionSketchOpen, setSessionSketchOpen] = useState(false);
@@ -580,7 +578,7 @@ function SessionTerminal({ session, messages, onBack, onSend, keyboardOpen }: {
     <motion.div
       key="session-terminal"
       initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
-      transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+      transition={{ type: 'tween', duration: 0.25, ease: 'easeInOut' }}
       style={{ x: dragX, position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
         backgroundColor: '#0a0a0a', zIndex: 50, display: 'flex', flexDirection: 'column' }}
       onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
@@ -589,11 +587,11 @@ function SessionTerminal({ session, messages, onBack, onSend, keyboardOpen }: {
       <div style={{
         display: 'flex', alignItems: 'center', gap: 10,
         padding: '12px 12px 8px', paddingTop: 'max(12px, env(safe-area-inset-top))',
-        borderBottom: '1px solid rgba(100,140,255,0.15)', flexShrink: 0,
+        borderBottom: '1px solid rgba(224,160,48,0.15)', flexShrink: 0,
       }}>
         <motion.button whileTap={{ scale: 0.9 }} onClick={onBack}
           style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px',
-            color: '#6e8ef7', fontSize: 14, display: 'flex', alignItems: 'center', gap: 4 }}>
+            color: '#e0a030', fontSize: 14, display: 'flex', alignItems: 'center', gap: 4 }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
           Back
         </motion.button>
@@ -615,7 +613,7 @@ function SessionTerminal({ session, messages, onBack, onSend, keyboardOpen }: {
         pendingSketch={sessionSketch ? sessionSketch.dataUrl : null}
         pendingFile={sessionFile ? (sessionFile.isImage ? 'image' : 'file') : null}
         onClearPending={() => { setSessionSketch(null); setSessionFile(null); }}
-        tint="blue"
+        tint="amber"
         keyboardOpen={keyboardOpen}
       />
       {/* Disabled TabBar — same height as main, keeps InputBar aligned */}
@@ -632,20 +630,20 @@ function SessionTerminal({ session, messages, onBack, onSend, keyboardOpen }: {
             style={{ position: 'absolute', bottom: 60, left: 12, zIndex: 999,
               backgroundColor: 'rgba(30,30,50,0.9)', backdropFilter: 'blur(40px)', WebkitBackdropFilter: 'blur(40px)',
               borderRadius: 14, padding: '4px 0', minWidth: 200,
-              boxShadow: '0 8px 40px rgba(0,0,0,0.6)', border: '1px solid rgba(100,140,255,0.15)',
+              boxShadow: '0 8px 40px rgba(0,0,0,0.6)', border: '1px solid rgba(224,160,48,0.15)',
               transformOrigin: 'bottom left' }}>
             {[
               { label: 'Attach File', icon: (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>), action: () => uploadSessionFile('image/*,.pdf,.md,.txt,.csv,.json,.py,.js,.ts,.jsx,.tsx') },
               { label: 'Sketch', icon: (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>), action: () => { setSessionAttachMenu(false); setSessionSketchOpen(true); } },
             ].map((item, i) => (
               <div key={item.label}>
-                {i > 0 && <div style={{ height: 1, backgroundColor: 'rgba(100,140,255,0.10)', margin: '0 12px' }} />}
+                {i > 0 && <div style={{ height: 1, backgroundColor: 'rgba(224,160,48,0.10)', margin: '0 12px' }} />}
                 <button tabIndex={-1} onClick={item.action} style={{
                   display: 'flex', alignItems: 'center', gap: 12, width: '100%',
                   padding: '11px 16px', border: 'none', cursor: 'pointer',
                   backgroundColor: 'transparent', color: '#e0e0e0',
                   fontSize: 15, textAlign: 'left', fontFamily: '-apple-system, system-ui, sans-serif',
-                }}><span style={{ color: '#6e8ef7', display: 'flex' }}>{item.icon}</span> {item.label}</button>
+                }}><span style={{ color: '#e0a030', display: 'flex' }}>{item.icon}</span> {item.label}</button>
               </div>
             ))}
           </motion.div>
@@ -690,21 +688,59 @@ export default function App() {
     return () => vv.removeEventListener('resize', onResize);
   }, []);
 
-  // Load history + subscribe to live updates when a session is selected
+  // Preload all session histories into cache on mount
+  const sessionCache = useRef<Map<string, Message[]>>(new Map());
   useEffect(() => {
-    if (!selectedSession) return;
+    if (!authed) return;
     const token = localStorage.getItem('morph-auth') || '';
-    fetch(`/v2/claude/history/${selectedSession.id}?limit=50`, { headers: { 'Authorization': `Bearer ${token}` } })
+    fetch('/v2/claude/sessions?limit=30', { headers: { 'Authorization': `Bearer ${token}` } })
       .then(r => r.json())
       .then(d => {
-        const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-        setSessionMessages((d.messages || []).map((m: any) => ({
-          id: uid(), role: m.role, type: m.type, content: m.content, name: m.name,
-          ts: m.ts ? new Date(m.ts).getTime() : Date.now(),
-        })));
+        const sessions = (d.sessions || []).filter((s: any) => s.id !== 'a0a0a0a0-0e00-4000-a000-000000000002');
+        // Preload each session's history (staggered to avoid burst)
+        sessions.forEach((s: any, i: number) => {
+          setTimeout(() => {
+            fetch(`/v2/claude/history/${s.id}?limit=50`, { headers: { 'Authorization': `Bearer ${token}` } })
+              .then(r => r.json())
+              .then(d => {
+                const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                const msgs = (d.messages || []).map((m: any) => ({
+                  id: uid(), role: m.role, type: m.type, content: m.content, name: m.name,
+                  ts: m.ts ? new Date(m.ts).getTime() : Date.now(),
+                }));
+                sessionCache.current.set(s.id, msgs);
+              })
+              .catch(() => {});
+          }, i * 100); // 100ms stagger
+        });
       })
       .catch(() => {});
-    // Subscribe socket to this session for live updates
+  }, [authed]);
+
+  // When a session is selected, load from cache instantly, then subscribe for live updates
+  useEffect(() => {
+    if (!selectedSession) return;
+    // Instant load from cache
+    const cached = sessionCache.current.get(selectedSession.id);
+    if (cached) {
+      setSessionMessages(cached);
+    } else {
+      // Fallback: fetch if not cached
+      const token = localStorage.getItem('morph-auth') || '';
+      fetch(`/v2/claude/history/${selectedSession.id}?limit=50`, { headers: { 'Authorization': `Bearer ${token}` } })
+        .then(r => r.json())
+        .then(d => {
+          const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+          const msgs = (d.messages || []).map((m: any) => ({
+            id: uid(), role: m.role, type: m.type, content: m.content, name: m.name,
+            ts: m.ts ? new Date(m.ts).getTime() : Date.now(),
+          }));
+          setSessionMessages(msgs);
+          sessionCache.current.set(selectedSession.id, msgs);
+        })
+        .catch(() => {});
+    }
+    // Subscribe socket for live updates
     subscribeSessionMessages(selectedSession.id, (msg) => {
       setSessionMessages(prev => [...prev, msg]);
     });
@@ -849,7 +885,7 @@ export default function App() {
             setSelectedSession({ id: sid, display: display || sid.slice(0, 8) });
           }} />
           {/* Canvas iframe — fills full area */}
-          <div style={{ flex: 1, position: 'relative' }}>
+          <div style={{ flex: 1, position: 'relative', backgroundColor: '#0a0a0a' }}>
             {!canvasLoaded && (
               <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0a0a0a', zIndex: 1 }}>
                 <div style={{ width: 120, height: 2, borderRadius: 1, backgroundColor: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
@@ -858,7 +894,7 @@ export default function App() {
                 <style>{`@keyframes canvasLoad { 0% { transform: translateX(-120%); } 100% { transform: translateX(300%); } }`}</style>
               </div>
             )}
-            <iframe src={`/canvas.html?v=${BUILD_TS}`} onLoad={() => setCanvasLoaded(true)} style={{ width: '100%', height: '100%', border: 'none', backgroundColor: '#0a0a0a' }} sandbox="allow-scripts allow-same-origin" />
+            <iframe src={`/canvas.html?v=${BUILD_TS}`} onLoad={() => setCanvasLoaded(true)} style={{ width: '100%', height: '100%', border: 'none', backgroundColor: '#0a0a0a', willChange: 'transform' }} sandbox="allow-scripts allow-same-origin" />
           </div>
         </div>
 
