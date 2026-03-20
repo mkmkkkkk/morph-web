@@ -7,6 +7,75 @@ import Sketch from './components/Sketch';
 // Cache-bust canvas.html on each page load (not per render)
 const BUILD_TS = Date.now().toString(36);
 
+// ─── Shared send flow: attachments + fire-and-forget upload ───
+function useSendFlow(sendFn: (msg: string) => void) {
+  const [pendingSketch, setPendingSketch] = useState<{ dataUrl: string; bounds: { x: number; y: number; w: number; h: number } } | null>(null);
+  const [pendingFile, setPendingFile] = useState<{ path: string; isImage: boolean } | null>(null);
+  const [attachMenu, setAttachMenu] = useState(false);
+  const [sketchOpen, setSketchOpen] = useState(false);
+
+  const handleSend = useCallback((text: string) => {
+    if (text === '/clear') return; // handled upstream
+    const sketch = pendingSketch;
+    const file = pendingFile;
+    setPendingSketch(null);
+    setPendingFile(null);
+
+    (async () => {
+      let prefix = '';
+      if (sketch) {
+        const b64 = sketch.dataUrl.split(',')[1];
+        const { x, y, w, h } = sketch.bounds;
+        try {
+          const token = localStorage.getItem('morph-auth') || '';
+          const res = await fetch('/v2/claude/upload', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename: `sketch-${Date.now()}.png`, base64: b64, mime: 'image/png' }),
+          });
+          const data = await res.json();
+          if (data.path) prefix += `[Sketch annotation at screen position: x=${Math.round(x)}%, y=${Math.round(y)}%, w=${Math.round(w)}%, h=${Math.round(h)}%]\nImage: ${data.path}\n`;
+        } catch {}
+      }
+      if (file) {
+        prefix += file.isImage ? `Look at this image: ${file.path}\n` : `Read this file: ${file.path}\n`;
+      }
+      sendFn(prefix ? (prefix + (text ? `\n${text}` : '')).trim() : text);
+    })();
+  }, [sendFn, pendingSketch, pendingFile]);
+
+  const uploadFile = useCallback((accept: string) => {
+    setAttachMenu(false);
+    const input = document.createElement('input');
+    input.type = 'file'; input.accept = accept;
+    input.onchange = async (e: any) => {
+      const f = e.target?.files?.[0]; if (!f) return;
+      const b64: string = await new Promise(r => { const rd = new FileReader(); rd.onload = () => r((rd.result as string).split(',')[1]); rd.readAsDataURL(f); });
+      try {
+        const token = localStorage.getItem('morph-auth') || '';
+        const res = await fetch('/v2/claude/upload', { method: 'POST', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ filename: f.name, base64: b64, mime: f.type }) });
+        const data = await res.json();
+        if (data.path) setPendingFile({ path: data.path, isImage: f.type.startsWith('image/') });
+      } catch {}
+    };
+    input.click();
+  }, []);
+
+  const handleSketchInsert = useCallback((dataUrl: string, bounds: { x: number; y: number; w: number; h: number }) => {
+    setSketchOpen(false);
+    setPendingSketch({ dataUrl, bounds });
+  }, []);
+
+  const clearPending = useCallback(() => { setPendingSketch(null); setPendingFile(null); }, []);
+  const toggleAttach = useCallback(() => setAttachMenu(v => !v), []);
+
+  return {
+    pendingSketch, pendingFile, attachMenu, sketchOpen,
+    setSketchOpen, setAttachMenu,
+    handleSend, uploadFile, handleSketchInsert, clearPending, toggleAttach,
+  };
+}
+
 // ─── Password Gate ───
 const PASS_KEY = 'morph-auth';
 
@@ -510,12 +579,7 @@ function SessionTerminal({ session, messages, onBack, onSend, keyboardOpen }: {
   const swipeStart = useRef<{ x: number } | null>(null);
 
   // Swipe-back handled entirely by React touch handlers below.
-  // Do NOT set __allowLeftSwipe — that would trigger iOS native back gesture (white flash).
-  // Instead, we capture left-edge touches directly on the session terminal div.
-  const [sessionSketch, setSessionSketch] = useState<{ dataUrl: string; bounds: { x: number; y: number; w: number; h: number } } | null>(null);
-  const [sessionFile, setSessionFile] = useState<{ path: string; isImage: boolean } | null>(null);
-  const [sessionSketchOpen, setSessionSketchOpen] = useState(false);
-  const [sessionAttachMenu, setSessionAttachMenu] = useState(false);
+  const flow = useSendFlow(onSend);
 
   const onTouchStart = (e: React.TouchEvent) => {
     const x = e.touches[0].clientX;
@@ -533,46 +597,6 @@ function SessionTerminal({ session, messages, onBack, onSend, keyboardOpen }: {
     swipeStart.current = null;
   };
 
-  const handleSessionSend = async (text: string) => {
-    let prefix = '';
-    if (sessionSketch) {
-      const b64 = sessionSketch.dataUrl.split(',')[1];
-      const { x, y, w, h } = sessionSketch.bounds;
-      try {
-        const token = localStorage.getItem('morph-auth') || '';
-        const res = await fetch('/v2/claude/upload', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filename: `sketch-${Date.now()}.png`, base64: b64, mime: 'image/png' }),
-        });
-        const data = await res.json();
-        if (data.path) prefix += `[Sketch annotation at screen position: x=${Math.round(x)}%, y=${Math.round(y)}%, w=${Math.round(w)}%, h=${Math.round(h)}%]\nImage: ${data.path}\n`;
-      } catch {}
-      setSessionSketch(null);
-    }
-    if (sessionFile) {
-      prefix += sessionFile.isImage ? `Look at this image: ${sessionFile.path}\n` : `Read this file: ${sessionFile.path}\n`;
-      setSessionFile(null);
-    }
-    onSend(prefix ? (prefix + (text ? `\n${text}` : '')).trim() : text);
-  };
-
-  const uploadSessionFile = (accept: string) => {
-    setSessionAttachMenu(false);
-    const input = document.createElement('input');
-    input.type = 'file'; input.accept = accept;
-    input.onchange = async (e: any) => {
-      const file = e.target?.files?.[0]; if (!file) return;
-      const b64: string = await new Promise(r => { const rd = new FileReader(); rd.onload = () => r((rd.result as string).split(',')[1]); rd.readAsDataURL(file); });
-      try {
-        const token = localStorage.getItem('morph-auth') || '';
-        const res = await fetch('/v2/claude/upload', { method: 'POST', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ filename: file.name, base64: b64, mime: file.type }) });
-        const data = await res.json();
-        if (data.path) setSessionFile({ path: data.path, isImage: file.type.startsWith('image/') });
-      } catch {}
-    };
-    input.click();
-  };
 
   return (
     <motion.div
@@ -606,13 +630,13 @@ function SessionTerminal({ session, messages, onBack, onSend, keyboardOpen }: {
 
       {/* Shared InputBar — blue tint, no terminal toggle (header has Back) */}
       <InputBar
-        onSend={handleSessionSend} onStop={() => {}}
+        onSend={flow.handleSend} onStop={() => {}}
         isProcessing={false} connected={true}
-        onAttach={() => setSessionAttachMenu(v => !v)}
-        onSketch={() => setSessionSketchOpen(true)}
-        pendingSketch={sessionSketch ? sessionSketch.dataUrl : null}
-        pendingFile={sessionFile ? (sessionFile.isImage ? 'image' : 'file') : null}
-        onClearPending={() => { setSessionSketch(null); setSessionFile(null); }}
+        onAttach={flow.toggleAttach}
+        onSketch={() => flow.setSketchOpen(true)}
+        pendingSketch={flow.pendingSketch ? flow.pendingSketch.dataUrl : null}
+        pendingFile={flow.pendingFile ? (flow.pendingFile.isImage ? 'image' : 'file') : null}
+        onClearPending={flow.clearPending}
         tint="amber"
         keyboardOpen={keyboardOpen}
       />
@@ -621,9 +645,9 @@ function SessionTerminal({ session, messages, onBack, onSend, keyboardOpen }: {
 
       {/* Session attach menu */}
       <AnimatePresence>
-        {sessionAttachMenu && (<>
+        {flow.attachMenu && (<>
           <motion.div key="s-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            transition={{ duration: 0.15 }} onClick={() => setSessionAttachMenu(false)}
+            transition={{ duration: 0.15 }} onClick={() => flow.setAttachMenu(false)}
             style={{ position: 'fixed', inset: 0, zIndex: 998 }} />
           <motion.div key="s-menu" initial={{ scale: 0.3, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.3, opacity: 0 }}
             transition={{ type: 'spring', stiffness: 500, damping: 25 }}
@@ -633,8 +657,8 @@ function SessionTerminal({ session, messages, onBack, onSend, keyboardOpen }: {
               boxShadow: '0 8px 40px rgba(0,0,0,0.6)', border: '1px solid rgba(224,160,48,0.15)',
               transformOrigin: 'bottom left' }}>
             {[
-              { label: 'Attach File', icon: (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>), action: () => uploadSessionFile('image/*,.pdf,.md,.txt,.csv,.json,.py,.js,.ts,.jsx,.tsx') },
-              { label: 'Sketch', icon: (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>), action: () => { setSessionAttachMenu(false); setSessionSketchOpen(true); } },
+              { label: 'Attach File', icon: (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>), action: () => flow.uploadFile('image/*,.pdf,.md,.txt,.csv,.json,.py,.js,.ts,.jsx,.tsx') },
+              { label: 'Sketch', icon: (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>), action: () => { flow.setAttachMenu(false); flow.setSketchOpen(true); } },
             ].map((item, i) => (
               <div key={item.label}>
                 {i > 0 && <div style={{ height: 1, backgroundColor: 'rgba(224,160,48,0.10)', margin: '0 12px' }} />}
@@ -651,8 +675,8 @@ function SessionTerminal({ session, messages, onBack, onSend, keyboardOpen }: {
       </AnimatePresence>
 
       {/* Session sketch overlay */}
-      {sessionSketchOpen && createPortal(
-        <Sketch onInsert={(dataUrl, bounds) => { setSessionSketchOpen(false); setSessionSketch({ dataUrl, bounds }); }} onClose={() => setSessionSketchOpen(false)} />,
+      {flow.sketchOpen && createPortal(
+        <Sketch onInsert={flow.handleSketchInsert} onClose={() => flow.setSketchOpen(false)} />,
         document.body
       )}
     </motion.div>
@@ -666,10 +690,8 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [connState, setConnState] = useState(getState());
   const [isProcessing, setIsProcessing] = useState(false);
-  const [sketchOpen, setSketchOpen] = useState(false);
   const [canvasLoaded, setCanvasLoaded] = useState(false);
-  const [pendingSketch, setPendingSketch] = useState<{ dataUrl: string; bounds: { x: number; y: number; w: number; h: number } } | null>(null);
-  const [pendingFile, setPendingFile] = useState<{ path: string; isImage: boolean } | null>(null);
+  const mainFlow = useSendFlow(send);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [selectedSession, setSelectedSession] = useState<{ id: string; display: string } | null>(null);
   const [sessionMessages, setSessionMessages] = useState<Message[]>([]);
@@ -798,77 +820,9 @@ export default function App() {
 
   const handleTab = (t: string) => { setTab(t); setCurrentTab(t); if (t === 'config') setTerminalVisible(false); };
 
-  const handleSend = async (text: string) => {
-    if (text === '/clear') { setMessages([]); setIsProcessing(false); clearSession(); setPendingSketch(null); setPendingFile(null); return; }
-
-    let prefix = '';
-
-    // Pending sketch → upload and prepend
-    if (pendingSketch) {
-      const b64 = pendingSketch.dataUrl.split(',')[1];
-      const { x, y, w, h } = pendingSketch.bounds;
-      try {
-        const token = localStorage.getItem('morph-auth') || '';
-        const res = await fetch('/v2/claude/upload', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filename: `sketch-${Date.now()}.png`, base64: b64, mime: 'image/png' }),
-        });
-        const data = await res.json();
-        if (data.path) {
-          prefix += `[Sketch annotation at screen position: x=${Math.round(x)}%, y=${Math.round(y)}%, w=${Math.round(w)}%, h=${Math.round(h)}%]\nImage: ${data.path}\n`;
-        }
-      } catch {}
-      setPendingSketch(null);
-    }
-
-    // Pending file → prepend
-    if (pendingFile) {
-      prefix += pendingFile.isImage ? `Look at this image: ${pendingFile.path}\n` : `Read this file: ${pendingFile.path}\n`;
-      setPendingFile(null);
-    }
-
-    send(prefix ? (prefix + (text ? `\n${text}` : '')).trim() : text);
-  };
-
-  const [attachMenu, setAttachMenu] = useState(false);
-
-  const handleAttach = () => setAttachMenu(v => !v);
-
-  const uploadFile = (accept: string) => {
-    setAttachMenu(false);
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = accept;
-    input.onchange = async (e: any) => {
-      const file = e.target?.files?.[0];
-      if (!file) return;
-      const b64: string = await new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve((reader.result as string).split(',')[1]);
-        reader.readAsDataURL(file);
-      });
-      try {
-        const token = localStorage.getItem('morph-auth') || '';
-        const res = await fetch('/v2/claude/upload', {
-          method: 'POST',
-          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filename: file.name, base64: b64, mime: file.type }),
-        });
-        const data = await res.json();
-        if (data.path) {
-          // Store as pending — user types prompt before sending
-          setPendingFile({ path: data.path, isImage: file.type.startsWith('image/') });
-        }
-      } catch {}
-    };
-    input.click();
-  };
-
-  const handleSketchInsert = (dataUrl: string, bounds: { x: number; y: number; w: number; h: number }) => {
-    setSketchOpen(false);
-    // Insert as pending attachment — user can add text prompt before sending
-    setPendingSketch({ dataUrl, bounds });
+  const handleSend = (text: string) => {
+    if (text === '/clear') { setMessages([]); setIsProcessing(false); clearSession(); mainFlow.clearPending(); return; }
+    mainFlow.handleSend(text);
   };
 
   if (!authed) return <PasswordGate onAuth={() => setAuthed(true)} />;
@@ -977,22 +931,22 @@ export default function App() {
           onSend={handleSend} onStop={interrupt}
           isProcessing={isProcessing} connected={connState === 'connected'}
           terminalVisible={terminalVisible} onToggleTerminal={toggleTerminal}
-          hasNew={hasNew} onAttach={handleAttach} onSketch={() => setSketchOpen(true)}
-          pendingSketch={pendingSketch ? pendingSketch.dataUrl : null}
-          pendingFile={pendingFile ? (pendingFile.isImage ? 'image' : 'file') : null}
-          onClearPending={() => { setPendingSketch(null); setPendingFile(null); }}
+          hasNew={hasNew} onAttach={mainFlow.toggleAttach} onSketch={() => mainFlow.setSketchOpen(true)}
+          pendingSketch={mainFlow.pendingSketch ? mainFlow.pendingSketch.dataUrl : null}
+          pendingFile={mainFlow.pendingFile ? (mainFlow.pendingFile.isImage ? 'image' : 'file') : null}
+          onClearPending={mainFlow.clearPending}
           keyboardOpen={keyboardOpen}
         />
       </div>
       {!keyboardOpen && <TabBar tab={tab} onTab={handleTab} />}
       {/* Attach menu — frosted glass popup with Framer Motion */}
       <AnimatePresence>
-        {attachMenu && (<>
+        {mainFlow.attachMenu && (<>
           <motion.div
             key="attach-backdrop"
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             transition={{ duration: 0.15 }}
-            onClick={() => setAttachMenu(false)}
+            onClick={() => mainFlow.setAttachMenu(false)}
             style={{ position: 'fixed', inset: 0, zIndex: 998 }}
           />
           <motion.div
@@ -1010,8 +964,8 @@ export default function App() {
             }}
           >
             {[
-              { label: 'Attach File', icon: (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>), action: () => uploadFile('image/*,.pdf,.md,.txt,.csv,.json,.py,.js,.ts,.jsx,.tsx') },
-              { label: 'Sketch', icon: (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>), action: () => { setAttachMenu(false); setSketchOpen(true); } },
+              { label: 'Attach File', icon: (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>), action: () => mainFlow.uploadFile('image/*,.pdf,.md,.txt,.csv,.json,.py,.js,.ts,.jsx,.tsx') },
+              { label: 'Sketch', icon: (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>), action: () => { mainFlow.setAttachMenu(false); mainFlow.setSketchOpen(true); } },
             ].map((item, i) => (
               <motion.div key={item.label}
                 initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}
@@ -1029,8 +983,8 @@ export default function App() {
           </motion.div>
         </>)}
       </AnimatePresence>
-      {sketchOpen && createPortal(
-        <Sketch onInsert={handleSketchInsert} onClose={() => setSketchOpen(false)} />,
+      {mainFlow.sketchOpen && createPortal(
+        <Sketch onInsert={mainFlow.handleSketchInsert} onClose={() => mainFlow.setSketchOpen(false)} />,
         document.body
       )}
 
