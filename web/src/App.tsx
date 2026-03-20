@@ -402,6 +402,70 @@ function EnvironmentGroup({ env, onSelect }: { env: EnvConfig; onSelect: (sessio
   );
 }
 
+// ─── Usage Bar Widget (top-right) ───
+function UsageWidget() {
+  const [usage, setUsage] = useState<{ session: { pct: number; resetsAt: string | null }; weekly: { pct: number; resetsAt: string | null } } | null>(null);
+  const [countdown, setCountdown] = useState('');
+
+  useEffect(() => {
+    const token = localStorage.getItem('morph-auth') || '';
+    const load = () => {
+      fetch('/v2/claude/usage', { headers: { 'Authorization': `Bearer ${token}` } })
+        .then(r => r.json())
+        .then(d => { if (d.session) setUsage(d); })
+        .catch(() => {});
+    };
+    load();
+    const iv = setInterval(load, 60000);
+    return () => clearInterval(iv);
+  }, []);
+
+  useEffect(() => {
+    if (!usage?.session?.resetsAt) return;
+    const tick = () => {
+      const diff = new Date(usage.session.resetsAt!).getTime() - Date.now();
+      if (diff <= 0) { setCountdown('now'); return; }
+      const h = Math.floor(diff / 3600000);
+      const m = Math.floor((diff % 3600000) / 60000);
+      setCountdown(h > 0 ? `${h}h${m}m` : `${m}m`);
+    };
+    tick();
+    const iv = setInterval(tick, 30000);
+    return () => clearInterval(iv);
+  }, [usage?.session?.resetsAt]);
+
+  if (!usage) return null;
+
+  const barW = 56;
+  const barH = 4;
+  const barColor = '#555';
+  const trackColor = 'rgba(255,255,255,0.06)';
+
+  return (
+    <div style={{ position: 'absolute', top: 68, right: 12, zIndex: 3, pointerEvents: 'auto' }}>
+      <div style={{
+        backgroundColor: 'rgba(28,28,30,0.85)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+        borderRadius: 6, padding: '4px 8px', border: '1px solid rgba(255,255,255,0.06)',
+      }}>
+        {/* Session bar (5h) */}
+        <div style={{ marginBottom: 3 }}>
+          <div style={{ width: barW, height: barH, borderRadius: 2, backgroundColor: trackColor, overflow: 'hidden' }}>
+            <div style={{ width: `${Math.min(usage.session.pct, 100)}%`, height: '100%', borderRadius: 2, backgroundColor: barColor, transition: 'width 0.5s' }} />
+          </div>
+        </div>
+        {/* Weekly bar (7d) */}
+        <div>
+          <div style={{ width: barW, height: barH, borderRadius: 2, backgroundColor: trackColor, overflow: 'hidden' }}>
+            <div style={{ width: `${Math.min(usage.weekly.pct, 100)}%`, height: '100%', borderRadius: 2, backgroundColor: barColor, transition: 'width 0.5s' }} />
+          </div>
+        </div>
+        {/* Reset countdown */}
+        {countdown && <div style={{ fontSize: 7, color: '#444', textAlign: 'center' as const, marginTop: 2 }}>{countdown}</div>}
+      </div>
+    </div>
+  );
+}
+
 // Canvas overlay — renders all environment groups
 function SessionCards({ onSelect }: { onSelect: (sessionId: string, display?: string, relayUrl?: string) => void }) {
   const envs = getEnvironments();
@@ -833,6 +897,8 @@ export default function App() {
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
         {/* Canvas view */}
         <div style={{ flex: 1, display: tab === 'canvas' ? 'flex' : 'none', position: 'relative' }}>
+          {/* Usage widget — top right */}
+          <UsageWidget />
           {/* Session cards — floating overlay */}
           <SessionCards onSelect={(sid, display) => {
             setSessionMessages([]);

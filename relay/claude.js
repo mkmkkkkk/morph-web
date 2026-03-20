@@ -437,6 +437,48 @@ export function registerClaudeAPI(app, io, authMiddleware) {
     return { sessions };
   });
 
+  // ─── REST: Claude usage (session + weekly utilization) ───
+
+  app.get('/v2/claude/usage', { preHandler: authMiddleware }, async () => {
+    try {
+      const credsPath = join(homedir(), '.claude', '.credentials.json');
+      const creds = JSON.parse(readFileSync(credsPath, 'utf-8'));
+      const oauth = creds.claudeAiOauth;
+      if (!oauth?.accessToken) return { error: 'no_token' };
+
+      const resp = await fetch('https://api.anthropic.com/api/oauth/usage', {
+        headers: {
+          'Authorization': `Bearer ${oauth.accessToken}`,
+          'Content-Type': 'application/json',
+          'User-Agent': 'claude-code/2.1.38',
+          'anthropic-beta': 'oauth-2025-04-20',
+        },
+      });
+
+      if (!resp.ok) return { error: `http_${resp.status}` };
+      const data = await resp.json();
+
+      const parseUtil = (v) => {
+        if (typeof v === 'number') return v;
+        if (typeof v === 'string') return parseFloat(v.replace('%', '')) || 0;
+        return 0;
+      };
+
+      return {
+        session: {
+          pct: parseUtil(data.five_hour?.utilization),
+          resetsAt: data.five_hour?.resets_at || null,
+        },
+        weekly: {
+          pct: parseUtil(data.seven_day?.utilization),
+          resetsAt: data.seven_day?.resets_at || null,
+        },
+      };
+    } catch (e) {
+      return { error: e.message };
+    }
+  });
+
   // ─── Socket.IO: direct mode events ───
 
   io.on('connection', (socket) => {
