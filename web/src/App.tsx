@@ -82,7 +82,7 @@ function TerminalOverlay({ messages, visible }: { messages: Message[]; visible: 
     <div style={{
       flex: '1 1 0', minHeight: 0, overflowY: 'scroll', overflowX: 'hidden',
       display: 'flex', flexDirection: 'column-reverse',
-      borderTop: '1px solid rgba(255,255,255,0.08)', backgroundColor: '#0a0a0a',
+      borderTop: '1px solid rgba(255,255,255,0.08)', backgroundColor: '#111',
       WebkitOverflowScrolling: 'touch' as any,
       userSelect: 'text', WebkitUserSelect: 'text' as any,
     }}>
@@ -914,7 +914,7 @@ export default function App() {
           transform: terminalVisible ? 'translateY(0)' : 'translateY(100%)',
           transition: dragging.current ? 'none' : 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
           display: 'flex', flexDirection: 'column',
-          backgroundColor: '#0a0a0a',
+          backgroundColor: '#111',
           borderTopLeftRadius: 12, borderTopRightRadius: 12,
           boxShadow: terminalVisible ? '0 -4px 20px rgba(0,0,0,0.5)' : 'none',
         }}>
@@ -940,25 +940,33 @@ export default function App() {
             style={{
               display: 'flex', justifyContent: 'center', alignItems: 'center',
               padding: '10px 0 6px', cursor: 'grab', flexShrink: 0, touchAction: 'none',
+              backgroundColor: 'rgba(255,255,255,0.06)', borderBottom: '1px solid rgba(255,255,255,0.08)',
             }}
           >
-            <div style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.25)' }} />
+            <div style={{ width: 40, height: 5, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.45)' }} />
           </div>
-          <TerminalOverlay messages={messages} visible={true} />
-          {/* ESC button — bottom-right of terminal, only when open */}
-          <div style={{ padding: '4px 12px 6px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
-            <span style={{ marginRight: 8, color: '#888', fontSize: 11, fontFamily: 'Menlo, monospace' }}>
-              {isProcessing ? (() => {
-                const words = ['thinking...', 'pondering...', 'wondering...', 'reasoning...', 'considering...', 'analyzing...', 'processing...', 'compacting...'];
-                return words[Math.floor(Date.now() / 4000) % words.length];
-              })() : 'idle'}
-            </span>
-            <button tabIndex={-1} onClick={interrupt} style={{
-              padding: '3px 10px', borderRadius: 5, cursor: 'pointer', flexShrink: 0,
-              border: isProcessing ? '1px solid rgba(255,59,48,0.4)' : '1px solid rgba(255,255,255,0.1)',
-              backgroundColor: isProcessing ? 'rgba(255,59,48,0.15)' : 'transparent',
-              color: isProcessing ? '#ff453a' : '#555', fontSize: 11, fontFamily: 'Menlo, monospace',
-            }}>ESC</button>
+          <div style={{ flex: '1 1 0', minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
+            <TerminalOverlay messages={messages} visible={true} />
+            {/* ESC — floating overlay at bottom-right of terminal */}
+            <div style={{
+              position: 'absolute', bottom: 4, right: 8,
+              display: 'flex', alignItems: 'center', gap: 6,
+              pointerEvents: 'none',
+            }}>
+              <span style={{ color: '#444', fontSize: 11, fontFamily: 'Menlo, monospace' }}>
+                {isProcessing ? (() => {
+                  const words = ['thinking...', 'pondering...', 'wondering...', 'reasoning...', 'considering...', 'analyzing...', 'processing...', 'compacting...'];
+                  return words[Math.floor(Date.now() / 4000) % words.length];
+                })() : 'idle'}
+              </span>
+              <button tabIndex={-1} onClick={interrupt} style={{
+                padding: '3px 10px', borderRadius: 5, cursor: 'pointer', flexShrink: 0,
+                border: isProcessing ? '1px solid rgba(255,59,48,0.4)' : '1px solid rgba(255,255,255,0.08)',
+                backgroundColor: isProcessing ? 'rgba(255,59,48,0.15)' : 'rgba(17,17,17,0.7)',
+                color: isProcessing ? '#ff453a' : '#444', fontSize: 11, fontFamily: 'Menlo, monospace',
+                pointerEvents: 'auto',
+              }}>ESC</button>
+            </div>
           </div>
         </div>
       </div>
