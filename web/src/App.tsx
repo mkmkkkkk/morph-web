@@ -4,8 +4,9 @@ import { motion, AnimatePresence, useMotionValue } from 'framer-motion';
 import { connect, send, interrupt, clearSession, setCurrentTab, fetchSessions, onMessage, onState, getState, sendToSession, resumeSession, isSessionAlive, loadHistory, subscribe, subscribeSessionMessages, unsubscribeSessionMessages, addRelay, registerSession, type Message, type RelayConfig } from './lib/connection';
 import Sketch from './components/Sketch';
 
-// Cache-bust canvas.html on each page load (not per render)
-const BUILD_TS = Date.now().toString(36);
+// Cache-bust canvas.html per build (not per page load) — allows HTTP caching across reloads
+declare const __BUILD_TIME__: string;
+const BUILD_TS = typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : Date.now().toString(36);
 
 // Module-level constant — avoids array allocation on every render
 const IDLE_WORDS = ['thinking...', 'pondering...', 'wondering...', 'reasoning...', 'considering...', 'analyzing...', 'processing...', 'compacting...'];
@@ -888,6 +889,7 @@ export default function App() {
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [selectedSession, setSelectedSession] = useState<{ id: string; display: string; relayUrl?: string; relayToken?: string; project?: string; envId?: string } | null>(null);
   const [sessionMessages, setSessionMessages] = useState<Message[]>([]);
+  const [hasVisitedConfig, setHasVisitedConfig] = useState(false);
   const liveSessionIdRef = useRef<string | null>(null); // tracks active process ID after resume;
   const idleTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const inputBarRef = useRef<HTMLDivElement>(null);
@@ -909,33 +911,37 @@ export default function App() {
     return () => { vv.removeEventListener('resize', onResize); clearTimeout(t); };
   }, []);
 
-  // Preload all session histories into cache on mount
+  // Preload all session histories into cache — deferred so cold load is not competing
   const sessionCache = useRef<Map<string, Message[]>>(new Map());
   useEffect(() => {
     if (!authed) return;
     const token = localStorage.getItem('morph-auth') || '';
-    fetch('/v2/claude/sessions?limit=30', { headers: { 'Authorization': `Bearer ${token}` } })
-      .then(r => r.json())
-      .then(d => {
-        const sessions = (d.sessions || []).filter((s: any) => s.id !== 'a0a0a0a0-0e00-4000-a000-000000000002');
-        // Preload each session's history (staggered to avoid burst)
-        sessions.forEach((s: any, i: number) => {
-          setTimeout(() => {
-            fetch(`/v2/claude/history/${s.id}?limit=50`, { headers: { 'Authorization': `Bearer ${token}` } })
-              .then(r => r.json())
-              .then(d => {
-                const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-                const msgs = (d.messages || []).map((m: any) => ({
-                  id: uid(), role: m.role, type: m.type, content: m.content, name: m.name,
-                  ts: m.ts ? new Date(m.ts).getTime() : Date.now(),
-                }));
-                sessionCache.current.set(s.id, msgs);
-              })
-              .catch(() => {});
-          }, i * 100); // 100ms stagger
-        });
-      })
-      .catch(() => {});
+    // Delay start by 1.5s to let cold load and first session switch finish first
+    const startTimer = setTimeout(() => {
+      fetch('/v2/claude/sessions?limit=30', { headers: { 'Authorization': `Bearer ${token}` } })
+        .then(r => r.json())
+        .then(d => {
+          const sessions = (d.sessions || []).filter((s: any) => s.id !== 'a0a0a0a0-0e00-4000-a000-000000000002');
+          // Stagger individual fetches to avoid burst
+          sessions.forEach((s: any, i: number) => {
+            setTimeout(() => {
+              fetch(`/v2/claude/history/${s.id}?limit=50`, { headers: { 'Authorization': `Bearer ${token}` } })
+                .then(r => r.json())
+                .then(d => {
+                  const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                  const msgs = (d.messages || []).map((m: any) => ({
+                    id: uid(), role: m.role, type: m.type, content: m.content, name: m.name,
+                    ts: m.ts ? new Date(m.ts).getTime() : Date.now(),
+                  }));
+                  sessionCache.current.set(s.id, msgs);
+                })
+                .catch(() => {});
+            }, i * 150); // 150ms stagger
+          });
+        })
+        .catch(() => {});
+    }, 1500);
+    return () => clearTimeout(startTimer);
   }, [authed]);
 
   // Pull server-defined environments from relay (runs once after auth)
@@ -1120,7 +1126,7 @@ export default function App() {
 
   const toggleTerminal = () => { setTerminalVisible(v => !v); setHasNew(false); };
 
-  const handleTab = (t: string) => { setTab(t); setCurrentTab(t); if (t === 'config') setTerminalVisible(false); };
+  const handleTab = (t: string) => { setTab(t); setCurrentTab(t); if (t === 'config') { setTerminalVisible(false); setHasVisitedConfig(true); } };
 
   const handleSend = useCallback((text: string) => {
     if (text === '/clear') { setMessages([]); setIsProcessing(false); clearSession(); mainFlow.clearPending(); return; }
@@ -1144,7 +1150,7 @@ export default function App() {
           <UsageWidget />
           {/* Session cards — floating overlay */}
           <SessionCards onSelect={(sid, display, relayUrl, relayToken, project, envId) => {
-            setSessionMessages([]);
+            setSessionMessages(sessionCache.current.get(sid) || []);
             setSelectedSession({ id: sid, display: display || sid.slice(0, 8), relayUrl, relayToken, project, envId });
           }} />
           {/* Canvas iframe — fills full area */}
@@ -1161,14 +1167,14 @@ export default function App() {
           </div>
         </div>
 
-        {/* Config content */}
-        <div style={{ flex: 1, display: tab === 'config' ? 'flex' : 'none', overflow: 'hidden', flexDirection: 'column' }}>
+        {/* Config content — lazy-mounted: only rendered after first visit */}
+        {hasVisitedConfig && <div style={{ flex: 1, display: tab === 'config' ? 'flex' : 'none', overflow: 'hidden', flexDirection: 'column' }}>
           <ConfigTab connState={connState} onQuickAction={(prompt) => {
             send(prompt);
             setTab('canvas'); setCurrentTab('canvas');
             setTerminalVisible(true);
           }} onRefresh={() => { if (connState !== 'connected') connect(); }} />
-        </div>
+        </div>}
 
         {/* Origin Terminal — always on top of Canvas UI */}
         <div ref={terminalDivRef} style={{
