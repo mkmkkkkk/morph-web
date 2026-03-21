@@ -986,6 +986,8 @@ export default function App() {
   const [hasVisitedConfig, setHasVisitedConfig] = useState(false);
   const liveSessionIdRef = useRef<string | null>(null); // tracks active process ID after resume
   const sessionAliveCache = useRef<Map<string, { alive: boolean; ts: number }>>(new Map());
+  const sessionSendQueue = useRef<Array<() => Promise<void>>>([]);
+  const sessionSendBusy = useRef(false);
   const idleTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const [sessionIsProcessing, setSessionIsProcessing] = useState(false);
   const sessionIdleTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -1339,6 +1341,8 @@ export default function App() {
           <SessionCards
             onSelect={(sid, display, relayUrl, relayToken, project, envId) => {
               setSessionMessages(sessionCache.current.get(sid) || []);
+              sessionSendQueue.current = [];
+              sessionSendBusy.current = false;
               setSelectedSession({ id: sid, display: display || sid.slice(0, 8), relayUrl, relayToken, project, envId });
             }}
             onNewSession={(envId, relayUrl, relayToken) => {
@@ -1346,6 +1350,8 @@ export default function App() {
               if (envId !== 'workspace') registerSession(sid, envId);
               setSessionMessages([]);
               liveSessionIdRef.current = null;
+              sessionSendQueue.current = [];
+              sessionSendBusy.current = false;
               setSelectedSession({ id: sid, display: 'New Session', relayUrl, relayToken, envId });
             }}
           />
@@ -1537,48 +1543,67 @@ export default function App() {
               // Show user message immediately
               const msgId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
               setSessionMessages(prev => [...prev, { id: msgId, role: 'user', type: 'text', content: text, ts: Date.now(), pending: true }]);
-              try {
-                // Use live session ID (updated after resume) to avoid spawning new process on every send
-                const liveId = liveSessionIdRef.current || selectedSession.id;
-                const token = selectedSession.relayToken || localStorage.getItem('morph-auth') || '';
-                const base = selectedSession.relayUrl || '';
-                // Use pre-fetched alive status (5s TTL) to skip the blocking check on first send
-                const ALIVE_TTL = 5_000;
-                const cachedAlive = sessionAliveCache.current.get(liveId);
-                const aliveFast = cachedAlive && Date.now() - cachedAlive.ts < ALIVE_TTL && cachedAlive.alive;
-                if (aliveFast) {
-                  await sendToSession(liveId, text);
-                } else {
-                  const checkRes = await fetch(`${base}/v2/claude/active`, { headers: { 'Authorization': `Bearer ${token}` } });
-                  const checkData = await checkRes.json();
-                  const alive = (checkData.sessions || []).find((s: any) => s.id === liveId && s.alive);
-                  if (alive) {
+
+              // Capture session snapshot for the queued closure
+              const snapSession = selectedSession;
+
+              const doSend = async () => {
+                try {
+                  // Use live session ID (updated after resume) to avoid spawning new process on every send
+                  const liveId = liveSessionIdRef.current || snapSession.id;
+                  const token = snapSession.relayToken || localStorage.getItem('morph-auth') || '';
+                  const base = snapSession.relayUrl || '';
+                  // Use pre-fetched alive status (5s TTL) to skip the blocking check on first send
+                  const ALIVE_TTL = 5_000;
+                  const cachedAlive = sessionAliveCache.current.get(liveId);
+                  const aliveFast = cachedAlive && Date.now() - cachedAlive.ts < ALIVE_TTL && cachedAlive.alive;
+                  if (aliveFast) {
                     await sendToSession(liveId, text);
                   } else {
-                    const newSid = await resumeSession(selectedSession.id, text);
-                    liveSessionIdRef.current = newSid; // track resumed process ID for subsequent sends
-                    // Update subscription if session ID changed (subscribeSessionMessages auto-cleans old)
-                    if (newSid !== selectedSession.id) {
-                      subscribeSessionMessages(newSid, (msg) => {
-                        setSessionMessages(prev => {
-                          if (msg.role === 'agent' && msg.type === 'text') {
-                            const lastIdx = prev.length - 1;
-                            if (lastIdx >= 0 && prev[lastIdx].role === 'agent' && prev[lastIdx].type === 'text') {
-                              const next = [...prev];
-                              next[lastIdx] = { ...next[lastIdx], content: msg.content };
-                              return next;
+                    const checkRes = await fetch(`${base}/v2/claude/active`, { headers: { 'Authorization': `Bearer ${token}` } });
+                    const checkData = await checkRes.json();
+                    const alive = (checkData.sessions || []).find((s: any) => s.id === liveId && s.alive);
+                    if (alive) {
+                      sessionAliveCache.current.set(liveId, { alive: true, ts: Date.now() });
+                      await sendToSession(liveId, text);
+                    } else {
+                      const newSid = await resumeSession(snapSession.id, text);
+                      liveSessionIdRef.current = newSid; // track resumed process ID for subsequent sends
+                      sessionAliveCache.current.set(newSid, { alive: true, ts: Date.now() });
+                      // Update subscription if session ID changed (subscribeSessionMessages auto-cleans old)
+                      if (newSid !== snapSession.id) {
+                        subscribeSessionMessages(newSid, (msg) => {
+                          setSessionMessages(prev => {
+                            if (msg.role === 'agent' && msg.type === 'text') {
+                              const lastIdx = prev.length - 1;
+                              if (lastIdx >= 0 && prev[lastIdx].role === 'agent' && prev[lastIdx].type === 'text') {
+                                const next = [...prev];
+                                next[lastIdx] = { ...next[lastIdx], content: msg.content };
+                                return next;
+                              }
                             }
-                          }
-                          return [...prev, msg];
+                            return [...prev, msg];
+                          });
                         });
-                      });
+                      }
                     }
                   }
+                  // Confirm sent
+                  setSessionMessages(prev => prev.map(m => m.id === msgId ? { ...m, pending: false } : m));
+                } catch (err: any) {
+                  setSessionMessages(prev => [...prev, { id: `${Date.now()}`, role: 'system', type: 'error', content: (err as Error).message || 'Send failed', ts: Date.now() }]);
                 }
-                // Confirm sent
-                setSessionMessages(prev => prev.map(m => m.id === msgId ? { ...m, pending: false } : m));
-              } catch (err: any) {
-                setSessionMessages(prev => [...prev, { id: `${Date.now()}`, role: 'system', type: 'error', content: err.message || 'Send failed', ts: Date.now() }]);
+              };
+
+              // Serialize sends — prevents concurrent resume race when session is dead
+              sessionSendQueue.current.push(doSend);
+              if (!sessionSendBusy.current) {
+                sessionSendBusy.current = true;
+                while (sessionSendQueue.current.length > 0) {
+                  const fn = sessionSendQueue.current.shift()!;
+                  await fn();
+                }
+                sessionSendBusy.current = false;
               }
             }}
             keyboardOpen={keyboardOpen}
