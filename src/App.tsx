@@ -774,7 +774,7 @@ function TabBar({ tab, onTab, disabled }: { tab: string; onTab: (t: string) => v
 }
 
 // ─── Session Terminal (slide-in from right, swipe to go back) ───
-function SessionTerminal({ session, messages, onBack, onSend, onInterrupt, keyboardOpen, isProcessing = false }: {
+function SessionTerminal({ session, messages, onBack, onSend, onInterrupt, keyboardOpen, isProcessing = false, isCompacting = false }: {
   session: { id: string; display: string };
   messages: Message[];
   onBack: () => void;
@@ -782,6 +782,7 @@ function SessionTerminal({ session, messages, onBack, onSend, onInterrupt, keybo
   onInterrupt: () => void;
   keyboardOpen?: boolean;
   isProcessing?: boolean;
+  isCompacting?: boolean;
 }) {
   const dragX = useMotionValue(0);
   const swipeStart = useRef<{ x: number } | null>(null);
@@ -1441,6 +1442,7 @@ export default function App() {
             session={selectedSession}
             messages={sessionMessages}
             isProcessing={sessionIsProcessing}
+            isCompacting={isCompacting}
             onBack={() => setSelectedSession(null)}
             onInterrupt={() => interruptSession(liveSessionIdRef.current || selectedSession.id)}
             onSend={async (text) => {
