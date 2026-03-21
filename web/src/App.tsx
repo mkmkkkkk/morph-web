@@ -1228,6 +1228,7 @@ export default function App() {
       mainFlow.handleSend(`[ctx: ${selectedSession.display} · ${envId} · ${selectedSession.id.slice(0, 8)}]\n${text}`);
     } else {
       mainFlow.handleSend(text);
+      setTerminalVisible(true); // auto-expand terminal so user sees the response
     }
   }, [selectedSession, mainFlow]);
 
