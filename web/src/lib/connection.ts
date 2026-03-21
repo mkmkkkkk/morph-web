@@ -404,3 +404,13 @@ export function subscribeSessionMessages(sid: string, cb: Listener) {
 export function unsubscribeSessionMessages() {
   if (_sessionUnsub) { _sessionUnsub(); _sessionUnsub = null; }
 }
+
+// Bypass socket.io reconnection delay when page comes back to foreground
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    for (const [, conn] of relayConns) {
+      if (conn.socket && !conn.socket.connected) conn.socket.connect();
+    }
+  });
+}
