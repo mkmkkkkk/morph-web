@@ -43,19 +43,14 @@
         if (style.overflowY === 'scroll' || style.overflowY === 'auto') {
           if (el.scrollHeight > el.clientHeight) {
             var dy = e.touches[0].clientY - _touchStartY;
-            // column-reverse: scrollTop=0 at bottom (latest), negative at top (oldest)
-            // Normal: scrollTop=0 at top, positive going down
+            // column-reverse containers (terminal): scrollTop sign differs between
+            // Chrome (negative) and Safari (positive) — skip boundary blocking entirely
+            // and let native scroll work. Only block on normal containers.
             var colRev = window.getComputedStyle(el).flexDirection === 'column-reverse';
-            var atStart, atEnd;
-            if (colRev) {
-              atStart = el.scrollTop >= 0;  // at bottom (latest)
-              atEnd = el.scrollTop <= -(el.scrollHeight - el.clientHeight);  // at top (oldest)
-            } else {
-              atStart = el.scrollTop <= 0;
-              atEnd = el.scrollTop + el.clientHeight >= el.scrollHeight;
-            }
-            if ((dy > 0 && atStart) || (dy < 0 && atEnd)) {
-              e.preventDefault();
+            if (!colRev) {
+              if ((dy > 0 && el.scrollTop <= 0) || (dy < 0 && el.scrollTop + el.clientHeight >= el.scrollHeight)) {
+                e.preventDefault();
+              }
             }
             return;
           }
