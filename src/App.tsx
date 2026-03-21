@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, useMotionValue } from 'framer-motion';
-import { connect, send, interrupt, interruptSession, clearSession, setCurrentTab, fetchSessions, onMessage, onState, getState, sendToSession, resumeSession, isSessionAlive, loadHistory, subscribe, subscribeSessionMessages, unsubscribeSessionMessages, addRelay, registerSession, type Message, type RelayConfig } from './lib/connection';
+import { connect, send, interrupt, interruptSession, clearSession, setCurrentTab, fetchSessions, onMessage, onState, onCompact, getState, sendToSession, resumeSession, isSessionAlive, loadHistory, subscribe, subscribeSessionMessages, unsubscribeSessionMessages, addRelay, registerSession, type Message, type RelayConfig } from './lib/connection';
 import Sketch from './components/Sketch';
 
 // Cache-bust canvas.html per build (not per page load) — allows HTTP caching across reloads
@@ -838,9 +838,9 @@ function SessionTerminal({ session, messages, onBack, onSend, onInterrupt, keybo
       {/* Messages + ESC overlay */}
       <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
         <TerminalOverlay messages={messages} visible={true} />
-        {(() => { const w = isProcessing ? IDLE_WORDS[Math.floor(Date.now() / 4000) % IDLE_WORDS.length] : 'idle'; return (
+        {(() => { const w = isCompacting ? 'compacting...' : isProcessing ? IDLE_WORDS[Math.floor(Date.now() / 4000) % IDLE_WORDS.length] : 'idle'; return (
         <div style={{ position: 'absolute', bottom: 4, right: 8, display: 'flex', alignItems: 'center', gap: 6, pointerEvents: 'none' }}>
-          <span style={{ color: '#444', fontSize: 11, fontFamily: 'Menlo, monospace' }}>
+          <span style={{ color: isCompacting ? '#3a8eff' : '#444', fontSize: 11, fontFamily: 'Menlo, monospace' }}>
             {w}
           </span>
           <button tabIndex={-1} onClick={onInterrupt} style={{
@@ -917,6 +917,8 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [connState, setConnState] = useState(getState());
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isCompacting, setIsCompacting] = useState(false);
+  const compactTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [canvasLoaded, setCanvasLoaded] = useState(false);
   const mainFlow = useSendFlow(send);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
@@ -1196,8 +1198,13 @@ export default function App() {
       idleTimer.current = setTimeout(() => setIsProcessing(false), 30000);
     });
     const unsub2 = onState(setConnState);
+    const unsub3 = onCompact(() => {
+      setIsCompacting(true);
+      if (compactTimer.current) clearTimeout(compactTimer.current);
+      compactTimer.current = setTimeout(() => setIsCompacting(false), 4000);
+    });
     connect();
-    return () => { unsub1(); unsub2(); clearTimeout(idleTimer.current); };
+    return () => { unsub1(); unsub2(); unsub3(); clearTimeout(idleTimer.current); if (compactTimer.current) clearTimeout(compactTimer.current); };
   }, [authed]);
 
   const [terminalVisible, setTerminalVisible] = useState(false);
@@ -1245,16 +1252,14 @@ export default function App() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', maxWidth: 600, margin: '0 auto', width: '100%' }}>
-      {/* Reconnecting toast */}
+      {/* Reconnecting indicator */}
       {connState !== 'connected' && (
         <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, zIndex: 99999,
-          background: 'rgba(255,159,10,0.95)', backdropFilter: 'blur(8px)',
-          color: '#000', fontSize: 13, fontWeight: 600,
-          textAlign: 'center', padding: '10px 16px',
-          paddingTop: 'max(10px, env(safe-area-inset-top))',
+          position: 'fixed', top: 'max(8px, env(safe-area-inset-top))', right: 12, zIndex: 99999,
+          color: '#f5a623', fontSize: 11, fontFamily: 'Menlo, monospace',
+          pointerEvents: 'none',
         }}>
-          {connState === 'connecting' ? 'Reconnecting...' : 'Relay disconnected — reconnecting...'}
+          reconnecting...
         </div>
       )}
       {/* Content area — tab-specific, always full height */}
@@ -1343,13 +1348,13 @@ export default function App() {
           <div style={{ flex: '1 1 0', minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
             <TerminalOverlay messages={messages} visible={true} />
             {/* ESC — floating overlay at bottom-right of terminal */}
-            {(() => { const w = isProcessing ? IDLE_WORDS[Math.floor(Date.now() / 4000) % IDLE_WORDS.length] : 'idle'; return (
+            {(() => { const w = isCompacting ? 'compacting...' : isProcessing ? IDLE_WORDS[Math.floor(Date.now() / 4000) % IDLE_WORDS.length] : 'idle'; return (
             <div style={{
               position: 'absolute', bottom: 4, right: 8,
               display: 'flex', alignItems: 'center', gap: 6,
               pointerEvents: 'none',
             }}>
-              <span style={{ color: '#444', fontSize: 11, fontFamily: 'Menlo, monospace' }}>
+              <span style={{ color: isCompacting ? '#3a8eff' : '#444', fontSize: 11, fontFamily: 'Menlo, monospace' }}>
                 {w}
               </span>
               <button tabIndex={-1} onClick={interrupt} style={{

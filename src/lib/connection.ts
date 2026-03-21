@@ -38,6 +38,7 @@ const relayConns = new Map<string, RelayConn>();
 const sessionRelayMap = new Map<string, string>(); // sessionId → relayId
 const sessionListeners = new Map<string, Set<Listener>>();
 const stateListeners = new Set<StateListener>(); // global (tracks primary relay)
+const compactListeners = new Set<() => void>();
 
 // ─── Relay accessors ───
 function primaryToken() { return localStorage.getItem('morph-auth') || ''; }
@@ -150,6 +151,7 @@ function connectRelaySocket(relayId: string): void {
   });
   conn.socket.on('disconnect', () => setConnState('disconnected'));
   conn.socket.on('connect_error', () => setConnState('error'));
+  conn.socket.on('claude-compact', () => compactListeners.forEach(fn => fn()));
 
   conn.socket.on('claude-output', (data: any) => {
     const sid = data?.sessionId;
@@ -395,6 +397,7 @@ export function clearSession() {
 // ─── Legacy compat ───
 export function onMessage(fn: Listener) { return subscribe(FIXED_SESSION, fn); }
 export function onState(fn: StateListener) { stateListeners.add(fn); return () => { stateListeners.delete(fn); }; }
+export function onCompact(fn: () => void) { compactListeners.add(fn); return () => { compactListeners.delete(fn); }; }
 export function getState(): ConnectionState { return ensurePrimary().state; }
 export function getSessionId() { return FIXED_SESSION; }
 
