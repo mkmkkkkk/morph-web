@@ -1399,7 +1399,7 @@ export default function App() {
             }}
             onTouchEnd={() => {
               const h = dragCurrentH.current;
-              if (h < 25) { setTerminalVisible(false); setTerminalHeight(40); }
+              if (h < 8) { setTerminalVisible(false); setTerminalHeight(40); }
               else { setTerminalHeight(h); }
               dragging.current = false;
             }}
