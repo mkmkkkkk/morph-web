@@ -44,21 +44,56 @@ function useSendFlow(sendFn: (msg: string) => void) {
     })();
   }, [sendFn, pendingSketch, pendingFile]);
 
-  const uploadFile = useCallback((accept: string) => {
-    setAttachMenu(false);
-    const input = document.createElement('input');
-    input.type = 'file'; input.accept = accept;
-    input.onchange = async (e: any) => {
-      const f = e.target?.files?.[0]; if (!f) return;
+  // Pre-configured hidden inputs — never mutate accept at click time (eliminates iOS picker delay)
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    const makeInput = (accept: string, handler: (f: File) => Promise<void>) => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = accept;
+      input.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;opacity:0';
+      const onChange = async (e: Event) => {
+        const f = (e.target as HTMLInputElement).files?.[0];
+        if (!f) return;
+        await handler(f);
+        input.value = '';
+      };
+      input.addEventListener('change', onChange);
+      document.body.appendChild(input);
+      return { input, onChange };
+    };
+
+    const uploadHandler = (isImage: boolean) => async (f: File) => {
       const b64: string = await new Promise(r => { const rd = new FileReader(); rd.onload = () => r((rd.result as string).split(',')[1]); rd.readAsDataURL(f); });
       try {
         const token = localStorage.getItem('morph-auth') || '';
         const res = await fetch('/v2/claude/upload', { method: 'POST', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ filename: f.name, base64: b64, mime: f.type }) });
         const data = await res.json();
-        if (data.path) setPendingFile({ path: data.path, isImage: f.type.startsWith('image/') });
+        if (data.path) setPendingFile({ path: data.path, isImage: isImage || f.type.startsWith('image/') });
       } catch {}
     };
-    input.click();
+
+    const { input: photoInput, onChange: photoHandler } = makeInput('image/*', uploadHandler(true));
+    const { input: fileInput, onChange: fileHandler } = makeInput('.pdf,.md,.txt,.csv,.json,.py,.js,.ts,.jsx,.tsx', uploadHandler(false));
+    photoInputRef.current = photoInput;
+    fileInputRef.current = fileInput;
+
+    return () => {
+      photoInput.removeEventListener('change', photoHandler);
+      fileInput.removeEventListener('change', fileHandler);
+      document.body.removeChild(photoInput);
+      document.body.removeChild(fileInput);
+    };
+  }, []);
+
+  const uploadFile = useCallback((accept: string) => {
+    // Pick pre-configured input — no accept mutation at click time
+    const input = accept === 'image/*' ? photoInputRef.current : fileInputRef.current;
+    if (!input) return;
+    input.click(); // MUST be before state update on iOS
+    setAttachMenu(false);
   }, []);
 
   const handleSketchInsert = useCallback((dataUrl: string, bounds: { x: number; y: number; w: number; h: number }) => {
@@ -783,7 +818,8 @@ function SessionTerminal({ session, messages, onBack, onSend, keyboardOpen }: {
               boxShadow: '0 8px 40px rgba(0,0,0,0.6)', border: '1px solid rgba(224,160,48,0.15)',
               transformOrigin: 'bottom left' }}>
             {[
-              { label: 'Attach File', icon: (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>), action: () => flow.uploadFile('image/*,.pdf,.md,.txt,.csv,.json,.py,.js,.ts,.jsx,.tsx') },
+              { label: 'Add Photo', icon: (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>), action: () => flow.uploadFile('image/*') },
+              { label: 'Attach File', icon: (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>), action: () => flow.uploadFile('.pdf,.md,.txt,.csv,.json,.py,.js,.ts,.jsx,.tsx') },
               { label: 'Sketch', icon: (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>), action: () => { flow.setAttachMenu(false); flow.setSketchOpen(true); } },
             ].map((item, i) => (
               <div key={item.label}>
@@ -1141,7 +1177,8 @@ export default function App() {
             }}
           >
             {[
-              { label: 'Attach File', icon: (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>), action: () => mainFlow.uploadFile('image/*,.pdf,.md,.txt,.csv,.json,.py,.js,.ts,.jsx,.tsx') },
+              { label: 'Add Photo', icon: (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 01-2 2H3a2 2 0 01-2-2V8a2 2 0 012-2h4l2-3h6l2 3h4a2 2 0 012 2z"/><circle cx="12" cy="13" r="4"/></svg>), action: () => mainFlow.uploadFile('image/*') },
+              { label: 'Attach File', icon: (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>), action: () => mainFlow.uploadFile('.pdf,.md,.txt,.csv,.json,.py,.js,.ts,.jsx,.tsx') },
               { label: 'Sketch', icon: (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>), action: () => { mainFlow.setAttachMenu(false); mainFlow.setSketchOpen(true); } },
             ].map((item, i) => (
               <motion.div key={item.label}
