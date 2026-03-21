@@ -358,14 +358,15 @@ const timeAgo = (ms: number) => {
 const envSessionsCache = new Map<string, { data: any; ts: number }>();
 
 // Reusable environment group — renders session cards for one environment
-function EnvironmentGroup({ env, onSelect, maxVisible }: { env: EnvConfig; onSelect: (sessionId: string, display?: string, relayUrl?: string, relayToken?: string, project?: string, envId?: string) => void; maxVisible?: number }) {
+function EnvironmentGroup({ env, onSelect, maxVisible, initialExpanded = true }: { env: EnvConfig; onSelect: (sessionId: string, display?: string, relayUrl?: string, relayToken?: string, project?: string, envId?: string) => void; maxVisible?: number; initialExpanded?: boolean }) {
   const [sessions, setSessions] = useState<any[]>([]);
   const [viewed, setViewed] = useState<Set<string>>(getViewed);
   const [pinned, setPinned] = useState<Set<string>>(() => getPinned(env.id));
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(initialExpanded);
   const limit = maxVisible ?? env.maxSessions;
 
   useEffect(() => {
+    if (!expanded) return; // skip fetch while collapsed — will run on first expand
     const base = env.relayUrl || '';
     const token = env.token || localStorage.getItem('morph-auth') || '';
     const cacheKey = `${env.id}:${env.relayUrl}:${limit}`;
@@ -389,7 +390,7 @@ function EnvironmentGroup({ env, onSelect, maxVisible }: { env: EnvConfig; onSel
         applyRaw(d);
       })
       .catch(() => setSessions([]));
-  }, [env.id, env.relayUrl, limit]);
+  }, [env.id, env.relayUrl, limit, expanded]);
 
   const dotColor = (s: any) => {
     if (s.active) return '#30d158';
@@ -550,8 +551,8 @@ function SessionCards({ onSelect }: { onSelect: (sessionId: string, display?: st
   }, []);
   return (
     <div style={{ position: 'absolute', top: 90, left: 0, right: 0, bottom: 0, zIndex: 2, padding: '0 8px', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
-      {envs.map(env => (
-        <EnvironmentGroup key={env.id} env={env} onSelect={onSelect} />
+      {envs.map((env, idx) => (
+        <EnvironmentGroup key={env.id} env={env} onSelect={onSelect} initialExpanded={idx === 0} />
       ))}
     </div>
   );
@@ -927,6 +928,7 @@ export default function App() {
 
   // Preload all session histories into cache — deferred so cold load is not competing
   const sessionCache = useRef<Map<string, Message[]>>(new Map());
+  const sessionCacheTs = useRef<Map<string, number>>(new Map());
   useEffect(() => {
     if (!authed) return;
     const token = localStorage.getItem('morph-auth') || '';
@@ -948,6 +950,7 @@ export default function App() {
                     ts: m.ts ? new Date(m.ts).getTime() : Date.now(),
                   }));
                   sessionCache.current.set(s.id, msgs);
+                  sessionCacheTs.current.set(s.id, Date.now());
                 })
                 .catch(() => {});
             }, i * 150); // 150ms stagger
@@ -1018,18 +1021,33 @@ export default function App() {
     const base = selectedSession.relayUrl || '';
     const cwdParam = selectedSession.project ? `&cwd=${encodeURIComponent(selectedSession.project)}` : '';
     const abortCtrl = new AbortController();
-    fetch(`${base}/v2/claude/history/${selectedSession.id}?limit=50${cwdParam}`, { headers: { 'Authorization': `Bearer ${token}` }, signal: abortCtrl.signal })
-      .then(r => r.json())
-      .then(d => {
-        const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-        const msgs = (d.messages || []).map((m: any) => ({
-          id: uid(), role: m.role, type: m.type, content: m.content, name: m.name,
-          ts: m.ts ? new Date(m.ts).getTime() : Date.now(),
-        }));
-        setSessionMessages(prev => [...msgs, ...prev.filter(m => m.pending)]);
-        sessionCache.current.set(selectedSession.id, msgs);
-      })
-      .catch(() => {});
+    // Stale-while-revalidate: fresh cache (< 60s) → defer fetch off critical path
+    const HISTORY_TTL = 60_000;
+    const cacheTs = sessionCacheTs.current.get(selectedSession.id);
+    const freshCache = !!cacheTs && Date.now() - cacheTs < HISTORY_TTL;
+    let idleCbHandle: number | ReturnType<typeof setTimeout> | null = null;
+    const doFetch = () => {
+      fetch(`${base}/v2/claude/history/${selectedSession.id}?limit=50${cwdParam}`, { headers: { 'Authorization': `Bearer ${token}` }, signal: abortCtrl.signal })
+        .then(r => r.json())
+        .then(d => {
+          const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+          const msgs = (d.messages || []).map((m: any) => ({
+            id: uid(), role: m.role, type: m.type, content: m.content, name: m.name,
+            ts: m.ts ? new Date(m.ts).getTime() : Date.now(),
+          }));
+          setSessionMessages(prev => [...msgs, ...prev.filter(m => m.pending)]);
+          sessionCache.current.set(selectedSession.id, msgs);
+          sessionCacheTs.current.set(selectedSession.id, Date.now());
+        })
+        .catch(() => {});
+    };
+    if (freshCache) {
+      idleCbHandle = typeof requestIdleCallback !== 'undefined'
+        ? requestIdleCallback(doFetch, { timeout: 5000 })
+        : setTimeout(doFetch, 100);
+    } else {
+      doFetch();
+    }
     // Pre-fetch alive status so first send skips the blocking check
     fetch(`${base}/v2/claude/active`, { headers: { 'Authorization': `Bearer ${token}` } })
       .then(r => r.json())
@@ -1070,13 +1088,22 @@ export default function App() {
           .catch(() => {});
       }
     });
-    return () => { abortCtrl.abort(); unsubscribeSessionMessages(); };
+    return () => {
+      abortCtrl.abort();
+      if (idleCbHandle !== null) {
+        typeof cancelIdleCallback !== 'undefined'
+          ? cancelIdleCallback(idleCbHandle as number)
+          : clearTimeout(idleCbHandle as ReturnType<typeof setTimeout>);
+      }
+      unsubscribeSessionMessages();
+    };
   }, [selectedSession?.id]);
 
   // Keep sessionCache in sync so re-entry shows latest messages
   useEffect(() => {
     if (selectedSession && sessionMessages.length > 0) {
       sessionCache.current.set(selectedSession.id, sessionMessages);
+      sessionCacheTs.current.set(selectedSession.id, Date.now());
     }
   }, [sessionMessages, selectedSession?.id]);
 
