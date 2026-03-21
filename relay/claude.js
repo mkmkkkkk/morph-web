@@ -24,7 +24,7 @@ const MAX_CONCURRENT_SESSIONS = 6;
 // Cache for listClaudeSessions — avoids re-scanning filesystem on every request
 let _sessionsCache = null;
 let _sessionsCacheTs = 0;
-const SESSIONS_CACHE_TTL = 3000; // 3s
+const SESSIONS_CACHE_TTL = 30000; // 30s — matches client-side envSessionsCache TTL
 
 // ─── Live session detection ───
 // Returns set of session IDs that have open .jsonl file handles.
