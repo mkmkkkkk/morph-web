@@ -933,22 +933,12 @@ export default function App() {
       .then(data => {
         if (!Array.isArray(data.environments) || data.environments.length === 0) return;
         const current = getEnvironments();
-        // Remove stale direct-URL entries — all relays now go through /relay-proxy/
-        const purged = current.filter(e => !e.relayUrl?.startsWith('http'));
-        let changed = purged.length !== current.length;
-        const merged = [...purged];
+        // Full-replace server-managed envs (by id) to avoid ghost accumulation
+        const serverIds = new Set(data.environments.map((e: any) => e.id).filter(Boolean));
+        const merged = current.filter(e => !serverIds.has(e.id));
         for (const env of data.environments) {
           if (!env.relayUrl) continue;
-          const existingIdx = merged.findIndex(e => e.id === env.id || e.relayUrl === env.relayUrl);
-          if (existingIdx >= 0) {
-            // Update label/url in case they changed
-            merged[existingIdx] = { ...merged[existingIdx], relayUrl: env.relayUrl, label: env.label || merged[existingIdx].label };
-            changed = true;
-          } else {
-            merged.push({ id: env.id || `env_${Date.now()}`, label: env.label || env.relayUrl, relayUrl: env.relayUrl, token: env.token || undefined, maxSessions: env.maxSessions || 6 });
-            changed = true;
-          }
-          // Establish socket.io connection to proxy relay (uses primary token, proxy rewrites it)
+          merged.push({ id: env.id || `env_${Date.now()}`, label: env.label || env.relayUrl, relayUrl: env.relayUrl, token: env.token || undefined, maxSessions: env.maxSessions || 6 });
           const relayConfig: RelayConfig = {
             id: env.id,
             url: env.relayUrl,
@@ -958,7 +948,7 @@ export default function App() {
           };
           addRelay(relayConfig);
         }
-        if (changed) saveEnvironments(merged);
+        saveEnvironments(merged);
       })
       .catch(() => {});
   }, [authed]);
