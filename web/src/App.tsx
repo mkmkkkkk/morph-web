@@ -1111,7 +1111,12 @@ export default function App() {
 
   const handleSend = (text: string) => {
     if (text === '/clear') { setMessages([]); setIsProcessing(false); clearSession(); mainFlow.clearPending(); return; }
-    mainFlow.handleSend(text);
+    if (selectedSession) {
+      const envId = selectedSession.relayUrl?.match(/\/relay-proxy\/([^/]+)/)?.[1] || 'workspace';
+      mainFlow.handleSend(`[ctx: ${selectedSession.display} · ${envId} · ${selectedSession.id.slice(0, 8)}]\n${text}`);
+    } else {
+      mainFlow.handleSend(text);
+    }
   };
 
   if (!authed) return <PasswordGate onAuth={() => setAuthed(true)} />;
