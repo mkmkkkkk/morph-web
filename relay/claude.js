@@ -11,7 +11,7 @@
  *   Relay → Socket.IO "claude-output" → phone receives streaming output
  */
 
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
 import { readdirSync, readFileSync, statSync, writeFileSync, mkdirSync } from 'fs';
 import { join, resolve } from 'path';
 import { homedir } from 'os';
@@ -20,6 +20,23 @@ import { randomUUID } from 'crypto';
 // Active Claude processes: sessionId → { process, cwd, claudeSessionId }
 const active = new Map();
 const MAX_CONCURRENT_SESSIONS = 6;
+
+// ─── Live session detection ───
+// Returns set of session IDs that have a running claude process (relay-managed OR desktop terminal).
+function getLiveSessionIds() {
+  const live = new Set();
+  // Relay-managed processes are in `active` — added after this function is defined
+  try {
+    const ps = execSync('ps aux', { encoding: 'utf-8', timeout: 3000 });
+    for (const line of ps.split('\n')) {
+      if (!line.includes('claude')) continue;
+      // Match --resume <uuid> or --session-id <uuid>
+      const m = line.match(/(?:--resume|--session-id)\s+([0-9a-f-]{36})/i);
+      if (m) live.add(m[1]);
+    }
+  } catch {}
+  return live;
+}
 
 /**
  * Spawn a Claude process with stream-json I/O.
@@ -448,9 +465,14 @@ export function registerClaudeAPI(app, io, authMiddleware) {
   app.get('/v2/claude/sessions', { preHandler: authMiddleware }, async (request) => {
     const cwd = request.query.cwd || process.env.DEFAULT_CWD || '/workspace';
     const limit = parseInt(request.query.limit) || 20;
-    const sessions = listClaudeSessions(cwd).slice(0, limit);
+    const osLive = getLiveSessionIds();
+    // Merge relay-managed active sessions
+    for (const id of active.keys()) osLive.add(id);
 
-    // Mark which sessions are currently active
+    const sessions = listClaudeSessions(cwd)
+      .filter(s => osLive.has(s.id))
+      .slice(0, limit);
+
     for (const s of sessions) {
       s.active = active.has(s.id);
     }
