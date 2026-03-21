@@ -328,7 +328,10 @@ export function registerClaudeAPI(app, io, authMiddleware) {
     }
 
     // Otherwise, spawn new Claude process
-    if (active.size >= MAX_CONCURRENT_SESSIONS) {
+    // Pinned session (Morph Web fixed session) bypasses the concurrency cap
+    const PINNED_SESSION = 'a0a0a0a0-0e00-4000-a000-000000000002';
+    const isPinned = existingId === PINNED_SESSION;
+    if (!isPinned && active.size >= MAX_CONCURRENT_SESSIONS) {
       return { error: `Too many concurrent sessions (max ${MAX_CONCURRENT_SESSIONS}). Stop an existing session first.` };
     }
     const sessionId = existingId || randomUUID();
