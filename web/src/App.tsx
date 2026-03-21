@@ -1384,8 +1384,9 @@ export default function App() {
               hasMoved.current = false;
               dragStartY.current = e.touches[0].clientY;
               latestClientY.current = e.touches[0].clientY;
-              dragStartH.current = terminalHeight;
-              dragCurrentH.current = terminalHeight;
+              const domH = parseFloat(terminalDivRef.current?.style.height ?? '') || terminalHeight;
+              dragStartH.current = domH;
+              dragCurrentH.current = domH;
             }}
             onTouchMove={(e) => {
               if (!dragging.current) return;
@@ -1395,7 +1396,7 @@ export default function App() {
               rafPending.current = true;
               requestAnimationFrame(() => {
                 rafPending.current = false;
-                const containerH = (document.documentElement.clientHeight || 600);
+                const containerH = (window.innerHeight || document.documentElement.clientHeight || 600);
                 const dy = dragStartY.current - latestClientY.current;
                 const newH = Math.max(5, Math.min(95, dragStartH.current + (dy / containerH * 100)));
                 dragCurrentH.current = newH;
@@ -1405,7 +1406,7 @@ export default function App() {
             onTouchEnd={() => {
               const h = dragCurrentH.current;
               if (hasMoved.current) {
-                if (h < 8) { setTerminalVisible(false); setTimeout(() => setTerminalHeight(40), 350); }
+                if (h < 8) { setTerminalVisible(false); }
                 else { setTerminalHeight(h); }
               }
               dragging.current = false;
