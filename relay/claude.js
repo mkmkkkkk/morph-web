@@ -272,13 +272,16 @@ export function registerClaudeAPI(app, io, authMiddleware) {
       if (raw) {
         for (const e of JSON.parse(raw)) {
           if (!e.id || !e.relayUrl) continue;
-          // Return proxy URLs — never expose the actual relay URL or token to the client
+          // If relayUrl is absolute (external host), expose directly — client connects via CORS.
+          // If relative/internal, use proxy path to avoid exposing internal URLs.
+          const direct = e.relayUrl.startsWith('http');
           envs.push({
             id: e.id,
             label: e.label || e.id,
             maxSessions: e.maxSessions || 6,
-            relayUrl: `/relay-proxy/${e.id}`,
-            socketPath: `/relay-proxy/${e.id}/v1/updates`,
+            relayUrl: direct ? e.relayUrl : `/relay-proxy/${e.id}`,
+            socketPath: direct ? '/v1/updates' : `/relay-proxy/${e.id}/v1/updates`,
+            token: direct ? e.token : undefined,
           });
         }
       }
