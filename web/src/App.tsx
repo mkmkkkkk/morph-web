@@ -7,6 +7,9 @@ import Sketch from './components/Sketch';
 // Cache-bust canvas.html on each page load (not per render)
 const BUILD_TS = Date.now().toString(36);
 
+// Module-level constant — avoids array allocation on every render
+const IDLE_WORDS = ['thinking...', 'pondering...', 'wondering...', 'reasoning...', 'considering...', 'analyzing...', 'processing...', 'compacting...'];
+
 // ─── Shared send flow: attachments + fire-and-forget upload ───
 function useSendFlow(sendFn: (msg: string) => void) {
   const [pendingSketch, setPendingSketch] = useState<{ dataUrl: string; bounds: { x: number; y: number; w: number; h: number } } | null>(null);
@@ -428,7 +431,7 @@ function EnvironmentGroup({ env, onSelect, maxVisible }: { env: EnvConfig; onSel
                 style={{
                   display: 'flex', alignItems: 'center', gap: 8,
                   padding: '12px 10px', marginBottom: 4,
-                  backgroundColor: 'rgba(28,28,30,0.85)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+                  backgroundColor: 'rgba(28,28,30,0.92)',
                   borderRadius: 10, cursor: 'pointer',
                   border: `1px solid ${borderColor(s)}`,
                 }}
@@ -525,7 +528,11 @@ function SessionCards({ onSelect }: { onSelect: (sessionId: string, display?: st
     const onStorage = () => setEnvs(getEnvironments());
     window.addEventListener('storage', onStorage);
     // Also poll for same-tab changes (localStorage events don't fire in same tab)
-    const interval = setInterval(() => setEnvs(getEnvironments()), 2000);
+    // Only update state when value actually changed to avoid re-rendering all EnvironmentGroups
+    const interval = setInterval(() => {
+      const next = getEnvironments();
+      setEnvs(prev => JSON.stringify(prev) === JSON.stringify(next) ? prev : next);
+    }, 5000);
     return () => { window.removeEventListener('storage', onStorage); clearInterval(interval); };
   }, []);
   return (
@@ -1088,10 +1095,12 @@ export default function App() {
   const [terminalVisible, setTerminalVisible] = useState(false);
   const [terminalHeight, setTerminalHeight] = useState(40); // percentage
   const [hasNew, setHasNew] = useState(false);
+  const [inputBarHeight, setInputBarHeight] = useState(84);
   const prevCount = useRef(0);
   const dragging = useRef(false);
   const dragStartY = useRef(0);
   const dragStartH = useRef(40);
+  const rafPending = useRef(false);
 
   useEffect(() => {
     if (messages.length > prevCount.current && !terminalVisible && isProcessing) setHasNew(true);
@@ -1100,11 +1109,18 @@ export default function App() {
 
   useEffect(() => { if (!isProcessing) setHasNew(false); }, [isProcessing]);
 
+  // Capture input bar height when attach menu opens — avoids getBoundingClientRect during render
+  useEffect(() => {
+    if (mainFlow.attachMenu && inputBarRef.current) {
+      setInputBarHeight(inputBarRef.current.offsetHeight);
+    }
+  }, [mainFlow.attachMenu]);
+
   const toggleTerminal = () => { setTerminalVisible(v => !v); setHasNew(false); };
 
   const handleTab = (t: string) => { setTab(t); setCurrentTab(t); if (t === 'config') setTerminalVisible(false); };
 
-  const handleSend = (text: string) => {
+  const handleSend = useCallback((text: string) => {
     if (text === '/clear') { setMessages([]); setIsProcessing(false); clearSession(); mainFlow.clearPending(); return; }
     if (selectedSession) {
       const envId = selectedSession.envId || 'workspace';
@@ -1112,7 +1128,7 @@ export default function App() {
     } else {
       mainFlow.handleSend(text);
     }
-  };
+  }, [selectedSession, mainFlow]);
 
   if (!authed) return <PasswordGate onAuth={() => setAuthed(true)} />;
 
@@ -1158,6 +1174,7 @@ export default function App() {
           height: `${terminalHeight}%`,
           transform: terminalVisible ? 'translateY(0)' : 'translateY(100%)',
           transition: dragging.current ? 'none' : 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+          willChange: 'transform',
           display: 'flex', flexDirection: 'column',
           backgroundColor: '#111',
           borderTopLeftRadius: 12, borderTopRightRadius: 12,
@@ -1173,10 +1190,16 @@ export default function App() {
             }}
             onTouchMove={(e) => {
               if (!dragging.current) return;
-              const containerH = (e.currentTarget.parentElement?.parentElement?.getBoundingClientRect().height || 600);
-              const dy = dragStartY.current - e.touches[0].clientY;
-              const newH = dragStartH.current + (dy / containerH * 100);
-              setTerminalHeight(Math.max(20, Math.min(95, newH)));
+              if (rafPending.current) return;
+              rafPending.current = true;
+              const clientY = e.touches[0].clientY;
+              requestAnimationFrame(() => {
+                rafPending.current = false;
+                const containerH = (document.documentElement.clientHeight || 600);
+                const dy = dragStartY.current - clientY;
+                const newH = dragStartH.current + (dy / containerH * 100);
+                setTerminalHeight(Math.max(20, Math.min(95, newH)));
+              });
             }}
             onTouchEnd={() => {
               if (terminalHeight < 25) { setTerminalVisible(false); setTerminalHeight(40); }
@@ -1199,10 +1222,7 @@ export default function App() {
               pointerEvents: 'none',
             }}>
               <span style={{ color: '#444', fontSize: 11, fontFamily: 'Menlo, monospace' }}>
-                {isProcessing ? (() => {
-                  const words = ['thinking...', 'pondering...', 'wondering...', 'reasoning...', 'considering...', 'analyzing...', 'processing...', 'compacting...'];
-                  return words[Math.floor(Date.now() / 4000) % words.length];
-                })() : 'idle'}
+                {isProcessing ? IDLE_WORDS[Math.floor(Date.now() / 4000) % IDLE_WORDS.length] : 'idle'}
               </span>
               <button tabIndex={-1} onClick={interrupt} style={{
                 padding: '3px 10px', borderRadius: 5, cursor: 'pointer', flexShrink: 0,
@@ -1246,7 +1266,7 @@ export default function App() {
             transition={{ type: 'spring', stiffness: 500, damping: 25 }}
             style={{
               position: 'absolute',
-              bottom: (inputBarRef.current ? inputBarRef.current.getBoundingClientRect().height + (keyboardOpen ? 8 : 36) : 84),
+              bottom: inputBarHeight + (keyboardOpen ? 8 : 36),
               left: 12, zIndex: 999,
               backgroundColor: 'rgba(30,30,30,0.85)', backdropFilter: 'blur(40px)', WebkitBackdropFilter: 'blur(40px)',
               borderRadius: 14, padding: '4px 0', minWidth: 200,
