@@ -976,29 +976,24 @@ export default function App() {
   useEffect(() => {
     if (!selectedSession) return;
     liveSessionIdRef.current = selectedSession.id; // reset live ID on new session open
-    // Instant load from cache
+    // Instant load from cache, then always refetch for freshness
     const cached = sessionCache.current.get(selectedSession.id);
-    if (cached) {
-      setSessionMessages(cached);
-    } else {
-      // Fallback: fetch if not cached
-      const token = selectedSession.relayToken || localStorage.getItem('morph-auth') || '';
-      const base = selectedSession.relayUrl || '';
-      const cwdParam = selectedSession.project ? `&cwd=${encodeURIComponent(selectedSession.project)}` : '';
-      fetch(`${base}/v2/claude/history/${selectedSession.id}?limit=50${cwdParam}`, { headers: { 'Authorization': `Bearer ${token}` } })
-        .then(r => r.json())
-        .then(d => {
-          const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-          const msgs = (d.messages || []).map((m: any) => ({
-            id: uid(), role: m.role, type: m.type, content: m.content, name: m.name,
-            ts: m.ts ? new Date(m.ts).getTime() : Date.now(),
-          }));
-          // Merge: don't replace pending user messages already in state
-          setSessionMessages(prev => prev.length === 0 ? msgs : [...msgs, ...prev.filter(m => m.pending)]);
-          sessionCache.current.set(selectedSession.id, msgs);
-        })
-        .catch(() => {});
-    }
+    if (cached) setSessionMessages(cached);
+    const token = selectedSession.relayToken || localStorage.getItem('morph-auth') || '';
+    const base = selectedSession.relayUrl || '';
+    const cwdParam = selectedSession.project ? `&cwd=${encodeURIComponent(selectedSession.project)}` : '';
+    fetch(`${base}/v2/claude/history/${selectedSession.id}?limit=50${cwdParam}`, { headers: { 'Authorization': `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(d => {
+        const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        const msgs = (d.messages || []).map((m: any) => ({
+          id: uid(), role: m.role, type: m.type, content: m.content, name: m.name,
+          ts: m.ts ? new Date(m.ts).getTime() : Date.now(),
+        }));
+        setSessionMessages(prev => [...msgs, ...prev.filter(m => m.pending)]);
+        sessionCache.current.set(selectedSession.id, msgs);
+      })
+      .catch(() => {});
     // Subscribe socket for live updates
     let displayRefreshed = false;
     subscribeSessionMessages(selectedSession.id, (msg) => {
