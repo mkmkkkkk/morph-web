@@ -29,7 +29,7 @@ function getLiveSessionIds(allSessions) {
   const live = new Set();
   try {
     // Scan ALL processes — catches both native `claude` binary and node-launched variants
-    const out = execSync("lsof 2>/dev/null | grep -E '\\.claude.*\\.jsonl'", { encoding: 'utf-8', timeout: 2000, shell: true });
+    const out = execSync("lsof 2>/dev/null | grep -E '\\.claude.*\\.jsonl'", { encoding: 'utf-8', timeout: 500, shell: true });
     for (const line of out.split('\n')) {
       const m = line.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl/i);
       if (m) live.add(m[1]);
