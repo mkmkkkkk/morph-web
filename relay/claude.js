@@ -479,6 +479,16 @@ export function registerClaudeAPI(app, io, authMiddleware) {
     return { sessions };
   });
 
+  // ─── DEBUG: Show raw ps output for claude processes ───
+  app.get('/v2/claude/debug-ps', { preHandler: authMiddleware }, async () => {
+    try {
+      const ps = execSync('ps aux', { encoding: 'utf-8', timeout: 3000 });
+      const lines = ps.split('\n').filter(l => l.includes('claude'));
+      const liveIds = [...getLiveSessionIds()];
+      return { lines, liveIds };
+    } catch (e) { return { error: e.message }; }
+  });
+
   // ─── REST: List all projects ───
 
   app.get('/v2/claude/projects', { preHandler: authMiddleware }, async () => {
