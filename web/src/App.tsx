@@ -269,15 +269,14 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
       )}
 
       {/* Attach menu button — tap when pending = clear, otherwise open menu */}
-      <button tabIndex={-1} onClick={(pendingSketch || pendingFile) ? onClearPending : onAttach}
+      <motion.button tabIndex={-1} onClick={(pendingSketch || pendingFile) ? onClearPending : onAttach}
+        whileTap={{ scale: 1.3 }}
+        transition={{ type: 'spring', stiffness: 500, damping: 20 }}
         style={{
           width: 34, height: 34, borderRadius: 17, border: 'none', cursor: 'pointer', flexShrink: 0,
           backgroundColor: (pendingSketch || pendingFile) ? 'rgba(48,209,88,0.2)' : 'rgba(255,255,255,0.08)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          transition: 'transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1)',
-        }}
-        onTouchStart={e => (e.currentTarget.style.transform = 'scale(1.3)')}
-        onTouchEnd={e => (e.currentTarget.style.transform = 'scale(1)')}>
+        }}>
         {pendingSketch
           ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#30d158" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
           : pendingFile === 'image'
@@ -285,7 +284,7 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
             : pendingFile === 'file'
               ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#30d158" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
               : <span style={{ color: '#888', fontSize: 22, lineHeight: '22px' }}>+</span>}
-      </button>
+      </motion.button>
 
       {/* Text input — textarea with auto-grow, Enter=send, Shift+Enter=newline */}
       <textarea ref={ref} value={text}
@@ -845,7 +844,7 @@ function SessionTerminal({ session, messages, onBack, onSend, keyboardOpen }: {
           <motion.div key="s-menu" initial={{ scale: 0.3, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.3, opacity: 0 }}
             transition={{ type: 'spring', stiffness: 500, damping: 25 }}
             style={{ position: 'absolute', bottom: 60, left: 12, zIndex: 999,
-              backgroundColor: 'rgba(30,30,50,0.9)', backdropFilter: 'blur(40px)', WebkitBackdropFilter: 'blur(40px)',
+              backgroundColor: 'rgba(30,30,50,0.95)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
               borderRadius: 14, padding: '4px 0', minWidth: 200,
               boxShadow: '0 8px 40px rgba(0,0,0,0.6)', border: '1px solid rgba(224,160,48,0.15)',
               transformOrigin: 'bottom left' }}>
@@ -998,7 +997,8 @@ export default function App() {
     const token = selectedSession.relayToken || localStorage.getItem('morph-auth') || '';
     const base = selectedSession.relayUrl || '';
     const cwdParam = selectedSession.project ? `&cwd=${encodeURIComponent(selectedSession.project)}` : '';
-    fetch(`${base}/v2/claude/history/${selectedSession.id}?limit=50${cwdParam}`, { headers: { 'Authorization': `Bearer ${token}` } })
+    const abortCtrl = new AbortController();
+    fetch(`${base}/v2/claude/history/${selectedSession.id}?limit=50${cwdParam}`, { headers: { 'Authorization': `Bearer ${token}` }, signal: abortCtrl.signal })
       .then(r => r.json())
       .then(d => {
         const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -1041,7 +1041,7 @@ export default function App() {
           .catch(() => {});
       }
     });
-    return () => { unsubscribeSessionMessages(); };
+    return () => { abortCtrl.abort(); unsubscribeSessionMessages(); };
   }, [selectedSession?.id]);
 
   // Keep sessionCache in sync so re-entry shows latest messages
@@ -1100,7 +1100,9 @@ export default function App() {
   const dragging = useRef(false);
   const dragStartY = useRef(0);
   const dragStartH = useRef(40);
+  const dragCurrentH = useRef(40);
   const rafPending = useRef(false);
+  const terminalDivRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (messages.length > prevCount.current && !terminalVisible && isProcessing) setHasNew(true);
@@ -1169,7 +1171,7 @@ export default function App() {
         </div>
 
         {/* Origin Terminal — always on top of Canvas UI */}
-        <div style={{
+        <div ref={terminalDivRef} style={{
           position: 'absolute', left: 0, right: 0, bottom: 0, zIndex: 10,
           height: `${terminalHeight}%`,
           transform: terminalVisible ? 'translateY(0)' : 'translateY(100%)',
@@ -1187,6 +1189,7 @@ export default function App() {
               dragging.current = true;
               dragStartY.current = e.touches[0].clientY;
               dragStartH.current = terminalHeight;
+              dragCurrentH.current = terminalHeight;
             }}
             onTouchMove={(e) => {
               if (!dragging.current) return;
@@ -1197,12 +1200,15 @@ export default function App() {
                 rafPending.current = false;
                 const containerH = (document.documentElement.clientHeight || 600);
                 const dy = dragStartY.current - clientY;
-                const newH = dragStartH.current + (dy / containerH * 100);
-                setTerminalHeight(Math.max(20, Math.min(95, newH)));
+                const newH = Math.max(20, Math.min(95, dragStartH.current + (dy / containerH * 100)));
+                dragCurrentH.current = newH;
+                if (terminalDivRef.current) terminalDivRef.current.style.height = `${newH}%`;
               });
             }}
             onTouchEnd={() => {
-              if (terminalHeight < 25) { setTerminalVisible(false); setTerminalHeight(40); }
+              const h = dragCurrentH.current;
+              if (h < 25) { setTerminalVisible(false); setTerminalHeight(40); }
+              else { setTerminalHeight(h); }
               dragging.current = false;
             }}
             style={{
@@ -1268,7 +1274,7 @@ export default function App() {
               position: 'absolute',
               bottom: inputBarHeight + (keyboardOpen ? 8 : 36),
               left: 12, zIndex: 999,
-              backgroundColor: 'rgba(30,30,30,0.85)', backdropFilter: 'blur(40px)', WebkitBackdropFilter: 'blur(40px)',
+              backgroundColor: 'rgba(30,30,30,0.95)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
               borderRadius: 14, padding: '4px 0', minWidth: 200,
               boxShadow: '0 8px 40px rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.08)',
               transformOrigin: 'bottom left',
