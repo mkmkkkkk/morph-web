@@ -18,6 +18,7 @@ function useSendFlow(sendFn: (msg: string) => void, relayConfig?: { relayUrl?: s
   const [attachMenu, setAttachMenu] = useState(false);
   const [sketchOpen, setSketchOpen] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
 
   // Refs so async handlers always use current relay config without stale closure
   const relayUrlRef = useRef(relayConfig?.relayUrl);
@@ -66,6 +67,8 @@ function useSendFlow(sendFn: (msg: string) => void, relayConfig?: { relayUrl?: s
   setPendingFileRef.current = setPendingFile;
   const setUploadErrorRef = useRef(setUploadError);
   setUploadErrorRef.current = setUploadError;
+  const setIsUploadingRef = useRef(setIsUploading);
+  setIsUploadingRef.current = setIsUploading;
 
   useEffect(() => {
     const makeInput = (accept: string) => {
@@ -86,6 +89,7 @@ function useSendFlow(sendFn: (msg: string) => void, relayConfig?: { relayUrl?: s
       const f = input.files?.[0];
       input.value = ''; // reset so same file can be re-selected
       if (!f) return;
+      setIsUploadingRef.current(true);
       const b64: string = await new Promise(r => {
         const rd = new FileReader();
         rd.onload = () => r((rd.result as string).split(',')[1]);
@@ -118,6 +122,8 @@ function useSendFlow(sendFn: (msg: string) => void, relayConfig?: { relayUrl?: s
         const msg = err instanceof Error ? err.message : String(err);
         console.error('[upload]', msg);
         setUploadErrorRef.current(msg);
+      } finally {
+        setIsUploadingRef.current(false);
       }
     };
 
@@ -153,7 +159,7 @@ function useSendFlow(sendFn: (msg: string) => void, relayConfig?: { relayUrl?: s
     pendingSketch, pendingFile, attachMenu, sketchOpen,
     setSketchOpen, setAttachMenu,
     handleSend, uploadFile, handleSketchInsert, clearPending, toggleAttach,
-    uploadError, clearUploadError: () => setUploadError(null),
+    uploadError, clearUploadError: () => setUploadError(null), isUploading,
   };
 }
 
@@ -248,7 +254,7 @@ function TerminalOverlay({ messages, visible }: { messages: Message[]; visible: 
 }
 
 // ─── Input Bar (matches native: dot + attach + terminal toggle + input + send/stop) ───
-function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, onToggleTerminal, hasNew, onAttach, onSketch, pendingSketch, pendingFile, onClearPending, tint, keyboardOpen }: {
+function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, onToggleTerminal, hasNew, onAttach, onSketch, pendingSketch, pendingFile, onClearPending, tint, keyboardOpen, isUploading }: {
   onSend: (text: string) => void; onStop: () => void; isProcessing: boolean; connected: boolean;
   terminalVisible?: boolean; onToggleTerminal?: () => void; hasNew?: boolean;
   onAttach: () => void;
@@ -258,6 +264,7 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
   onClearPending: () => void;
   tint?: 'amber'; // session terminal color
   keyboardOpen?: boolean;
+  isUploading?: boolean;
 }) {
   const [text, setText] = useState('');
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -303,19 +310,22 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
       {/* Attach menu button — tap when pending = clear, otherwise open menu */}
       <motion.button tabIndex={-1} onClick={(pendingSketch || pendingFile) ? onClearPending : onAttach}
         whileTap={{ scale: 1.3 }}
-        transition={{ type: 'spring', stiffness: 500, damping: 20 }}
+        animate={isUploading ? { opacity: [0.35, 1, 0.35] } : {}}
+        transition={isUploading ? { repeat: Infinity, duration: 0.75, ease: 'easeInOut' } : { type: 'spring', stiffness: 500, damping: 20 }}
         style={{
           width: 34, height: 34, borderRadius: 17, border: 'none', cursor: 'pointer', flexShrink: 0,
-          backgroundColor: (pendingSketch || pendingFile) ? 'rgba(48,209,88,0.2)' : 'rgba(255,255,255,0.08)',
+          backgroundColor: (pendingSketch || pendingFile) ? 'rgba(48,209,88,0.2)' : isUploading ? 'rgba(48,209,88,0.12)' : 'rgba(255,255,255,0.08)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
-        {pendingSketch
-          ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#30d158" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
-          : pendingFile === 'image'
-            ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#30d158" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
-            : pendingFile === 'file'
-              ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#30d158" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
-              : <span style={{ color: '#888', fontSize: 22, lineHeight: '22px' }}>+</span>}
+        {isUploading
+          ? <span style={{ color: '#30d158', fontSize: 16, lineHeight: '16px' }}>↑</span>
+          : pendingSketch
+            ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#30d158" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+            : pendingFile === 'image'
+              ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#30d158" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+              : pendingFile === 'file'
+                ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#30d158" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
+                : <span style={{ color: '#888', fontSize: 22, lineHeight: '22px' }}>+</span>}
       </motion.button>
 
       {/* Text input — textarea with auto-grow, Enter=send, Shift+Enter=newline */}
@@ -911,6 +921,7 @@ function SessionTerminal({ session, messages, onBack, onSend, onInterrupt, keybo
         onClearPending={flow.clearPending}
         tint="amber"
         keyboardOpen={keyboardOpen}
+        isUploading={flow.isUploading}
       />
       {/* Disabled TabBar — same height as main, keeps InputBar aligned */}
       {!keyboardOpen && <TabBar tab="canvas" onTab={() => {}} disabled />}
@@ -1436,6 +1447,7 @@ export default function App() {
           pendingFile={mainFlow.pendingFile ? (mainFlow.pendingFile.isImage ? 'image' : 'file') : null}
           onClearPending={mainFlow.clearPending}
           keyboardOpen={keyboardOpen}
+          isUploading={mainFlow.isUploading}
         />
       </div>
       {!keyboardOpen && !selectedSession && <TabBar tab={tab} onTab={handleTab} />}
