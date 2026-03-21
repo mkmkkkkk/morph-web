@@ -22,18 +22,28 @@ const active = new Map();
 const MAX_CONCURRENT_SESSIONS = 6;
 
 // ─── Live session detection ───
-// Returns set of session IDs that have a running claude process.
-// Strategy: lsof finds which .jsonl session files are currently open by claude processes.
-function getLiveSessionIds() {
+// Returns set of session IDs that have open .jsonl file handles.
+// Strategy: broad lsof scan for .claude/**/*.jsonl (process-agnostic).
+// Fallback: sessions modified within last 4 hours.
+function getLiveSessionIds(allSessions) {
   const live = new Set();
   try {
-    const out = execSync('lsof -c claude 2>/dev/null | grep \\.jsonl', { encoding: 'utf-8', timeout: 5000, shell: true });
+    // Scan ALL processes — catches both native `claude` binary and node-launched variants
+    const out = execSync("lsof 2>/dev/null | grep -E '\\.claude.*\\.jsonl'", { encoding: 'utf-8', timeout: 10000, shell: true });
     for (const line of out.split('\n')) {
-      // Extract UUID from path like .../<uuid>.jsonl
       const m = line.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl/i);
       if (m) live.add(m[1]);
     }
   } catch {}
+
+  // Fallback: if lsof found nothing, treat recently-modified sessions as live
+  if (live.size === 0 && allSessions && allSessions.length > 0) {
+    const cutoff = Date.now() - 4 * 60 * 60 * 1000; // 4 hours
+    for (const s of allSessions) {
+      if (s.updatedAt > cutoff) live.add(s.id);
+    }
+  }
+
   return live;
 }
 
@@ -464,11 +474,12 @@ export function registerClaudeAPI(app, io, authMiddleware) {
   app.get('/v2/claude/sessions', { preHandler: authMiddleware }, async (request) => {
     const cwd = request.query.cwd || process.env.DEFAULT_CWD || '/workspace';
     const limit = parseInt(request.query.limit) || 20;
-    const osLive = getLiveSessionIds();
+    const allSessions = listClaudeSessions(cwd);
+    const osLive = getLiveSessionIds(allSessions);
     // Merge relay-managed active sessions
     for (const id of active.keys()) osLive.add(id);
 
-    const sessions = listClaudeSessions(cwd)
+    const sessions = allSessions
       .filter(s => osLive.has(s.id))
       .slice(0, limit);
 
@@ -479,12 +490,22 @@ export function registerClaudeAPI(app, io, authMiddleware) {
   });
 
   // ─── DEBUG: Show raw ps output for claude processes ───
-  app.get('/v2/claude/debug-ps', { preHandler: authMiddleware }, async () => {
+  app.get('/v2/claude/debug-ps', { preHandler: authMiddleware }, async (request) => {
     try {
+      const cwd = request.query.cwd || process.env.DEFAULT_CWD || '/workspace';
       let lsofOut = '';
-      try { lsofOut = execSync('lsof -c claude 2>/dev/null | grep \\.jsonl', { encoding: 'utf-8', timeout: 5000, shell: true }); } catch {}
-      const liveIds = [...getLiveSessionIds()];
-      return { lsofLines: lsofOut.split('\n').filter(Boolean), liveIds };
+      try { lsofOut = execSync("lsof 2>/dev/null | grep -E '\\.claude.*\\.jsonl'", { encoding: 'utf-8', timeout: 10000, shell: true }); } catch {}
+      const allSessions = listClaudeSessions(cwd);
+      const liveIds = [...getLiveSessionIds(allSessions)];
+      const cutoff = Date.now() - 4 * 60 * 60 * 1000;
+      const recentSessions = allSessions.filter(s => s.updatedAt > cutoff).map(s => s.id);
+      return {
+        lsofLines: lsofOut.split('\n').filter(Boolean),
+        liveIds,
+        totalSessions: allSessions.length,
+        recentSessions,
+        cwd,
+      };
     } catch (e) { return { error: e.message }; }
   });
 
