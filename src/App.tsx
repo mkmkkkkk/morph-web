@@ -551,8 +551,8 @@ function SessionCards({ onSelect }: { onSelect: (sessionId: string, display?: st
   }, []);
   return (
     <div style={{ position: 'absolute', top: 90, left: 0, right: 0, bottom: 0, zIndex: 2, padding: '0 8px', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
-      {envs.map((env, idx) => (
-        <EnvironmentGroup key={env.id} env={env} onSelect={onSelect} initialExpanded={idx === 0} />
+      {envs.map(env => (
+        <EnvironmentGroup key={env.id} env={env} onSelect={onSelect} />
       ))}
     </div>
   );
