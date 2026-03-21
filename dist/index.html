@@ -16,7 +16,7 @@
     html, body { margin: 0; padding: 0; background: #0a0a0a; overflow: hidden; height: var(--real-h, 100%); overscroll-behavior: none; }
     #root { height: var(--real-h, 100%); width: 100%; background: #0a0a0a; color: #fff; font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; overflow: hidden; overscroll-behavior: none; }
   </style>
-  <script type="module" crossorigin src="/assets/index-Cf1TnOGO.js"></script>
+  <script type="module" crossorigin src="/assets/index-NHqk8ZtF.js"></script>
 </head>
 <body>
   <div id="root"></div>
@@ -44,8 +44,18 @@
         if (style.overflowY === 'scroll' || style.overflowY === 'auto') {
           if (el.scrollHeight > el.clientHeight) {
             var dy = e.touches[0].clientY - _touchStartY;
-            // At top pulling down, or at bottom pulling up → block
-            if ((dy > 0 && el.scrollTop <= 0) || (dy < 0 && el.scrollTop + el.clientHeight >= el.scrollHeight)) {
+            // column-reverse: scrollTop=0 at bottom (latest), negative at top (oldest)
+            // Normal: scrollTop=0 at top, positive going down
+            var colRev = window.getComputedStyle(el).flexDirection === 'column-reverse';
+            var atStart, atEnd;
+            if (colRev) {
+              atStart = el.scrollTop >= 0;  // at bottom (latest)
+              atEnd = el.scrollTop <= -(el.scrollHeight - el.clientHeight);  // at top (oldest)
+            } else {
+              atStart = el.scrollTop <= 0;
+              atEnd = el.scrollTop + el.clientHeight >= el.scrollHeight;
+            }
+            if ((dy > 0 && atStart) || (dy < 0 && atEnd)) {
               e.preventDefault();
             }
             return;
