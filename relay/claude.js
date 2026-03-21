@@ -158,6 +158,10 @@ function pipeOutput(proc, sessionId, io) {
         if (parsed.type && parsed.type !== 'assistant' && parsed.type !== 'stream_event') {
           console.log(`[claude:${sessionId.slice(0,8)}] event: ${parsed.type}${parsed.subtype ? '/' + parsed.subtype : ''}`);
         }
+        // Notify frontend of context compaction
+        if (parsed.type === 'system' && parsed.subtype === 'compact_boundary') {
+          io.to(`direct:${sessionId}`).emit('claude-compact', { sessionId });
+        }
         io.to(`direct:${sessionId}`).emit('claude-output', {
           sessionId,
           data: parsed,
