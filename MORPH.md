@@ -27,16 +27,20 @@ You are running as a **Morph Web session** — a mobile remote terminal for the 
 - You share files but NOT conversation context with the desktop session
 - If the CEO says "the other session did X", trust them and check the files
 
+## Session Start Protocol
+- **Always run `git log --oneline -5` in `/workspace/morph` at session start** — git log is ground truth, not memory
+- Context summaries lose fidelity across restarts; never assume you know the last commit
+
 ## Architecture Pointers (stable — don't repeat details, just read the file)
 
 | Layer | File | What it does |
 |-------|------|-------------|
-| **React App** | `src/App.tsx` | InputBar, Terminal overlay, ConfigTab, TabBar, attach/sketch flow |
-| **Connection** | `src/lib/connection.ts` | WebSocket (socket.io) + REST, fixed session, message parsing |
-| **Canvas** | `public/canvas.html` | Vanilla JS iframe — component system, sketch mode, postMessage bridge |
-| **Relay API** | `/workspace/morph-relay/claude.js` | v2 REST: send, stop, interrupt, active, history, upload, sessions |
-| **Relay Server** | `/workspace/morph-relay/server.js` | Fastify + auth + pairing |
-| **Relay Entry** | `/workspace/morph-relay/index.js` | HTTP + Socket.IO bootstrap |
+| **React App** | `/workspace/morph/web/src/App.tsx` | InputBar, Terminal overlay, ConfigTab, TabBar, attach/sketch flow |
+| **Connection** | `/workspace/morph/web/src/lib/connection.ts` | WebSocket (socket.io) + REST, fixed session, message parsing |
+| **Canvas** | `/workspace/morph/web/public/canvas.html` | Vanilla JS iframe — component system, sketch mode, postMessage bridge |
+| **Relay API** | `/workspace/morph/relay/claude.js` | v2 REST: send, stop, interrupt, active, history, upload, sessions |
+| **Relay Server** | `/workspace/morph/relay/server.js` | Fastify + auth + pairing |
+| **Relay Entry** | `/workspace/morph/relay/index.js` | HTTP + Socket.IO bootstrap |
 
 ### Canvas ↔ React Bridge
 - React → Canvas: `iframe.contentWindow.postMessage({ action: 'canvas.add', ... })`
