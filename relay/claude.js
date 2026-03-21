@@ -106,7 +106,7 @@ function spawnClaude({ sessionId, resumeFrom, model }) {
     // Dynamic context injected at session start
     const now = new Date();
     const dateStr = now.toISOString().slice(0, 10); // YYYY-MM-DD
-    const envId = process.env.RELAY_ENV_ID || 'workspace';
+    const envId = process.env.RELAY_ENV_ID || (WORK_DIR.toLowerCase().includes('tensor') ? 'tensor-revive' : 'workspace');
     let gitLog = '';
     try {
       gitLog = execSync('git log --oneline -5', { cwd: WORK_DIR, encoding: 'utf-8', timeout: 3000 }).trim();
