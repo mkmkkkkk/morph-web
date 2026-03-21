@@ -979,7 +979,9 @@ export default function App() {
   const [canvasLoaded, setCanvasLoaded] = useState(false);
   const mainFlow = useSendFlow(send);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
-  const [selectedSession, setSelectedSession] = useState<{ id: string; display: string; relayUrl?: string; relayToken?: string; project?: string; envId?: string } | null>(null);
+  const [selectedSession, setSelectedSession] = useState<{ id: string; display: string; relayUrl?: string; relayToken?: string; project?: string; envId?: string } | null>(() => {
+    try { const s = sessionStorage.getItem('morph-selected-session'); return s ? JSON.parse(s) : null; } catch { return null; }
+  });
   const [sessionMessages, setSessionMessages] = useState<Message[]>([]);
   const [hasVisitedConfig, setHasVisitedConfig] = useState(false);
   const liveSessionIdRef = useRef<string | null>(null); // tracks active process ID after resume
@@ -1098,6 +1100,12 @@ export default function App() {
     url.searchParams.delete('addEnv');
     window.history.replaceState({}, '', url.toString());
   }, []);
+
+  // Persist selected session across page refreshes (same tab)
+  useEffect(() => {
+    if (selectedSession) sessionStorage.setItem('morph-selected-session', JSON.stringify(selectedSession));
+    else sessionStorage.removeItem('morph-selected-session');
+  }, [selectedSession?.id]);
 
   // When a session is selected, load from cache instantly, then subscribe for live updates
   useEffect(() => {
