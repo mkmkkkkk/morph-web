@@ -1405,7 +1405,7 @@ export default function App() {
             onTouchEnd={() => {
               const h = dragCurrentH.current;
               if (hasMoved.current) {
-                if (h < 8) { setTerminalVisible(false); setTerminalHeight(40); }
+                if (h < 8) { setTerminalVisible(false); setTimeout(() => setTerminalHeight(40), 350); }
                 else { setTerminalHeight(h); }
               }
               dragging.current = false;
