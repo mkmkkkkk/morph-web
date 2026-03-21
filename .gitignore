@@ -1,0 +1,4 @@
+relay/.env
+relay/data/
+relay/node_modules/
+web/node_modules/
