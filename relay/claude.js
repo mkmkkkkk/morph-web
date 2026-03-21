@@ -27,7 +27,7 @@ function getLiveSessionIds() {
   const live = new Set();
   // Relay-managed processes are in `active` — added after this function is defined
   try {
-    const ps = execSync('ps aux', { encoding: 'utf-8', timeout: 3000 });
+    const ps = execSync('ps auxww', { encoding: 'utf-8', timeout: 3000 });
     for (const line of ps.split('\n')) {
       if (!line.includes('claude')) continue;
       // Match --resume <uuid> or --session-id <uuid>
@@ -482,7 +482,7 @@ export function registerClaudeAPI(app, io, authMiddleware) {
   // ─── DEBUG: Show raw ps output for claude processes ───
   app.get('/v2/claude/debug-ps', { preHandler: authMiddleware }, async () => {
     try {
-      const ps = execSync('ps aux', { encoding: 'utf-8', timeout: 3000 });
+      const ps = execSync('ps auxww', { encoding: 'utf-8', timeout: 3000 });
       const lines = ps.split('\n').filter(l => l.includes('claude'));
       const liveIds = [...getLiveSessionIds()];
       return { lines, liveIds };
