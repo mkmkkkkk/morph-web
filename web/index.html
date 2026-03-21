@@ -27,18 +27,30 @@
     document.documentElement.style.setProperty('--real-h', screenH + 'px');
     document.getElementById('root').style.height = screenH + 'px';
 
-    // Block iOS rubber-band on body/html (doesn't affect scrollable children or inputs)
+    // Block iOS rubber-band — prevent overscroll at scroll boundaries
+    var _touchStartY = 0;
+    document.addEventListener('touchstart', function(e) {
+      _touchStartY = e.touches[0].clientY;
+    }, { passive: true });
     document.addEventListener('touchmove', function(e) {
       var t = e.target;
       // Always allow touch in input/textarea (cursor, selection)
       if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA') return;
-      // Allow scroll inside elements with overflow-y: scroll/auto
-      while (t && t !== document.body) {
-        var style = window.getComputedStyle(t);
+      // Find scrollable ancestor
+      var el = t;
+      while (el && el !== document.body) {
+        var style = window.getComputedStyle(el);
         if (style.overflowY === 'scroll' || style.overflowY === 'auto') {
-          if (t.scrollHeight > t.clientHeight) return;
+          if (el.scrollHeight > el.clientHeight) {
+            var dy = e.touches[0].clientY - _touchStartY;
+            // At top pulling down, or at bottom pulling up → block
+            if ((dy > 0 && el.scrollTop <= 0) || (dy < 0 && el.scrollTop + el.clientHeight >= el.scrollHeight)) {
+              e.preventDefault();
+            }
+            return;
+          }
         }
-        t = t.parentElement;
+        el = el.parentElement;
       }
       e.preventDefault();
     }, { passive: false });
