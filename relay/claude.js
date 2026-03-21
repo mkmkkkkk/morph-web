@@ -36,9 +36,9 @@ function getLiveSessionIds(allSessions) {
     }
   } catch {}
 
-  // Fallback: if lsof found nothing, treat recently-modified sessions as live
-  if (live.size === 0 && allSessions && allSessions.length > 0) {
-    const cutoff = Date.now() - 4 * 60 * 60 * 1000; // 4 hours
+  // Always include recently-modified sessions (< 24hr) — lsof only catches open file handles
+  if (allSessions && allSessions.length > 0) {
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000;
     for (const s of allSessions) {
       if (s.updatedAt > cutoff) live.add(s.id);
     }
