@@ -538,7 +538,7 @@ function SessionCards({ onSelect }: { onSelect: (sessionId: string, display?: st
 }
 
 // ─── Config Tab ───
-function ConfigTab({ connState, onQuickAction }: { connState: string; onQuickAction: (prompt: string) => void }) {
+function ConfigTab({ connState, onQuickAction, onRefresh }: { connState: string; onQuickAction: (prompt: string) => void; onRefresh?: () => void }) {
   const [sessions, setSessions] = useState<any[]>([]);
   const [activeSessions, setActiveSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -576,6 +576,10 @@ function ConfigTab({ connState, onQuickAction }: { connState: string; onQuickAct
       <Section title="Connection">
         <Row label="Status" value={connState} valueColor={connState === 'connected' ? '#30d158' : '#ff453a'} />
         <Row label="Server" value={window.location.origin} />
+        <button onClick={() => { loadSessions(); if (onRefresh) onRefresh(); }} style={{
+          marginTop: 8, padding: '8px 0', border: 'none', borderRadius: 8, cursor: 'pointer',
+          fontSize: 13, width: '100%', backgroundColor: 'rgba(99,106,255,0.15)', color: '#636AFF',
+        }}>{loading ? '...' : '↻ Refresh'}</button>
       </Section>
 
       <Section title="Quick Actions">
@@ -886,12 +890,17 @@ export default function App() {
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
+    let t: ReturnType<typeof setTimeout>;
     const onResize = () => {
-      const ratio = vv.height / window.screen.height;
-      setKeyboardOpen(ratio < 0.75);
+      if (document.visibilityState === 'hidden') return;
+      clearTimeout(t);
+      t = setTimeout(() => {
+        const ratio = vv.height / window.screen.height;
+        setKeyboardOpen(ratio < 0.75);
+      }, 80);
     };
     vv.addEventListener('resize', onResize);
-    return () => vv.removeEventListener('resize', onResize);
+    return () => { vv.removeEventListener('resize', onResize); clearTimeout(t); };
   }, []);
 
   // Preload all session histories into cache on mount
@@ -1140,7 +1149,7 @@ export default function App() {
             send(prompt);
             setTab('canvas'); setCurrentTab('canvas');
             setTerminalVisible(true);
-          }} />
+          }} onRefresh={() => { if (connState !== 'connected') connect(); }} />
         </div>
 
         {/* Origin Terminal — always on top of Canvas UI */}
