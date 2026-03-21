@@ -412,8 +412,6 @@ function EnvironmentGroup({ env, onSelect, maxVisible, initialExpanded = true }:
     onSelect(id, s?.display, env.relayUrl, env.token, s?.project, env.id);
   };
 
-  if (sessions.length === 0) return null;
-
   const activeCount = sessions.filter(s => s.active).length;
   const unviewedCount = sessions.filter(s => !s.active && !viewed.has(s.id)).length;
 
@@ -437,6 +435,9 @@ function EnvironmentGroup({ env, onSelect, maxVisible, initialExpanded = true }:
             transition={{ duration: 0.2 }}
             style={{ overflow: 'hidden', pointerEvents: 'auto' }}
           >
+            {sessions.length === 0 && (
+              <div style={{ color: '#555', fontSize: 12, padding: '8px 4px' }}>No sessions</div>
+            )}
             {sessions.map(s => (
               <motion.div
                 key={s.id}
