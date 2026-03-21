@@ -196,7 +196,10 @@ async function apiGet(path: string) { return relayGet(PRIMARY, path); }
 function loadSavedRelays(): void {
   try {
     const saved = JSON.parse(localStorage.getItem('morph-secondary-relays') || '[]') as RelayConfig[];
-    saved.forEach(cfg => {
+    // Drop stale proxy entries (url starts with /relay-proxy/) — server will re-push direct URLs
+    const valid = saved.filter(cfg => !cfg.url.startsWith('/relay-proxy/'));
+    if (valid.length !== saved.length) localStorage.setItem('morph-secondary-relays', JSON.stringify(valid));
+    valid.forEach(cfg => {
       if (!relayConns.has(cfg.id)) {
         relayConns.set(cfg.id, { config: cfg, socket: null, state: 'disconnected' });
       }
