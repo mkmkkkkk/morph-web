@@ -21,6 +21,11 @@ import { randomUUID } from 'crypto';
 const active = new Map();
 const MAX_CONCURRENT_SESSIONS = 6;
 
+// Cache for listClaudeSessions — avoids re-scanning filesystem on every request
+let _sessionsCache = null;
+let _sessionsCacheTs = 0;
+const SESSIONS_CACHE_TTL = 3000; // 3s
+
 // ─── Live session detection ───
 // Returns set of session IDs that have open .jsonl file handles.
 // Strategy: broad lsof scan for .claude/**/*.jsonl (process-agnostic).
@@ -214,17 +219,28 @@ function sendInterrupt(sessionId) {
 /**
  * List Claude sessions from filesystem.
  * Reads ~/.claude/projects/<project_id>/*.jsonl
+ * Results cached for SESSIONS_CACHE_TTL ms to avoid repeated filesystem scans.
  */
 function listClaudeSessions(cwd) {
+  const now = Date.now();
+  if (_sessionsCache && (now - _sessionsCacheTs) < SESSIONS_CACHE_TTL) return _sessionsCache;
+
   const projectId = resolve(cwd || '/workspace').replace(/[\\\/.:]/g, '-');
   const claudeDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
   const projectDir = join(claudeDir, 'projects', projectId);
 
-  // Build display name index from history.jsonl
+  // Build display name index — tail-read last 64KB of history.jsonl (avoids reading multi-MB file)
   const displayMap = new Map();
   try {
     const historyPath = join(claudeDir, 'history.jsonl');
-    const lines = readFileSync(historyPath, 'utf-8').split('\n').filter(l => l.trim());
+    const stat = statSync(historyPath);
+    const TAIL = 65536;
+    const start = Math.max(0, stat.size - TAIL);
+    const fd = openSync(historyPath, 'r');
+    const buf = Buffer.alloc(Math.min(TAIL, stat.size));
+    readSync(fd, buf, 0, buf.length, start);
+    closeSync(fd);
+    const lines = buf.toString('utf-8').split('\n').filter(l => l.trim());
     for (const line of lines) {
       try {
         const entry = JSON.parse(line);
@@ -257,6 +273,8 @@ function listClaudeSessions(cwd) {
       .filter(s => s.size > 0)
       .sort((a, b) => b.updatedAt - a.updatedAt);
 
+    _sessionsCache = files;
+    _sessionsCacheTs = Date.now();
     return files;
   } catch {
     return [];
