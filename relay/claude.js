@@ -98,11 +98,29 @@ function spawnClaude({ sessionId, resumeFrom, model }) {
   // Whitelist model — reject unknown values
   if (model && ALLOWED_MODELS.has(model)) args.push('--model', model);
 
-  // Inject Morph-specific system prompt from MORPH.md
+  // Inject Morph-specific system prompt from MORPH.md + dynamic context
   const morphMdPath = join(WORK_DIR, 'morph/web/MORPH.md');
   try {
     const morphCtx = readFileSync(morphMdPath, 'utf-8');
-    args.push('--append-system-prompt', morphCtx);
+
+    // Dynamic context injected at session start
+    const now = new Date();
+    const dateStr = now.toISOString().slice(0, 10); // YYYY-MM-DD
+    const envId = process.env.RELAY_ENV_ID || 'workspace';
+    let gitLog = '';
+    try {
+      gitLog = execSync('git log --oneline -5', { cwd: WORK_DIR, encoding: 'utf-8', timeout: 3000 }).trim();
+    } catch {}
+
+    const dynamic = [
+      `\n# Session Context (injected at start)`,
+      `- **Date:** ${dateStr}`,
+      `- **Environment:** ${envId} (${WORK_DIR})`,
+      `- **Device:** iPhone — keep responses extra concise`,
+      gitLog ? `- **Recent commits:**\n${gitLog.split('\n').map(l => '  ' + l).join('\n')}` : '',
+    ].filter(Boolean).join('\n');
+
+    args.push('--append-system-prompt', morphCtx + dynamic);
   } catch {}
 
   // Always bypassPermissions — phone user is the machine owner
