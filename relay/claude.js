@@ -112,18 +112,12 @@ function spawnClaude({ sessionId, resumeFrom, model }) {
     const now = new Date();
     const dateStr = now.toISOString().slice(0, 10); // YYYY-MM-DD
     const envId = process.env.RELAY_ENV_ID || (WORK_DIR.toLowerCase().includes('tensor') ? 'tensor-revive' : 'workspace');
-    let gitLog = '';
-    try {
-      gitLog = execSync('git log --oneline -5', { cwd: WORK_DIR, encoding: 'utf-8', timeout: 3000 }).trim();
-    } catch {}
-
     const dynamic = [
-      `\n# Session Context (injected at session start — always fresh)`,
+      `\n# Session Context`,
       `- **Date:** ${dateStr}`,
       `- **Environment:** ${envId} (${WORK_DIR})`,
       `- **Device:** iPhone — keep responses extra concise`,
-      gitLog ? `- **Recent commits:**\n${gitLog.split('\n').map(l => '  ' + l).join('\n')}` : '',
-    ].filter(Boolean).join('\n');
+    ].join('\n');
 
     // New session: full MORPH.md + dynamic; resumed: dynamic only (no duplicate MORPH.md)
     args.push('--append-system-prompt', isResume ? dynamic : morphCtx + dynamic);
