@@ -354,6 +354,9 @@ const timeAgo = (ms: number) => {
   return `${Math.floor(diff / 86400000)}d`;
 };
 
+// Module-level session list cache per environment (30 s TTL) — avoids redundant fetches on every mount
+const envSessionsCache = new Map<string, { data: any; ts: number }>();
+
 // Reusable environment group — renders session cards for one environment
 function EnvironmentGroup({ env, onSelect, maxVisible }: { env: EnvConfig; onSelect: (sessionId: string, display?: string, relayUrl?: string, relayToken?: string, project?: string, envId?: string) => void; maxVisible?: number }) {
   const [sessions, setSessions] = useState<any[]>([]);
@@ -365,15 +368,25 @@ function EnvironmentGroup({ env, onSelect, maxVisible }: { env: EnvConfig; onSel
   useEffect(() => {
     const base = env.relayUrl || '';
     const token = env.token || localStorage.getItem('morph-auth') || '';
+    const cacheKey = `${env.id}:${env.relayUrl}:${limit}`;
+    const applyRaw = (d: any) => {
+      const all = d.sessions || [];
+      const pins = getPinned(env.id);
+      const filtered = all.filter((s: any) => s.id !== FIXED_SESSION_ID);
+      const pinnedSessions = filtered.filter((s: any) => pins.has(s.id));
+      const unpinned = filtered.filter((s: any) => !pins.has(s.id)).slice(0, limit - pinnedSessions.length);
+      setSessions([...pinnedSessions, ...unpinned]);
+    };
+    const cached = envSessionsCache.get(cacheKey);
+    if (cached && Date.now() - cached.ts < 30_000) {
+      applyRaw(cached.data);
+      return;
+    }
     fetch(`${base}/v2/claude/sessions?limit=${env.maxSessions || 30}`, { headers: { 'Authorization': `Bearer ${token}` } })
       .then(r => r.json())
       .then(d => {
-        const all = d.sessions || [];
-        const pins = getPinned(env.id);
-        const filtered = all.filter((s: any) => s.id !== FIXED_SESSION_ID);
-        const pinnedSessions = filtered.filter((s: any) => pins.has(s.id));
-        const unpinned = filtered.filter((s: any) => !pins.has(s.id)).slice(0, limit - pinnedSessions.length);
-        setSessions([...pinnedSessions, ...unpinned]);
+        envSessionsCache.set(cacheKey, { data: d, ts: Date.now() });
+        applyRaw(d);
       })
       .catch(() => setSessions([]));
   }, [env.id, env.relayUrl, limit]);
@@ -890,7 +903,8 @@ export default function App() {
   const [selectedSession, setSelectedSession] = useState<{ id: string; display: string; relayUrl?: string; relayToken?: string; project?: string; envId?: string } | null>(null);
   const [sessionMessages, setSessionMessages] = useState<Message[]>([]);
   const [hasVisitedConfig, setHasVisitedConfig] = useState(false);
-  const liveSessionIdRef = useRef<string | null>(null); // tracks active process ID after resume;
+  const liveSessionIdRef = useRef<string | null>(null); // tracks active process ID after resume
+  const sessionAliveCache = useRef<Map<string, { alive: boolean; ts: number }>>(new Map());
   const idleTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const inputBarRef = useRef<HTMLDivElement>(null);
 
@@ -1014,6 +1028,15 @@ export default function App() {
         }));
         setSessionMessages(prev => [...msgs, ...prev.filter(m => m.pending)]);
         sessionCache.current.set(selectedSession.id, msgs);
+      })
+      .catch(() => {});
+    // Pre-fetch alive status so first send skips the blocking check
+    fetch(`${base}/v2/claude/active`, { headers: { 'Authorization': `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(d => {
+        const sid = selectedSession.id;
+        const alive = !!(d.sessions || []).find((s: any) => s.id === sid && s.alive);
+        sessionAliveCache.current.set(sid, { alive, ts: Date.now() });
       })
       .catch(() => {});
     // Subscribe socket for live updates
@@ -1328,29 +1351,37 @@ export default function App() {
                 const liveId = liveSessionIdRef.current || selectedSession.id;
                 const token = selectedSession.relayToken || localStorage.getItem('morph-auth') || '';
                 const base = selectedSession.relayUrl || '';
-                const checkRes = await fetch(`${base}/v2/claude/active`, { headers: { 'Authorization': `Bearer ${token}` } });
-                const checkData = await checkRes.json();
-                const alive = (checkData.sessions || []).find((s: any) => s.id === liveId && s.alive);
-                if (alive) {
+                // Use pre-fetched alive status (5s TTL) to skip the blocking check on first send
+                const ALIVE_TTL = 5_000;
+                const cachedAlive = sessionAliveCache.current.get(liveId);
+                const aliveFast = cachedAlive && Date.now() - cachedAlive.ts < ALIVE_TTL && cachedAlive.alive;
+                if (aliveFast) {
                   await sendToSession(liveId, text);
                 } else {
-                  const newSid = await resumeSession(selectedSession.id, text);
-                  liveSessionIdRef.current = newSid; // track resumed process ID for subsequent sends
-                  // Update subscription if session ID changed (subscribeSessionMessages auto-cleans old)
-                  if (newSid !== selectedSession.id) {
-                    subscribeSessionMessages(newSid, (msg) => {
-                      setSessionMessages(prev => {
-                        if (msg.role === 'agent' && msg.type === 'text') {
-                          const lastIdx = prev.length - 1;
-                          if (lastIdx >= 0 && prev[lastIdx].role === 'agent' && prev[lastIdx].type === 'text') {
-                            const next = [...prev];
-                            next[lastIdx] = { ...next[lastIdx], content: msg.content };
-                            return next;
+                  const checkRes = await fetch(`${base}/v2/claude/active`, { headers: { 'Authorization': `Bearer ${token}` } });
+                  const checkData = await checkRes.json();
+                  const alive = (checkData.sessions || []).find((s: any) => s.id === liveId && s.alive);
+                  if (alive) {
+                    await sendToSession(liveId, text);
+                  } else {
+                    const newSid = await resumeSession(selectedSession.id, text);
+                    liveSessionIdRef.current = newSid; // track resumed process ID for subsequent sends
+                    // Update subscription if session ID changed (subscribeSessionMessages auto-cleans old)
+                    if (newSid !== selectedSession.id) {
+                      subscribeSessionMessages(newSid, (msg) => {
+                        setSessionMessages(prev => {
+                          if (msg.role === 'agent' && msg.type === 'text') {
+                            const lastIdx = prev.length - 1;
+                            if (lastIdx >= 0 && prev[lastIdx].role === 'agent' && prev[lastIdx].type === 'text') {
+                              const next = [...prev];
+                              next[lastIdx] = { ...next[lastIdx], content: msg.content };
+                              return next;
+                            }
                           }
-                        }
-                        return [...prev, msg];
+                          return [...prev, msg];
+                        });
                       });
-                    });
+                    }
                   }
                 }
                 // Confirm sent
