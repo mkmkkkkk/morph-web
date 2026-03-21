@@ -774,13 +774,14 @@ function TabBar({ tab, onTab, disabled }: { tab: string; onTab: (t: string) => v
 }
 
 // ─── Session Terminal (slide-in from right, swipe to go back) ───
-function SessionTerminal({ session, messages, onBack, onSend, onInterrupt, keyboardOpen }: {
+function SessionTerminal({ session, messages, onBack, onSend, onInterrupt, keyboardOpen, isProcessing = false }: {
   session: { id: string; display: string };
   messages: Message[];
   onBack: () => void;
   onSend: (text: string) => void;
   onInterrupt: () => void;
   keyboardOpen?: boolean;
+  isProcessing?: boolean;
 }) {
   const dragX = useMotionValue(0);
   const swipeStart = useRef<{ x: number } | null>(null);
@@ -837,21 +838,26 @@ function SessionTerminal({ session, messages, onBack, onSend, onInterrupt, keybo
       {/* Messages + ESC overlay */}
       <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
         <TerminalOverlay messages={messages} visible={true} />
+        {(() => { const w = isProcessing ? IDLE_WORDS[Math.floor(Date.now() / 4000) % IDLE_WORDS.length] : 'idle'; return (
         <div style={{ position: 'absolute', bottom: 4, right: 8, display: 'flex', alignItems: 'center', gap: 6, pointerEvents: 'none' }}>
+          <span style={{ color: w === 'compacting...' ? '#3a8eff' : '#444', fontSize: 11, fontFamily: 'Menlo, monospace' }}>
+            {w}
+          </span>
           <button tabIndex={-1} onClick={onInterrupt} style={{
             padding: '3px 10px', borderRadius: 5, cursor: 'pointer', flexShrink: 0,
-            border: '1px solid rgba(224,160,48,0.25)',
-            backgroundColor: 'rgba(17,17,17,0.7)',
-            color: '#666', fontSize: 11, fontFamily: 'Menlo, monospace',
+            border: isProcessing ? '1px solid rgba(255,59,48,0.4)' : '1px solid rgba(255,255,255,0.08)',
+            backgroundColor: isProcessing ? 'rgba(255,59,48,0.15)' : 'rgba(17,17,17,0.7)',
+            color: isProcessing ? '#ff453a' : '#444', fontSize: 11, fontFamily: 'Menlo, monospace',
             pointerEvents: 'auto',
           }}>ESC</button>
         </div>
+        ); })()}
       </div>
 
       {/* Shared InputBar — amber tint, no terminal toggle (header has Back) */}
       <InputBar
         onSend={flow.handleSend} onStop={onInterrupt}
-        isProcessing={false} connected={true}
+        isProcessing={isProcessing} connected={true}
         onAttach={flow.toggleAttach}
         onSketch={() => flow.setSketchOpen(true)}
         pendingSketch={flow.pendingSketch ? flow.pendingSketch.dataUrl : null}
@@ -920,6 +926,8 @@ export default function App() {
   const liveSessionIdRef = useRef<string | null>(null); // tracks active process ID after resume
   const sessionAliveCache = useRef<Map<string, { alive: boolean; ts: number }>>(new Map());
   const idleTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const [sessionIsProcessing, setSessionIsProcessing] = useState(false);
+  const sessionIdleTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const inputBarRef = useRef<HTMLDivElement>(null);
 
   // Detect iOS keyboard via visualViewport resize
@@ -1027,6 +1035,8 @@ export default function App() {
   useEffect(() => {
     if (!selectedSession) return;
     liveSessionIdRef.current = selectedSession.id; // reset live ID on new session open
+    setSessionIsProcessing(false);
+    clearTimeout(sessionIdleTimer.current);
     // Instant load from cache, then always refetch for freshness
     const cached = sessionCache.current.get(selectedSession.id);
     if (cached) setSessionMessages(cached);
@@ -1076,6 +1086,13 @@ export default function App() {
         }
         return [...prev, msg];
       });
+      // Track processing state for other sessions (mirrors main session logic)
+      if (msg.role === 'agent' || msg.type === 'tool' || msg.type === 'thinking') setSessionIsProcessing(true);
+      if (msg.type === 'status' && msg.content.includes('done')) setSessionIsProcessing(false);
+      if (msg.type === 'status' && msg.content.includes('exit')) setSessionIsProcessing(false);
+      if (msg.type === 'error') setSessionIsProcessing(false);
+      clearTimeout(sessionIdleTimer.current);
+      sessionIdleTimer.current = setTimeout(() => setSessionIsProcessing(false), 30000);
       // After first agent response, generate title via Haiku if missing
       if (!displayRefreshed && msg.role === 'agent' && msg.type === 'text') {
         displayRefreshed = true;
@@ -1121,6 +1138,7 @@ export default function App() {
           : clearTimeout(idleCbHandle as ReturnType<typeof setTimeout>);
       }
       unsubscribeSessionMessages();
+      clearTimeout(sessionIdleTimer.current);
     };
   }, [selectedSession?.id]);
 
@@ -1303,13 +1321,14 @@ export default function App() {
           <div style={{ flex: '1 1 0', minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
             <TerminalOverlay messages={messages} visible={true} />
             {/* ESC — floating overlay at bottom-right of terminal */}
+            {(() => { const w = isProcessing ? IDLE_WORDS[Math.floor(Date.now() / 4000) % IDLE_WORDS.length] : 'idle'; return (
             <div style={{
               position: 'absolute', bottom: 4, right: 8,
               display: 'flex', alignItems: 'center', gap: 6,
               pointerEvents: 'none',
             }}>
-              <span style={{ color: '#444', fontSize: 11, fontFamily: 'Menlo, monospace' }}>
-                {isProcessing ? IDLE_WORDS[Math.floor(Date.now() / 4000) % IDLE_WORDS.length] : 'idle'}
+              <span style={{ color: w === 'compacting...' ? '#3a8eff' : '#444', fontSize: 11, fontFamily: 'Menlo, monospace' }}>
+                {w}
               </span>
               <button tabIndex={-1} onClick={interrupt} style={{
                 padding: '3px 10px', borderRadius: 5, cursor: 'pointer', flexShrink: 0,
@@ -1319,6 +1338,7 @@ export default function App() {
                 pointerEvents: 'auto',
               }}>ESC</button>
             </div>
+            ); })()}
           </div>
         </div>
       </div>
@@ -1393,6 +1413,7 @@ export default function App() {
           <SessionTerminal
             session={selectedSession}
             messages={sessionMessages}
+            isProcessing={sessionIsProcessing}
             onBack={() => setSelectedSession(null)}
             onInterrupt={() => interruptSession(liveSessionIdRef.current || selectedSession.id)}
             onSend={async (text) => {
