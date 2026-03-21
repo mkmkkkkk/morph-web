@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, useMotionValue } from 'framer-motion';
-import { connect, send, interrupt, clearSession, setCurrentTab, fetchSessions, onMessage, onState, getState, sendToSession, resumeSession, isSessionAlive, loadHistory, subscribe, subscribeSessionMessages, unsubscribeSessionMessages, addRelay, registerSession, type Message, type RelayConfig } from './lib/connection';
+import { connect, send, interrupt, interruptSession, clearSession, setCurrentTab, fetchSessions, onMessage, onState, getState, sendToSession, resumeSession, isSessionAlive, loadHistory, subscribe, subscribeSessionMessages, unsubscribeSessionMessages, addRelay, registerSession, type Message, type RelayConfig } from './lib/connection';
 import Sketch from './components/Sketch';
 
 // Cache-bust canvas.html per build (not per page load) — allows HTTP caching across reloads
@@ -774,11 +774,12 @@ function TabBar({ tab, onTab, disabled }: { tab: string; onTab: (t: string) => v
 }
 
 // ─── Session Terminal (slide-in from right, swipe to go back) ───
-function SessionTerminal({ session, messages, onBack, onSend, keyboardOpen }: {
+function SessionTerminal({ session, messages, onBack, onSend, onInterrupt, keyboardOpen }: {
   session: { id: string; display: string };
   messages: Message[];
   onBack: () => void;
   onSend: (text: string) => void;
+  onInterrupt: () => void;
   keyboardOpen?: boolean;
 }) {
   const dragX = useMotionValue(0);
@@ -833,12 +834,23 @@ function SessionTerminal({ session, messages, onBack, onSend, keyboardOpen }: {
         <span style={{ color: '#777', fontSize: 11, fontFamily: 'Menlo, monospace' }}>{session.id.slice(0, 8)}</span>
       </div>
 
-      {/* Messages */}
-      <TerminalOverlay messages={messages} visible={true} />
+      {/* Messages + ESC overlay */}
+      <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
+        <TerminalOverlay messages={messages} visible={true} />
+        <div style={{ position: 'absolute', bottom: 4, right: 8, display: 'flex', alignItems: 'center', gap: 6, pointerEvents: 'none' }}>
+          <button tabIndex={-1} onClick={onInterrupt} style={{
+            padding: '3px 10px', borderRadius: 5, cursor: 'pointer', flexShrink: 0,
+            border: '1px solid rgba(224,160,48,0.25)',
+            backgroundColor: 'rgba(17,17,17,0.7)',
+            color: '#666', fontSize: 11, fontFamily: 'Menlo, monospace',
+            pointerEvents: 'auto',
+          }}>ESC</button>
+        </div>
+      </div>
 
-      {/* Shared InputBar — blue tint, no terminal toggle (header has Back) */}
+      {/* Shared InputBar — amber tint, no terminal toggle (header has Back) */}
       <InputBar
-        onSend={flow.handleSend} onStop={() => {}}
+        onSend={flow.handleSend} onStop={onInterrupt}
         isProcessing={false} connected={true}
         onAttach={flow.toggleAttach}
         onSketch={() => flow.setSketchOpen(true)}
@@ -1370,6 +1382,7 @@ export default function App() {
             session={selectedSession}
             messages={sessionMessages}
             onBack={() => setSelectedSession(null)}
+            onInterrupt={() => interruptSession(liveSessionIdRef.current || selectedSession.id)}
             onSend={async (text) => {
               // Show user message immediately
               const msgId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
