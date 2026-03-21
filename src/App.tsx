@@ -952,34 +952,43 @@ export default function App() {
   const sessionCacheTs = useRef<Map<string, number>>(new Map());
   useEffect(() => {
     if (!authed) return;
-    const token = localStorage.getItem('morph-auth') || '';
-    // Delay start by 1.5s to let cold load and first session switch finish first
-    const startTimer = setTimeout(() => {
-      fetch('/v2/claude/sessions?limit=30', { headers: { 'Authorization': `Bearer ${token}` } })
-        .then(r => r.json())
-        .then(d => {
-          const sessions = (d.sessions || []).filter((s: any) => s.id !== 'a0a0a0a0-0e00-4000-a000-000000000002');
-          // Stagger individual fetches to avoid burst
-          sessions.forEach((s: any, i: number) => {
-            setTimeout(() => {
-              fetch(`/v2/claude/history/${s.id}?limit=50`, { headers: { 'Authorization': `Bearer ${token}` } })
-                .then(r => r.json())
-                .then(d => {
-                  const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-                  const msgs = (d.messages || []).map((m: any) => ({
-                    id: uid(), role: m.role, type: m.type, content: m.content, name: m.name,
-                    ts: m.ts ? new Date(m.ts).getTime() : Date.now(),
-                  }));
-                  sessionCache.current.set(s.id, msgs);
-                  sessionCacheTs.current.set(s.id, Date.now());
-                })
-                .catch(() => {});
-            }, i * 150); // 150ms stagger
-          });
-        })
-        .catch(() => {});
-    }, 1500);
-    return () => clearTimeout(startTimer);
+    const mainToken = localStorage.getItem('morph-auth') || '';
+    const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const MORPH_SESSION = 'a0a0a0a0-0e00-4000-a000-000000000002';
+
+    function preloadEnv(base: string, token: string, startDelay: number) {
+      setTimeout(() => {
+        fetch(`${base}/v2/claude/sessions?limit=30`, { headers: { 'Authorization': `Bearer ${token}` } })
+          .then(r => r.json())
+          .then(d => {
+            const sessions = (d.sessions || []).filter((s: any) => s.id !== MORPH_SESSION);
+            sessions.forEach((s: any, i: number) => {
+              setTimeout(() => {
+                fetch(`${base}/v2/claude/history/${s.id}?limit=50`, { headers: { 'Authorization': `Bearer ${token}` } })
+                  .then(r => r.json())
+                  .then(d => {
+                    const msgs = (d.messages || []).map((m: any) => ({
+                      id: uid(), role: m.role, type: m.type, content: m.content, name: m.name,
+                      ts: m.ts ? new Date(m.ts).getTime() : Date.now(),
+                    }));
+                    sessionCache.current.set(s.id, msgs);
+                    sessionCacheTs.current.set(s.id, Date.now());
+                  })
+                  .catch(() => {});
+              }, i * 200);
+            });
+          })
+          .catch(() => {});
+      }, startDelay);
+    }
+
+    // Workspace (local relay) — start at 1.5s
+    preloadEnv('', mainToken, 1500);
+    // All other envs (e.g. tensor-revive via proxy) — start at 4s to not compete with workspace
+    const otherEnvs = getEnvironments().filter(e => e.relayUrl);
+    otherEnvs.forEach((env, i) => {
+      preloadEnv(env.relayUrl, env.token || mainToken, 4000 + i * 1000);
+    });
   }, [authed]);
 
   // Pull server-defined environments from relay (runs once after auth)
