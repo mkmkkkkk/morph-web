@@ -12,18 +12,27 @@ const BUILD_TS = typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : Date.n
 const IDLE_WORDS = ['thinking...', 'pondering...', 'wondering...', 'reasoning...', 'considering...', 'analyzing...', 'processing...'];
 
 // ─── Shared send flow: attachments + fire-and-forget upload ───
-function useSendFlow(sendFn: (msg: string) => void) {
+function useSendFlow(sendFn: (msg: string) => void, relayConfig?: { relayUrl?: string; relayToken?: string }) {
   const [pendingSketch, setPendingSketch] = useState<{ dataUrl: string; bounds: { x: number; y: number; w: number; h: number } } | null>(null);
   const [pendingFile, setPendingFile] = useState<{ path: string; isImage: boolean } | null>(null);
   const [attachMenu, setAttachMenu] = useState(false);
   const [sketchOpen, setSketchOpen] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  // Refs so async handlers always use current relay config without stale closure
+  const relayUrlRef = useRef(relayConfig?.relayUrl);
+  const relayTokenRef = useRef(relayConfig?.relayToken);
+  relayUrlRef.current = relayConfig?.relayUrl;
+  relayTokenRef.current = relayConfig?.relayToken;
 
   const handleSend = useCallback((text: string) => {
-    if (text === '/clear') return; // handled upstream
+    // Pass /clear through to sendFn — session onSend handles it; main handleSend catches it before reaching here
     const sketch = pendingSketch;
     const file = pendingFile;
     setPendingSketch(null);
     setPendingFile(null);
+
+    if (text === '/clear') { sendFn(text); return; }
 
     (async () => {
       let prefix = '';
@@ -31,8 +40,9 @@ function useSendFlow(sendFn: (msg: string) => void) {
         const b64 = sketch.dataUrl.split(',')[1];
         const { x, y, w, h } = sketch.bounds;
         try {
-          const token = localStorage.getItem('morph-auth') || '';
-          const res = await fetch('/v2/claude/upload', {
+          const token = relayTokenRef.current || localStorage.getItem('morph-auth') || '';
+          const base = relayUrlRef.current || '';
+          const res = await fetch(`${base}/v2/claude/upload`, {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ filename: `sketch-${Date.now()}.png`, base64: b64, mime: 'image/png' }),
@@ -54,6 +64,8 @@ function useSendFlow(sendFn: (msg: string) => void) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const setPendingFileRef = useRef(setPendingFile);
   setPendingFileRef.current = setPendingFile;
+  const setUploadErrorRef = useRef(setUploadError);
+  setUploadErrorRef.current = setUploadError;
 
   useEffect(() => {
     const makeInput = (accept: string) => {
@@ -80,15 +92,33 @@ function useSendFlow(sendFn: (msg: string) => void) {
         rd.readAsDataURL(f);
       });
       try {
-        const token = localStorage.getItem('morph-auth') || '';
-        const res = await fetch('/v2/claude/upload', {
+        const token = relayTokenRef.current || localStorage.getItem('morph-auth') || '';
+        const base = relayUrlRef.current || '';
+        const res = await fetch(`${base}/v2/claude/upload`, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ filename: f.name, base64: b64, mime: f.type }),
         });
+        if (!res.ok) {
+          const errText = await res.text().catch(() => '');
+          const msg = errText ? errText.slice(0, 100) : `HTTP ${res.status}`;
+          console.error('[upload]', res.status, msg);
+          setUploadErrorRef.current(msg);
+          return;
+        }
         const data = await res.json();
-        if (data.path) setPendingFileRef.current({ path: data.path, isImage: f.type.startsWith('image/') });
-      } catch (err) { console.error('[upload]', err); }
+        if (data.path) {
+          setPendingFileRef.current({ path: data.path, isImage: f.type.startsWith('image/') });
+        } else {
+          const msg = data.error || 'no path returned';
+          console.error('[upload] no path:', msg);
+          setUploadErrorRef.current(msg);
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('[upload]', msg);
+        setUploadErrorRef.current(msg);
+      }
     };
 
     const photoHandler = handleChange(photoInput);
@@ -123,6 +153,7 @@ function useSendFlow(sendFn: (msg: string) => void) {
     pendingSketch, pendingFile, attachMenu, sketchOpen,
     setSketchOpen, setAttachMenu,
     handleSend, uploadFile, handleSketchInsert, clearPending, toggleAttach,
+    uploadError, clearUploadError: () => setUploadError(null),
   };
 }
 
@@ -358,7 +389,7 @@ const timeAgo = (ms: number) => {
 const envSessionsCache = new Map<string, { data: any; ts: number }>();
 
 // Reusable environment group — renders session cards for one environment
-function EnvironmentGroup({ env, onSelect, maxVisible, initialExpanded = true }: { env: EnvConfig; onSelect: (sessionId: string, display?: string, relayUrl?: string, relayToken?: string, project?: string, envId?: string) => void; maxVisible?: number; initialExpanded?: boolean }) {
+function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpanded = true }: { env: EnvConfig; onSelect: (sessionId: string, display?: string, relayUrl?: string, relayToken?: string, project?: string, envId?: string) => void; onNewSession?: (envId: string, relayUrl?: string, relayToken?: string) => void; maxVisible?: number; initialExpanded?: boolean }) {
   const [sessions, setSessions] = useState<any[]>([]);
   const [viewed, setViewed] = useState<Set<string>>(getViewed);
   const [pinned, setPinned] = useState<Set<string>>(() => getPinned(env.id));
@@ -427,6 +458,10 @@ function EnvironmentGroup({ env, onSelect, maxVisible, initialExpanded = true }:
         {activeCount > 0 && <span style={{ fontSize: 9, color: '#30d158' }}>{activeCount} active</span>}
         {unviewedCount > 0 && <span style={{ fontSize: 9, color: '#ffcc00' }}>{unviewedCount} new</span>}
         <span style={{ color: '#888', fontSize: 10 }}>{expanded ? '▾' : '▸'}</span>
+        <span
+          onClick={(e) => { e.stopPropagation(); onNewSession?.(env.id, env.relayUrl, env.token); }}
+          style={{ marginLeft: 'auto', color: '#555', fontSize: 18, lineHeight: 1, padding: '0 2px', cursor: 'pointer', userSelect: 'none' }}
+        >+</span>
       </div>
       <AnimatePresence>
         {expanded && (
@@ -537,7 +572,7 @@ function UsageWidget() {
 }
 
 // Canvas overlay — renders all environment groups
-function SessionCards({ onSelect }: { onSelect: (sessionId: string, display?: string, relayUrl?: string, relayToken?: string, project?: string, envId?: string) => void }) {
+function SessionCards({ onSelect, onNewSession }: { onSelect: (sessionId: string, display?: string, relayUrl?: string, relayToken?: string, project?: string, envId?: string) => void; onNewSession?: (envId: string, relayUrl?: string, relayToken?: string) => void }) {
   const [envs, setEnvs] = useState<EnvConfig[]>(getEnvironments);
   useEffect(() => {
     const onStorage = () => setEnvs(getEnvironments());
@@ -553,7 +588,7 @@ function SessionCards({ onSelect }: { onSelect: (sessionId: string, display?: st
   return (
     <div style={{ position: 'absolute', top: 90, left: 0, right: 0, bottom: 0, zIndex: 2, padding: '0 8px', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
       {envs.map(env => (
-        <EnvironmentGroup key={env.id} env={env} onSelect={onSelect} />
+        <EnvironmentGroup key={env.id} env={env} onSelect={onSelect} onNewSession={onNewSession} />
       ))}
     </div>
   );
@@ -775,7 +810,7 @@ function TabBar({ tab, onTab, disabled }: { tab: string; onTab: (t: string) => v
 
 // ─── Session Terminal (slide-in from right, swipe to go back) ───
 function SessionTerminal({ session, messages, onBack, onSend, onInterrupt, keyboardOpen, isProcessing = false, isCompacting = false }: {
-  session: { id: string; display: string };
+  session: { id: string; display: string; relayUrl?: string; relayToken?: string };
   messages: Message[];
   onBack: () => void;
   onSend: (text: string) => void;
@@ -788,7 +823,7 @@ function SessionTerminal({ session, messages, onBack, onSend, onInterrupt, keybo
   const swipeStart = useRef<{ x: number } | null>(null);
 
   // Swipe-back handled entirely by React touch handlers below.
-  const flow = useSendFlow(onSend);
+  const flow = useSendFlow(onSend, { relayUrl: session.relayUrl, relayToken: session.relayToken });
 
   const onTouchStart = (e: React.TouchEvent) => {
     const x = e.touches[0].clientX;
@@ -855,6 +890,16 @@ function SessionTerminal({ session, messages, onBack, onSend, onInterrupt, keybo
         ); })()}
       </div>
 
+      {/* Upload error banner — tap to dismiss */}
+      {flow.uploadError && (
+        <div onClick={flow.clearUploadError} style={{
+          padding: '8px 14px', backgroundColor: 'rgba(255,59,48,0.85)',
+          color: '#fff', fontSize: 13, fontFamily: '-apple-system, system-ui, sans-serif',
+          flexShrink: 0, cursor: 'pointer',
+        }}>
+          Upload failed: {flow.uploadError}
+        </div>
+      )}
       {/* Shared InputBar — amber tint, no terminal toggle (header has Back) */}
       <InputBar
         onSend={flow.handleSend} onStop={onInterrupt}
@@ -1270,10 +1315,19 @@ export default function App() {
           {/* Usage widget — top right */}
           <UsageWidget />
           {/* Session cards — floating overlay */}
-          <SessionCards onSelect={(sid, display, relayUrl, relayToken, project, envId) => {
-            setSessionMessages(sessionCache.current.get(sid) || []);
-            setSelectedSession({ id: sid, display: display || sid.slice(0, 8), relayUrl, relayToken, project, envId });
-          }} />
+          <SessionCards
+            onSelect={(sid, display, relayUrl, relayToken, project, envId) => {
+              setSessionMessages(sessionCache.current.get(sid) || []);
+              setSelectedSession({ id: sid, display: display || sid.slice(0, 8), relayUrl, relayToken, project, envId });
+            }}
+            onNewSession={(envId, relayUrl, relayToken) => {
+              const sid = crypto.randomUUID();
+              if (envId !== 'workspace') registerSession(sid, envId);
+              setSessionMessages([]);
+              liveSessionIdRef.current = null;
+              setSelectedSession({ id: sid, display: 'New Session', relayUrl, relayToken, envId });
+            }}
+          />
           {/* Canvas iframe — fills full area */}
           <div style={{ flex: 1, position: 'relative', backgroundColor: '#0a0a0a' }}>
             {!canvasLoaded && (
@@ -1446,6 +1500,12 @@ export default function App() {
             onBack={() => setSelectedSession(null)}
             onInterrupt={() => interruptSession(liveSessionIdRef.current || selectedSession.id)}
             onSend={async (text) => {
+              if (text === '/clear') {
+                setSessionMessages([]);
+                sessionCache.current.delete(selectedSession.id);
+                setSessionIsProcessing(false);
+                return;
+              }
               // Show user message immediately
               const msgId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
               setSessionMessages(prev => [...prev, { id: msgId, role: 'user', type: 'text', content: text, ts: Date.now(), pending: true }]);
