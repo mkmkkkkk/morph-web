@@ -262,6 +262,30 @@ function listAllProjects() {
  */
 export function registerClaudeAPI(app, io, authMiddleware) {
 
+  // ─── REST: List configured relay environments (server-defined, no per-device config needed) ───
+  // Set RELAY_ENVS env var as JSON: [{"id":"tr","label":"TR Machine","relayUrl":"https://...","token":"...","maxSessions":6}]
+
+  app.get('/v2/claude/environments', { preHandler: authMiddleware }, async () => {
+    const envs = [];
+    try {
+      const raw = process.env.RELAY_ENVS;
+      if (raw) {
+        for (const e of JSON.parse(raw)) {
+          if (!e.id || !e.relayUrl) continue;
+          // Return proxy URLs — never expose the actual relay URL or token to the client
+          envs.push({
+            id: e.id,
+            label: e.label || e.id,
+            maxSessions: e.maxSessions || 6,
+            relayUrl: `/relay-proxy/${e.id}`,
+            socketPath: `/relay-proxy/${e.id}/v1/updates`,
+          });
+        }
+      }
+    } catch {}
+    return { environments: envs };
+  });
+
   // ─── REST: Start or send message ───
 
   app.post('/v2/claude/send', { preHandler: authMiddleware }, async (request) => {
@@ -363,21 +387,23 @@ export function registerClaudeAPI(app, io, authMiddleware) {
     const sid = request.params.sessionId;
     const limit = Math.min(parseInt(request.query.limit) || 50, 100); // cap at 100
     const claudeDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
+    const projectsDir = join(claudeDir, 'projects');
 
-    // Search all project dirs — session could be in any project, not just /workspace
-    let sessionFile = null;
+    // Find session file: try default cwd first, then search all project dirs
+    let raw = null;
+    const defaultCwd = process.env.DEFAULT_CWD || '/workspace';
+    const defaultProjectId = resolve(defaultCwd).replace(/[\\\/.:]/g, '-');
     try {
-      const projectsDir = join(claudeDir, 'projects');
-      const dirs = readdirSync(projectsDir);
-      for (const dir of dirs) {
-        const candidate = join(projectsDir, dir, `${sid}.jsonl`);
-        try { statSync(candidate); sessionFile = candidate; break; } catch {}
-      }
-    } catch {}
-    if (!sessionFile) return { messages: [] };
+      raw = readFileSync(join(projectsDir, defaultProjectId, `${sid}.jsonl`), 'utf-8');
+    } catch {
+      try {
+        for (const dir of readdirSync(projectsDir)) {
+          try { raw = readFileSync(join(projectsDir, dir, `${sid}.jsonl`), 'utf-8'); break; } catch {}
+        }
+      } catch {}
+    }
 
     try {
-      const raw = readFileSync(sessionFile, 'utf-8');
       const lines = raw.split('\n').filter(l => l.trim());
 
       // Parse and extract displayable messages (last N)
@@ -453,17 +479,10 @@ export function registerClaudeAPI(app, io, authMiddleware) {
     const { sessionId } = request.body || {};
     if (!sessionId) return { error: 'sessionId required' };
 
-    // Read last 10 messages from session history — search all project dirs
+    // Read last 10 messages from session history
+    const projectId = resolve('/workspace').replace(/[\\\/.:]/g, '-');
     const claudeDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
-    let sessionFile = null;
-    try {
-      const dirs = readdirSync(join(claudeDir, 'projects'));
-      for (const dir of dirs) {
-        const c = join(claudeDir, 'projects', dir, `${sessionId}.jsonl`);
-        try { statSync(c); sessionFile = c; break; } catch {}
-      }
-    } catch {}
-    if (!sessionFile) return { title: 'Untitled' };
+    const sessionFile = join(claudeDir, 'projects', projectId, `${sessionId}.jsonl`);
 
     let snippet = '';
     try {
