@@ -1061,18 +1061,9 @@ export default function App() {
     } else {
       doFetch();
     }
-    // Pre-fetch alive status so first send skips the blocking check
-    fetch(`${base}/v2/claude/active`, { headers: { 'Authorization': `Bearer ${token}` } })
-      .then(r => r.json())
-      .then(d => {
-        const sid = selectedSession.id;
-        const alive = !!(d.sessions || []).find((s: any) => s.id === sid && s.alive);
-        sessionAliveCache.current.set(sid, { alive, ts: Date.now() });
-      })
-      .catch(() => {});
     // Subscribe socket for live updates
     let displayRefreshed = false;
-    subscribeSessionMessages(selectedSession.id, (msg) => {
+    const onSessionMsg = (msg: Message) => {
       setSessionMessages(prev => {
         // Streaming: update last agent text in-place
         if (msg.role === 'agent' && msg.type === 'text') {
@@ -1100,7 +1091,28 @@ export default function App() {
           })
           .catch(() => {});
       }
-    });
+    };
+    subscribeSessionMessages(selectedSession.id, onSessionMsg);
+    // Pre-fetch alive status; hydrate liveSessionIdRef from any existing resumed process
+    fetch(`${base}/v2/claude/active`, { headers: { 'Authorization': `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(d => {
+        const sid = selectedSession.id;
+        const sessions: any[] = d.sessions || [];
+        // Find most recently started process that is (or was resumed from) this session
+        const resumed = sessions
+          .filter((s: any) => (s.resumedFrom === sid || s.id === sid) && s.alive)
+          .sort((a: any, b: any) => b.startedAt - a.startedAt)[0];
+        if (resumed) {
+          liveSessionIdRef.current = resumed.id;
+          sessionAliveCache.current.set(resumed.id, { alive: true, ts: Date.now() });
+          // Re-subscribe to the live process ID so we receive its output
+          if (resumed.id !== sid) subscribeSessionMessages(resumed.id, onSessionMsg);
+        } else {
+          sessionAliveCache.current.set(sid, { alive: false, ts: Date.now() });
+        }
+      })
+      .catch(() => {});
     return () => {
       abortCtrl.abort();
       if (idleCbHandle !== null) {
