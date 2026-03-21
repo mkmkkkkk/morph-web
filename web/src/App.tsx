@@ -352,7 +352,7 @@ const timeAgo = (ms: number) => {
 };
 
 // Reusable environment group — renders session cards for one environment
-function EnvironmentGroup({ env, onSelect, maxVisible }: { env: EnvConfig; onSelect: (sessionId: string, display?: string, relayUrl?: string, relayToken?: string) => void; maxVisible?: number }) {
+function EnvironmentGroup({ env, onSelect, maxVisible }: { env: EnvConfig; onSelect: (sessionId: string, display?: string, relayUrl?: string, relayToken?: string, project?: string) => void; maxVisible?: number }) {
   const [sessions, setSessions] = useState<any[]>([]);
   const [viewed, setViewed] = useState<Set<string>>(getViewed);
   const [pinned, setPinned] = useState<Set<string>>(() => getPinned(env.id));
@@ -392,7 +392,7 @@ function EnvironmentGroup({ env, onSelect, maxVisible }: { env: EnvConfig; onSel
     const s = sessions.find(x => x.id === id);
     // Map session to its relay so socket.io events are routed correctly
     if (env.id !== 'workspace') registerSession(id, env.id);
-    onSelect(id, s?.display, env.relayUrl, env.token);
+    onSelect(id, s?.display, env.relayUrl, env.token, s?.project);
   };
 
   if (sessions.length === 0) return null;
@@ -519,7 +519,7 @@ function UsageWidget() {
 }
 
 // Canvas overlay — renders all environment groups
-function SessionCards({ onSelect }: { onSelect: (sessionId: string, display?: string, relayUrl?: string, relayToken?: string) => void }) {
+function SessionCards({ onSelect }: { onSelect: (sessionId: string, display?: string, relayUrl?: string, relayToken?: string, project?: string) => void }) {
   const [envs, setEnvs] = useState<EnvConfig[]>(getEnvironments);
   useEffect(() => {
     const onStorage = () => setEnvs(getEnvironments());
@@ -876,7 +876,7 @@ export default function App() {
   const [canvasLoaded, setCanvasLoaded] = useState(false);
   const mainFlow = useSendFlow(send);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
-  const [selectedSession, setSelectedSession] = useState<{ id: string; display: string; relayUrl?: string; relayToken?: string } | null>(null);
+  const [selectedSession, setSelectedSession] = useState<{ id: string; display: string; relayUrl?: string; relayToken?: string; project?: string } | null>(null);
   const [sessionMessages, setSessionMessages] = useState<Message[]>([]);
   const liveSessionIdRef = useRef<string | null>(null); // tracks active process ID after resume;
   const idleTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -994,7 +994,8 @@ export default function App() {
       // Fallback: fetch if not cached
       const token = selectedSession.relayToken || localStorage.getItem('morph-auth') || '';
       const base = selectedSession.relayUrl || '';
-      fetch(`${base}/v2/claude/history/${selectedSession.id}?limit=50`, { headers: { 'Authorization': `Bearer ${token}` } })
+      const cwdParam = selectedSession.project ? `&cwd=${encodeURIComponent(selectedSession.project)}` : '';
+      fetch(`${base}/v2/claude/history/${selectedSession.id}?limit=50${cwdParam}`, { headers: { 'Authorization': `Bearer ${token}` } })
         .then(r => r.json())
         .then(d => {
           const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -1130,9 +1131,9 @@ export default function App() {
           {/* Usage widget — top right */}
           <UsageWidget />
           {/* Session cards — floating overlay */}
-          <SessionCards onSelect={(sid, display, relayUrl, relayToken) => {
+          <SessionCards onSelect={(sid, display, relayUrl, relayToken, project) => {
             setSessionMessages([]);
-            setSelectedSession({ id: sid, display: display || sid.slice(0, 8), relayUrl, relayToken });
+            setSelectedSession({ id: sid, display: display || sid.slice(0, 8), relayUrl, relayToken, project });
           }} />
           {/* Canvas iframe — fills full area */}
           <div style={{ flex: 1, position: 'relative', backgroundColor: '#0a0a0a' }}>

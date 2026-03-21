@@ -389,13 +389,16 @@ export function registerClaudeAPI(app, io, authMiddleware) {
     const claudeDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
     const projectsDir = join(claudeDir, 'projects');
 
-    // Find session file: try default cwd first, then search all project dirs
+    // Find session file: try client-supplied cwd first, then default, then search all project dirs
     let raw = null;
-    const defaultCwd = process.env.DEFAULT_CWD || '/workspace';
-    const defaultProjectId = resolve(defaultCwd).replace(/[\\\/.:]/g, '-');
-    try {
-      raw = readFileSync(join(projectsDir, defaultProjectId, `${sid}.jsonl`), 'utf-8');
-    } catch {
+    const cwds = [];
+    if (request.query.cwd) cwds.push(request.query.cwd);
+    cwds.push(process.env.DEFAULT_CWD || '/workspace');
+    for (const cwd of cwds) {
+      const pid = resolve(cwd).replace(/[\\\/.:]/g, '-');
+      try { raw = readFileSync(join(projectsDir, pid, `${sid}.jsonl`), 'utf-8'); break; } catch {}
+    }
+    if (!raw) {
       try {
         for (const dir of readdirSync(projectsDir)) {
           try { raw = readFileSync(join(projectsDir, dir, `${sid}.jsonl`), 'utf-8'); break; } catch {}
