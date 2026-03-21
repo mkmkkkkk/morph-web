@@ -457,7 +457,7 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
   const unviewedCount = sessions.filter(s => !s.active && !viewed.has(s.id)).length;
 
   return (
-    <div style={{ marginBottom: 12, pointerEvents: 'none' }}>
+    <div style={{ marginBottom: 12, pointerEvents: 'none', userSelect: 'none' }}>
       <div
         onClick={() => setExpanded(v => !v)}
         style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: expanded ? 6 : 0, cursor: 'pointer', pointerEvents: 'auto' }}
