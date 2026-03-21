@@ -345,10 +345,13 @@ export async function connect(): Promise<void> {
       const t = setTimeout(done, 3000);
     });
 
-    const history = await loadHistory(FIXED_SESSION, 30);
+    const [history, alive] = await Promise.all([
+      loadHistory(FIXED_SESSION, 30),
+      isSessionAlive(FIXED_SESSION),
+    ]);
     history.forEach(msg => routeMessage(FIXED_SESSION, msg));
 
-    if (!(await isSessionAlive(FIXED_SESSION))) {
+    if (!alive) {
       await apiPost('/v2/claude/send', {
         message: `This is Morph Web — a mobile terminal for the CEO to interact with Claude Code remotely.\nYou are a CTO-level AI assistant. Working directory: /workspace. You have full access to the codebase.\nThe CEO may also be running a separate Claude Code session on the desktop terminal — they share the same /workspace files.\nBe concise. Follow CLAUDE.md instructions. Ready for tasks.`,
         sessionId: FIXED_SESSION,
