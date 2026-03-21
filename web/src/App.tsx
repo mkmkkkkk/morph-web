@@ -9,7 +9,7 @@ declare const __BUILD_TIME__: string;
 const BUILD_TS = typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : Date.now().toString(36);
 
 // Module-level constant — avoids array allocation on every render
-const IDLE_WORDS = ['thinking...', 'pondering...', 'wondering...', 'reasoning...', 'considering...', 'analyzing...', 'processing...', 'compacting...'];
+const IDLE_WORDS = ['thinking...', 'pondering...', 'wondering...', 'reasoning...', 'considering...', 'analyzing...', 'processing...'];
 
 // ─── Shared send flow: attachments + fire-and-forget upload ───
 function useSendFlow(sendFn: (msg: string) => void) {
@@ -840,7 +840,7 @@ function SessionTerminal({ session, messages, onBack, onSend, onInterrupt, keybo
         <TerminalOverlay messages={messages} visible={true} />
         {(() => { const w = isProcessing ? IDLE_WORDS[Math.floor(Date.now() / 4000) % IDLE_WORDS.length] : 'idle'; return (
         <div style={{ position: 'absolute', bottom: 4, right: 8, display: 'flex', alignItems: 'center', gap: 6, pointerEvents: 'none' }}>
-          <span style={{ color: w === 'compacting...' ? '#3a8eff' : '#444', fontSize: 11, fontFamily: 'Menlo, monospace' }}>
+          <span style={{ color: '#444', fontSize: 11, fontFamily: 'Menlo, monospace' }}>
             {w}
           </span>
           <button tabIndex={-1} onClick={onInterrupt} style={{
@@ -1245,6 +1245,18 @@ export default function App() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', maxWidth: 600, margin: '0 auto', width: '100%' }}>
+      {/* Reconnecting toast */}
+      {connState !== 'connected' && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, zIndex: 99999,
+          background: 'rgba(255,159,10,0.95)', backdropFilter: 'blur(8px)',
+          color: '#000', fontSize: 13, fontWeight: 600,
+          textAlign: 'center', padding: '10px 16px',
+          paddingTop: 'max(10px, env(safe-area-inset-top))',
+        }}>
+          {connState === 'connecting' ? 'Reconnecting...' : 'Relay disconnected — reconnecting...'}
+        </div>
+      )}
       {/* Content area — tab-specific, always full height */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
         {/* Canvas view */}
@@ -1337,7 +1349,7 @@ export default function App() {
               display: 'flex', alignItems: 'center', gap: 6,
               pointerEvents: 'none',
             }}>
-              <span style={{ color: w === 'compacting...' ? '#3a8eff' : '#444', fontSize: 11, fontFamily: 'Menlo, monospace' }}>
+              <span style={{ color: '#444', fontSize: 11, fontFamily: 'Menlo, monospace' }}>
                 {w}
               </span>
               <button tabIndex={-1} onClick={interrupt} style={{
