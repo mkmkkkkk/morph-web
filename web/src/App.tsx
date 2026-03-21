@@ -1270,6 +1270,8 @@ export default function App() {
   const [inputBarHeight, setInputBarHeight] = useState(84);
   const prevCount = useRef(0);
   const dragging = useRef(false);
+  const hasMoved = useRef(false);
+  const latestClientY = useRef(0);
   const dragStartY = useRef(0);
   const dragStartH = useRef(40);
   const dragCurrentH = useRef(40);
@@ -1376,31 +1378,36 @@ export default function App() {
         }}>
           {/* Drag handle bar — drag to resize, tap to collapse */}
           <div
-            onClick={(e) => { if (!dragging.current) toggleTerminal(); }}
+            onClick={(e) => { if (!hasMoved.current) toggleTerminal(); }}
             onTouchStart={(e) => {
               dragging.current = true;
+              hasMoved.current = false;
               dragStartY.current = e.touches[0].clientY;
+              latestClientY.current = e.touches[0].clientY;
               dragStartH.current = terminalHeight;
               dragCurrentH.current = terminalHeight;
             }}
             onTouchMove={(e) => {
               if (!dragging.current) return;
+              hasMoved.current = true;
+              latestClientY.current = e.touches[0].clientY;
               if (rafPending.current) return;
               rafPending.current = true;
-              const clientY = e.touches[0].clientY;
               requestAnimationFrame(() => {
                 rafPending.current = false;
                 const containerH = (document.documentElement.clientHeight || 600);
-                const dy = dragStartY.current - clientY;
-                const newH = Math.max(20, Math.min(95, dragStartH.current + (dy / containerH * 100)));
+                const dy = dragStartY.current - latestClientY.current;
+                const newH = Math.max(5, Math.min(95, dragStartH.current + (dy / containerH * 100)));
                 dragCurrentH.current = newH;
                 if (terminalDivRef.current) terminalDivRef.current.style.height = `${newH}%`;
               });
             }}
             onTouchEnd={() => {
               const h = dragCurrentH.current;
-              if (h < 8) { setTerminalVisible(false); setTerminalHeight(40); }
-              else { setTerminalHeight(h); }
+              if (hasMoved.current) {
+                if (h < 8) { setTerminalVisible(false); setTerminalHeight(40); }
+                else { setTerminalHeight(h); }
+              }
               dragging.current = false;
             }}
             style={{
