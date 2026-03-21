@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, useMotionValue } from 'framer-motion';
-import { connect, send, interrupt, clearSession, setCurrentTab, fetchSessions, onMessage, onState, getState, sendToSession, resumeSession, isSessionAlive, loadHistory, subscribe, subscribeSessionMessages, unsubscribeSessionMessages, type Message } from './lib/connection';
+import { connect, send, interrupt, clearSession, setCurrentTab, fetchSessions, onMessage, onState, getState, sendToSession, resumeSession, isSessionAlive, loadHistory, subscribe, subscribeSessionMessages, unsubscribeSessionMessages, addRelay, registerSession, type Message, type RelayConfig } from './lib/connection';
 import Sketch from './components/Sketch';
 
 // Cache-bust canvas.html on each page load (not per render)
@@ -44,42 +44,53 @@ function useSendFlow(sendFn: (msg: string) => void) {
     })();
   }, [sendFn, pendingSketch, pendingFile]);
 
-  // Pre-configured hidden inputs — never mutate accept at click time (eliminates iOS picker delay)
+  // Persistent hidden file input — created once on mount, never re-created.
+  // iOS PWA is unreliable with dynamically-created inputs; a persistent DOM element is required.
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const setPendingFileRef = useRef(setPendingFile);
+  setPendingFileRef.current = setPendingFile;
 
   useEffect(() => {
-    const makeInput = (accept: string, handler: (f: File) => Promise<void>) => {
+    const makeInput = (accept: string) => {
       const input = document.createElement('input');
       input.type = 'file';
       input.accept = accept;
       input.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;opacity:0';
-      const onChange = async (e: Event) => {
-        const f = (e.target as HTMLInputElement).files?.[0];
-        if (!f) return;
-        await handler(f);
-        input.value = '';
-      };
-      input.addEventListener('change', onChange);
       document.body.appendChild(input);
-      return { input, onChange };
+      return input;
     };
 
-    const uploadHandler = (isImage: boolean) => async (f: File) => {
-      const b64: string = await new Promise(r => { const rd = new FileReader(); rd.onload = () => r((rd.result as string).split(',')[1]); rd.readAsDataURL(f); });
-      try {
-        const token = localStorage.getItem('morph-auth') || '';
-        const res = await fetch('/v2/claude/upload', { method: 'POST', headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ filename: f.name, base64: b64, mime: f.type }) });
-        const data = await res.json();
-        if (data.path) setPendingFile({ path: data.path, isImage: isImage || f.type.startsWith('image/') });
-      } catch {}
-    };
-
-    const { input: photoInput, onChange: photoHandler } = makeInput('image/*', uploadHandler(true));
-    const { input: fileInput, onChange: fileHandler } = makeInput('.pdf,.md,.txt,.csv,.json,.py,.js,.ts,.jsx,.tsx', uploadHandler(false));
+    const photoInput = makeInput('image/*');
+    const fileInput = makeInput('.pdf,.md,.txt,.csv,.json,.py,.js,.ts,.jsx,.tsx');
     photoInputRef.current = photoInput;
     fileInputRef.current = fileInput;
 
+    const handleChange = (input: HTMLInputElement) => async () => {
+      const f = input.files?.[0];
+      input.value = ''; // reset so same file can be re-selected
+      if (!f) return;
+      const b64: string = await new Promise(r => {
+        const rd = new FileReader();
+        rd.onload = () => r((rd.result as string).split(',')[1]);
+        rd.readAsDataURL(f);
+      });
+      try {
+        const token = localStorage.getItem('morph-auth') || '';
+        const res = await fetch('/v2/claude/upload', {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: f.name, base64: b64, mime: f.type }),
+        });
+        const data = await res.json();
+        if (data.path) setPendingFileRef.current({ path: data.path, isImage: f.type.startsWith('image/') });
+      } catch (err) { console.error('[upload]', err); }
+    };
+
+    const photoHandler = handleChange(photoInput);
+    const fileHandler = handleChange(fileInput);
+    photoInput.addEventListener('change', photoHandler);
+    fileInput.addEventListener('change', fileHandler);
     return () => {
       photoInput.removeEventListener('change', photoHandler);
       fileInput.removeEventListener('change', fileHandler);
@@ -89,10 +100,10 @@ function useSendFlow(sendFn: (msg: string) => void) {
   }, []);
 
   const uploadFile = useCallback((accept: string) => {
-    // Pick pre-configured input — no accept mutation at click time
+    // Use pre-configured inputs — no accept mutation at click time (eliminates iOS delay)
     const input = accept === 'image/*' ? photoInputRef.current : fileInputRef.current;
     if (!input) return;
-    input.click(); // MUST be before state update on iOS
+    input.click(); // click synchronously in user gesture — MUST be before any state update
     setAttachMenu(false);
   }, []);
 
@@ -341,11 +352,12 @@ const timeAgo = (ms: number) => {
 };
 
 // Reusable environment group — renders session cards for one environment
-function EnvironmentGroup({ env, onSelect }: { env: EnvConfig; onSelect: (sessionId: string, display?: string, relayUrl?: string, relayToken?: string) => void }) {
+function EnvironmentGroup({ env, onSelect, maxVisible }: { env: EnvConfig; onSelect: (sessionId: string, display?: string, relayUrl?: string, relayToken?: string) => void; maxVisible?: number }) {
   const [sessions, setSessions] = useState<any[]>([]);
   const [viewed, setViewed] = useState<Set<string>>(getViewed);
   const [pinned, setPinned] = useState<Set<string>>(() => getPinned(env.id));
   const [expanded, setExpanded] = useState(true);
+  const limit = maxVisible ?? env.maxSessions;
 
   useEffect(() => {
     const base = env.relayUrl || '';
@@ -357,11 +369,11 @@ function EnvironmentGroup({ env, onSelect }: { env: EnvConfig; onSelect: (sessio
         const pins = getPinned(env.id);
         const filtered = all.filter((s: any) => s.id !== FIXED_SESSION_ID);
         const pinnedSessions = filtered.filter((s: any) => pins.has(s.id));
-        const unpinned = filtered.filter((s: any) => !pins.has(s.id)).slice(0, env.maxSessions - pinnedSessions.length);
+        const unpinned = filtered.filter((s: any) => !pins.has(s.id)).slice(0, limit - pinnedSessions.length);
         setSessions([...pinnedSessions, ...unpinned]);
       })
       .catch(() => setSessions([]));
-  }, [env.id, env.relayUrl]);
+  }, [env.id, env.relayUrl, limit]);
 
   const dotColor = (s: any) => {
     if (s.active) return '#30d158';
@@ -378,6 +390,8 @@ function EnvironmentGroup({ env, onSelect }: { env: EnvConfig; onSelect: (sessio
     markViewed(id);
     setViewed(getViewed());
     const s = sessions.find(x => x.id === id);
+    // Map session to its relay so socket.io events are routed correctly
+    if (env.id !== 'workspace') registerSession(id, env.id);
     onSelect(id, s?.display, env.relayUrl, env.token);
   };
 
@@ -506,11 +520,18 @@ function UsageWidget() {
 
 // Canvas overlay — renders all environment groups
 function SessionCards({ onSelect }: { onSelect: (sessionId: string, display?: string, relayUrl?: string, relayToken?: string) => void }) {
-  const envs = getEnvironments();
+  const [envs, setEnvs] = useState<EnvConfig[]>(getEnvironments);
+  useEffect(() => {
+    const onStorage = () => setEnvs(getEnvironments());
+    window.addEventListener('storage', onStorage);
+    // Also poll for same-tab changes (localStorage events don't fire in same tab)
+    const interval = setInterval(() => setEnvs(getEnvironments()), 2000);
+    return () => { window.removeEventListener('storage', onStorage); clearInterval(interval); };
+  }, []);
   return (
-    <div style={{ position: 'absolute', top: 90, left: 0, right: 0, zIndex: 2, padding: '0 8px' }}>
+    <div style={{ position: 'absolute', top: 90, left: 0, right: 0, bottom: 0, zIndex: 2, padding: '0 8px', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
       {envs.map(env => (
-        <EnvironmentGroup key={env.id} env={env} onSelect={onSelect} />
+        <EnvironmentGroup key={env.id} env={env} onSelect={onSelect} maxVisible={3} />
       ))}
     </div>
   );
@@ -902,6 +923,65 @@ export default function App() {
       .catch(() => {});
   }, [authed]);
 
+  // Pull server-defined environments from relay (runs once after auth)
+  // Relay can push any env via RELAY_ENVS env var — no per-device config needed
+  useEffect(() => {
+    if (!authed) return;
+    const token = localStorage.getItem(PASS_KEY) || '';
+    fetch('/v2/claude/environments', { headers: { 'Authorization': `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(data => {
+        if (!Array.isArray(data.environments) || data.environments.length === 0) return;
+        const current = getEnvironments();
+        // Remove stale direct-URL entries — all relays now go through /relay-proxy/
+        const purged = current.filter(e => !e.relayUrl?.startsWith('http'));
+        let changed = purged.length !== current.length;
+        const merged = [...purged];
+        for (const env of data.environments) {
+          if (!env.relayUrl) continue;
+          const existingIdx = merged.findIndex(e => e.id === env.id || e.relayUrl === env.relayUrl);
+          if (existingIdx >= 0) {
+            // Update label/url in case they changed
+            merged[existingIdx] = { ...merged[existingIdx], relayUrl: env.relayUrl, label: env.label || merged[existingIdx].label };
+            changed = true;
+          } else {
+            merged.push({ id: env.id || `env_${Date.now()}`, label: env.label || env.relayUrl, relayUrl: env.relayUrl, token: env.token || undefined, maxSessions: env.maxSessions || 6 });
+            changed = true;
+          }
+          // Establish socket.io connection to proxy relay (uses primary token, proxy rewrites it)
+          const relayConfig: RelayConfig = {
+            id: env.id,
+            url: env.relayUrl,
+            token: env.token || token,
+            label: env.label,
+            socketPath: env.socketPath,
+          };
+          addRelay(relayConfig);
+        }
+        if (changed) saveEnvironments(merged);
+      })
+      .catch(() => {});
+  }, [authed]);
+
+  // Import env from URL param: ?addEnv=<base64-json>
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const raw = params.get('addEnv');
+    if (!raw) return;
+    try {
+      const cfg = JSON.parse(atob(raw));
+      if (cfg.relayUrl) {
+        const current = getEnvironments();
+        if (!current.find(e => e.relayUrl === cfg.relayUrl)) {
+          saveEnvironments([...current, { id: `env_${Date.now()}`, label: cfg.label || cfg.relayUrl, relayUrl: cfg.relayUrl, token: cfg.token || undefined, maxSessions: 6 }]);
+        }
+      }
+    } catch {}
+    const url = new URL(window.location.href);
+    url.searchParams.delete('addEnv');
+    window.history.replaceState({}, '', url.toString());
+  }, []);
+
   // When a session is selected, load from cache instantly, then subscribe for live updates
   useEffect(() => {
     if (!selectedSession) return;
@@ -1136,21 +1216,19 @@ export default function App() {
         </div>
       </div>
 
-      {/* Shared InputBar — hidden when session terminal is open */}
-      {!selectedSession && (
-        <div ref={inputBarRef}>
-          <InputBar
-            onSend={handleSend} onStop={interrupt}
-            isProcessing={isProcessing} connected={connState === 'connected'}
-            terminalVisible={terminalVisible} onToggleTerminal={toggleTerminal}
-            hasNew={hasNew} onAttach={mainFlow.toggleAttach} onSketch={() => mainFlow.setSketchOpen(true)}
-            pendingSketch={mainFlow.pendingSketch ? mainFlow.pendingSketch.dataUrl : null}
-            pendingFile={mainFlow.pendingFile ? (mainFlow.pendingFile.isImage ? 'image' : 'file') : null}
-            onClearPending={mainFlow.clearPending}
-            keyboardOpen={keyboardOpen}
-          />
-        </div>
-      )}
+      {/* Shared InputBar — keep mounted to preserve draft text; hidden when session terminal is open */}
+      <div ref={inputBarRef} style={selectedSession ? { display: 'none' } : undefined}>
+        <InputBar
+          onSend={handleSend} onStop={interrupt}
+          isProcessing={isProcessing} connected={connState === 'connected'}
+          terminalVisible={terminalVisible} onToggleTerminal={toggleTerminal}
+          hasNew={hasNew} onAttach={mainFlow.toggleAttach} onSketch={() => mainFlow.setSketchOpen(true)}
+          pendingSketch={mainFlow.pendingSketch ? mainFlow.pendingSketch.dataUrl : null}
+          pendingFile={mainFlow.pendingFile ? (mainFlow.pendingFile.isImage ? 'image' : 'file') : null}
+          onClearPending={mainFlow.clearPending}
+          keyboardOpen={keyboardOpen}
+        />
+      </div>
       {!keyboardOpen && !selectedSession && <TabBar tab={tab} onTab={handleTab} />}
       {/* Attach menu — frosted glass popup with Framer Motion */}
       <AnimatePresence>

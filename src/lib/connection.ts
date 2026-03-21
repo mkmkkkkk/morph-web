@@ -16,10 +16,11 @@ export interface Message {
 }
 
 export interface RelayConfig {
-  id: string;    // unique key (e.g. 'primary', 'remote-1')
-  url: string;   // relay base URL
-  token: string; // bearer token
-  label?: string; // display name
+  id: string;        // unique key (e.g. 'primary', 'remote-1')
+  url: string;       // relay base URL (may be relative, e.g. /relay-proxy/tensor-revive)
+  token: string;     // bearer token
+  label?: string;    // display name
+  socketPath?: string; // custom socket.io path (for proxy connections)
 }
 
 type Listener = (msg: Message) => void;
@@ -118,10 +119,17 @@ function connectRelaySocket(relayId: string): void {
     if (relayId === PRIMARY) stateListeners.forEach(fn => fn(s));
   };
 
-  conn.socket = io(conn.config.url, {
-    path: '/v1/updates',
+  // For proxy relays (relative URLs like /relay-proxy/...), use current origin as socket host
+  const socketUrl = conn.config.url.startsWith('/') ? window.location.origin : conn.config.url;
+  const socketPath = conn.config.socketPath || '/v1/updates';
+  const token = conn.config.token || primaryToken();
+
+  conn.socket = io(socketUrl, {
+    path: socketPath,
     transports: ['websocket'],
-    auth: { token: conn.config.token, clientType: 'session-scoped', sessionId: 'direct' },
+    auth: { token, clientType: 'session-scoped', sessionId: 'direct' },
+    // Also pass token as query param so proxy can rewrite it in the upgrade URL
+    query: { token },
     reconnection: true,
     reconnectionDelay: 1000,
     reconnectionDelayMax: 5000,
@@ -236,6 +244,13 @@ export function getRelayConfigs(): RelayConfig[] {
 /** Get connection state for a specific relay. */
 export function getRelayState(id: string): ConnectionState {
   return relayConns.get(id)?.state ?? 'disconnected';
+}
+
+/** Map a session to its relay without going through fetchAllSessions. */
+export function registerSession(sessionId: string, relayId: string): void {
+  sessionRelayMap.set(sessionId, relayId);
+  const conn = relayConns.get(relayId);
+  if (conn?.socket?.connected) conn.socket.emit('direct-subscribe', { sessionId });
 }
 
 // ─── Session operations (relay-aware) ───
