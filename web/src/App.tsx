@@ -1478,6 +1478,33 @@ export default function App() {
           />
         )}
       </AnimatePresence>
+
+      {/* Add to Home Screen nudge — shown once in Safari browser (not standalone PWA) */}
+      {(() => {
+        const isSafari = /iphone|ipad/i.test(navigator.userAgent) && !(window.navigator as any).standalone;
+        const dismissed = localStorage.getItem('morph-a2hs-dismissed');
+        if (!isSafari || dismissed) return null;
+        return (
+          <div style={{
+            position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 9999,
+            background: 'rgba(20,20,22,0.97)', backdropFilter: 'blur(12px)',
+            borderTop: '1px solid rgba(255,255,255,0.10)',
+            padding: '14px 16px', paddingBottom: 'max(14px, env(safe-area-inset-bottom))',
+            display: 'flex', alignItems: 'flex-start', gap: 12,
+          }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ color: '#fff', fontSize: 14, fontWeight: 600, marginBottom: 3 }}>Add Morph to Home Screen</div>
+              <div style={{ color: '#888', fontSize: 12, lineHeight: '16px' }}>
+                Tap <svg style={{ display: 'inline', verticalAlign: 'middle', margin: '0 2px' }} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v13M7 7l5-5 5 5"/><path d="M3 17v3a1 1 0 001 1h16a1 1 0 001-1v-3"/></svg> Share, then "Add to Home Screen" for a better experience.
+              </div>
+            </div>
+            <button onClick={() => { localStorage.setItem('morph-a2hs-dismissed', '1'); window.location.reload(); }} style={{
+              background: 'none', border: 'none', color: '#555', fontSize: 20, cursor: 'pointer',
+              padding: '0 4px', lineHeight: 1, flexShrink: 0,
+            }}>×</button>
+          </div>
+        );
+      })()}
     </div>
   );
 }
