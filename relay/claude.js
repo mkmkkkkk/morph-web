@@ -76,8 +76,10 @@ function spawnClaude({ sessionId, resumeFrom, model }) {
     '--include-partial-messages',
   ];
 
+  let isResume = false;
   if (resumeFrom) {
     args.push('--resume', resumeFrom);
+    isResume = true;
   } else {
     // Check if session file exists — if so, resume instead of creating new
     const projectId = resolve(WORK_DIR).replace(/[\\\/.:]/g, '-');
@@ -87,6 +89,7 @@ function spawnClaude({ sessionId, resumeFrom, model }) {
       const stat = statSync(sessionFile);
       if (stat.size > 0) {
         args.push('--resume', sessionId);
+        isResume = true;
       } else {
         args.push('--session-id', sessionId);
       }
@@ -99,11 +102,13 @@ function spawnClaude({ sessionId, resumeFrom, model }) {
   if (model && ALLOWED_MODELS.has(model)) args.push('--model', model);
 
   // Inject Morph-specific system prompt from MORPH.md + dynamic context
+  // New sessions: inject full MORPH.md + dynamic (establishes Morph persona)
+  // Resumed sessions: inject dynamic only — MORPH.md is already baked into session history
   const morphMdPath = join(WORK_DIR, 'morph/web/MORPH.md');
   try {
     const morphCtx = readFileSync(morphMdPath, 'utf-8');
 
-    // Dynamic context injected at session start
+    // Dynamic context — always fresh (current date, env, recent commits)
     const now = new Date();
     const dateStr = now.toISOString().slice(0, 10); // YYYY-MM-DD
     const envId = process.env.RELAY_ENV_ID || (WORK_DIR.toLowerCase().includes('tensor') ? 'tensor-revive' : 'workspace');
@@ -113,14 +118,15 @@ function spawnClaude({ sessionId, resumeFrom, model }) {
     } catch {}
 
     const dynamic = [
-      `\n# Session Context (injected at start)`,
+      `\n# Session Context (injected at session start — always fresh)`,
       `- **Date:** ${dateStr}`,
       `- **Environment:** ${envId} (${WORK_DIR})`,
       `- **Device:** iPhone — keep responses extra concise`,
       gitLog ? `- **Recent commits:**\n${gitLog.split('\n').map(l => '  ' + l).join('\n')}` : '',
     ].filter(Boolean).join('\n');
 
-    args.push('--append-system-prompt', morphCtx + dynamic);
+    // New session: full MORPH.md + dynamic; resumed: dynamic only (no duplicate MORPH.md)
+    args.push('--append-system-prompt', isResume ? dynamic : morphCtx + dynamic);
   } catch {}
 
   // Always bypassPermissions — phone user is the machine owner
