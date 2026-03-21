@@ -353,11 +353,14 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
       />
 
       {/* Send button */}
-      <button tabIndex={-1} onClick={handleSend} disabled={!canSend} style={{
-        width: 36, height: 36, borderRadius: 18, border: 'none', flexShrink: 0,
-        backgroundColor: canSend ? sendBg : inputBg, cursor: canSend ? 'pointer' : 'default',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={canSend ? '#fff' : '#666'} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+      <button tabIndex={-1}
+        onPointerDown={(e) => { e.preventDefault(); if (canSend) handleSend(); }}
+        style={{
+          width: 36, height: 36, borderRadius: 18, border: 'none', flexShrink: 0,
+          backgroundColor: canSend ? sendBg : inputBg, cursor: canSend ? 'pointer' : 'default',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' as any,
+        }}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={canSend ? '#fff' : '#666'} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
     </div>
   );
 }
@@ -889,12 +892,12 @@ function SessionTerminal({ session, messages, onBack, onSend, onInterrupt, keybo
           <span style={{ color: isCompacting ? '#3a8eff' : '#444', fontSize: 11, fontFamily: 'Menlo, monospace' }}>
             {w}
           </span>
-          <button tabIndex={-1} onClick={onInterrupt} style={{
+          <button tabIndex={-1} onPointerDown={(e) => { e.preventDefault(); onInterrupt(); }} style={{
             padding: '3px 10px', borderRadius: 5, cursor: 'pointer', flexShrink: 0,
             border: isProcessing ? '1px solid rgba(255,59,48,0.4)' : '1px solid rgba(255,255,255,0.08)',
             backgroundColor: isProcessing ? 'rgba(255,59,48,0.15)' : 'rgba(17,17,17,0.7)',
             color: isProcessing ? '#ff453a' : '#444', fontSize: 11, fontFamily: 'Menlo, monospace',
-            pointerEvents: 'auto',
+            pointerEvents: 'auto', touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' as any,
           }}>ESC</button>
         </div>
         ); })()}
@@ -1445,12 +1448,12 @@ export default function App() {
               <span style={{ color: isCompacting ? '#3a8eff' : '#444', fontSize: 11, fontFamily: 'Menlo, monospace' }}>
                 {w}
               </span>
-              <button tabIndex={-1} onClick={interrupt} style={{
+              <button tabIndex={-1} onPointerDown={(e) => { e.preventDefault(); interrupt(); }} style={{
                 padding: '3px 10px', borderRadius: 5, cursor: 'pointer', flexShrink: 0,
                 border: isProcessing ? '1px solid rgba(255,59,48,0.4)' : '1px solid rgba(255,255,255,0.08)',
                 backgroundColor: isProcessing ? 'rgba(255,59,48,0.15)' : 'rgba(17,17,17,0.7)',
                 color: isProcessing ? '#ff453a' : '#444', fontSize: 11, fontFamily: 'Menlo, monospace',
-                pointerEvents: 'auto',
+                pointerEvents: 'auto', touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' as any,
               }}>ESC</button>
             </div>
             ); })()}
