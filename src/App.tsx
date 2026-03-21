@@ -352,7 +352,7 @@ const timeAgo = (ms: number) => {
 };
 
 // Reusable environment group — renders session cards for one environment
-function EnvironmentGroup({ env, onSelect, maxVisible }: { env: EnvConfig; onSelect: (sessionId: string, display?: string, relayUrl?: string, relayToken?: string, project?: string) => void; maxVisible?: number }) {
+function EnvironmentGroup({ env, onSelect, maxVisible }: { env: EnvConfig; onSelect: (sessionId: string, display?: string, relayUrl?: string, relayToken?: string, project?: string, envId?: string) => void; maxVisible?: number }) {
   const [sessions, setSessions] = useState<any[]>([]);
   const [viewed, setViewed] = useState<Set<string>>(getViewed);
   const [pinned, setPinned] = useState<Set<string>>(() => getPinned(env.id));
@@ -362,7 +362,7 @@ function EnvironmentGroup({ env, onSelect, maxVisible }: { env: EnvConfig; onSel
   useEffect(() => {
     const base = env.relayUrl || '';
     const token = env.token || localStorage.getItem('morph-auth') || '';
-    fetch(`${base}/v2/claude/sessions?limit=30`, { headers: { 'Authorization': `Bearer ${token}` } })
+    fetch(`${base}/v2/claude/sessions?limit=${env.maxSessions || 30}`, { headers: { 'Authorization': `Bearer ${token}` } })
       .then(r => r.json())
       .then(d => {
         const all = d.sessions || [];
@@ -392,7 +392,7 @@ function EnvironmentGroup({ env, onSelect, maxVisible }: { env: EnvConfig; onSel
     const s = sessions.find(x => x.id === id);
     // Map session to its relay so socket.io events are routed correctly
     if (env.id !== 'workspace') registerSession(id, env.id);
-    onSelect(id, s?.display, env.relayUrl, env.token, s?.project);
+    onSelect(id, s?.display, env.relayUrl, env.token, s?.project, env.id);
   };
 
   if (sessions.length === 0) return null;
@@ -519,7 +519,7 @@ function UsageWidget() {
 }
 
 // Canvas overlay — renders all environment groups
-function SessionCards({ onSelect }: { onSelect: (sessionId: string, display?: string, relayUrl?: string, relayToken?: string, project?: string) => void }) {
+function SessionCards({ onSelect }: { onSelect: (sessionId: string, display?: string, relayUrl?: string, relayToken?: string, project?: string, envId?: string) => void }) {
   const [envs, setEnvs] = useState<EnvConfig[]>(getEnvironments);
   useEffect(() => {
     const onStorage = () => setEnvs(getEnvironments());
@@ -531,7 +531,7 @@ function SessionCards({ onSelect }: { onSelect: (sessionId: string, display?: st
   return (
     <div style={{ position: 'absolute', top: 90, left: 0, right: 0, bottom: 0, zIndex: 2, padding: '0 8px', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
       {envs.map(env => (
-        <EnvironmentGroup key={env.id} env={env} onSelect={onSelect} maxVisible={3} />
+        <EnvironmentGroup key={env.id} env={env} onSelect={onSelect} />
       ))}
     </div>
   );
@@ -876,7 +876,7 @@ export default function App() {
   const [canvasLoaded, setCanvasLoaded] = useState(false);
   const mainFlow = useSendFlow(send);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
-  const [selectedSession, setSelectedSession] = useState<{ id: string; display: string; relayUrl?: string; relayToken?: string; project?: string } | null>(null);
+  const [selectedSession, setSelectedSession] = useState<{ id: string; display: string; relayUrl?: string; relayToken?: string; project?: string; envId?: string } | null>(null);
   const [sessionMessages, setSessionMessages] = useState<Message[]>([]);
   const liveSessionIdRef = useRef<string | null>(null); // tracks active process ID after resume;
   const idleTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -1103,7 +1103,7 @@ export default function App() {
   const handleSend = (text: string) => {
     if (text === '/clear') { setMessages([]); setIsProcessing(false); clearSession(); mainFlow.clearPending(); return; }
     if (selectedSession) {
-      const envId = selectedSession.relayUrl?.match(/\/relay-proxy\/([^/]+)/)?.[1] || 'workspace';
+      const envId = selectedSession.envId || 'workspace';
       mainFlow.handleSend(`[ctx: ${selectedSession.display} · ${envId} · ${selectedSession.id.slice(0, 8)}]\n${text}`);
     } else {
       mainFlow.handleSend(text);
@@ -1121,9 +1121,9 @@ export default function App() {
           {/* Usage widget — top right */}
           <UsageWidget />
           {/* Session cards — floating overlay */}
-          <SessionCards onSelect={(sid, display, relayUrl, relayToken, project) => {
+          <SessionCards onSelect={(sid, display, relayUrl, relayToken, project, envId) => {
             setSessionMessages([]);
-            setSelectedSession({ id: sid, display: display || sid.slice(0, 8), relayUrl, relayToken, project });
+            setSelectedSession({ id: sid, display: display || sid.slice(0, 8), relayUrl, relayToken, project, envId });
           }} />
           {/* Canvas iframe — fills full area */}
           <div style={{ flex: 1, position: 'relative', backgroundColor: '#0a0a0a' }}>
