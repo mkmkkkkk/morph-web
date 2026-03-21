@@ -12,7 +12,7 @@
  */
 
 import { spawn, execSync } from 'child_process';
-import { readdirSync, readFileSync, statSync, writeFileSync, mkdirSync } from 'fs';
+import { readdirSync, readFileSync, statSync, writeFileSync, mkdirSync, openSync, readSync, closeSync } from 'fs';
 import { join, resolve } from 'path';
 import { homedir } from 'os';
 import { randomUUID } from 'crypto';
@@ -421,6 +421,19 @@ export function registerClaudeAPI(app, io, authMiddleware) {
     const claudeDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
     const projectsDir = join(claudeDir, 'projects');
 
+    // Tail-read: only load last TAIL_BYTES of file — avoids loading entire 20MB+ session into RAM
+    const TAIL_BYTES = 512 * 1024; // 512 KB — enough for ~100+ messages
+    function tailRead(filePath) {
+      const stat = statSync(filePath);
+      if (stat.size === 0) return null;
+      const fd = openSync(filePath, 'r');
+      const start = Math.max(0, stat.size - TAIL_BYTES);
+      const buf = Buffer.allocUnsafe(stat.size - start);
+      readSync(fd, buf, 0, buf.length, start);
+      closeSync(fd);
+      return buf.toString('utf-8');
+    }
+
     // Find session file: try client-supplied cwd first, then default, then search all project dirs
     let raw = null;
     const cwds = [];
@@ -428,18 +441,20 @@ export function registerClaudeAPI(app, io, authMiddleware) {
     cwds.push(process.env.DEFAULT_CWD || '/workspace');
     for (const cwd of cwds) {
       const pid = resolve(cwd).replace(/[\\\/.:]/g, '-');
-      try { raw = readFileSync(join(projectsDir, pid, `${sid}.jsonl`), 'utf-8'); break; } catch {}
+      try { raw = tailRead(join(projectsDir, pid, `${sid}.jsonl`)); break; } catch {}
     }
     if (!raw) {
       try {
         for (const dir of readdirSync(projectsDir)) {
-          try { raw = readFileSync(join(projectsDir, dir, `${sid}.jsonl`), 'utf-8'); break; } catch {}
+          try { raw = tailRead(join(projectsDir, dir, `${sid}.jsonl`)); break; } catch {}
         }
       } catch {}
     }
 
     try {
-      const lines = raw.split('\n').filter(l => l.trim());
+      // Drop first line (may be partial due to tail offset), then parse
+      const allLines = raw.split('\n');
+      const lines = (allLines.length > 1 ? allLines.slice(1) : allLines).filter(l => l.trim());
 
       // Parse and extract displayable messages (last N)
       const messages = [];
