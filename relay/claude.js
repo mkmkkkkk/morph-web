@@ -22,16 +22,15 @@ const active = new Map();
 const MAX_CONCURRENT_SESSIONS = 6;
 
 // ─── Live session detection ───
-// Returns set of session IDs that have a running claude process (relay-managed OR desktop terminal).
+// Returns set of session IDs that have a running claude process.
+// Strategy: lsof finds which .jsonl session files are currently open by claude processes.
 function getLiveSessionIds() {
   const live = new Set();
-  // Relay-managed processes are in `active` — added after this function is defined
   try {
-    const ps = execSync('ps auxww', { encoding: 'utf-8', timeout: 3000 });
-    for (const line of ps.split('\n')) {
-      if (!line.includes('claude')) continue;
-      // Match --resume <uuid> or --session-id <uuid>
-      const m = line.match(/(?:--resume|--session-id)\s+([0-9a-f-]{36})/i);
+    const out = execSync('lsof -c claude 2>/dev/null | grep \\.jsonl', { encoding: 'utf-8', timeout: 5000, shell: true });
+    for (const line of out.split('\n')) {
+      // Extract UUID from path like .../<uuid>.jsonl
+      const m = line.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl/i);
       if (m) live.add(m[1]);
     }
   } catch {}
@@ -482,10 +481,10 @@ export function registerClaudeAPI(app, io, authMiddleware) {
   // ─── DEBUG: Show raw ps output for claude processes ───
   app.get('/v2/claude/debug-ps', { preHandler: authMiddleware }, async () => {
     try {
-      const ps = execSync('ps auxww', { encoding: 'utf-8', timeout: 3000 });
-      const lines = ps.split('\n').filter(l => l.includes('claude'));
+      let lsofOut = '';
+      try { lsofOut = execSync('lsof -c claude 2>/dev/null | grep \\.jsonl', { encoding: 'utf-8', timeout: 5000, shell: true }); } catch {}
       const liveIds = [...getLiveSessionIds()];
-      return { lines, liveIds };
+      return { lsofLines: lsofOut.split('\n').filter(Boolean), liveIds };
     } catch (e) { return { error: e.message }; }
   });
 
