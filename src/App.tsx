@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, useMotionValue } from 'framer-motion';
-import { connect, send, interrupt, interruptSession, clearSession, setCurrentTab, fetchSessions, onMessage, onState, onCompact, getState, sendToSession, resumeSession, isSessionAlive, loadHistory, subscribe, subscribeSessionMessages, unsubscribeSessionMessages, addRelay, registerSession, type Message, type RelayConfig } from './lib/connection';
+import { connect, send, interrupt, interruptSession, clearSession, setCurrentTab, fetchSessions, onMessage, onState, onCompact, getState, sendToSession, resumeSession, isSessionAlive, loadHistory, subscribe, subscribeSessionMessages, unsubscribeSessionMessages, addRelay, registerSession, approvePermission, denyPermission, type Message, type RelayConfig } from './lib/connection';
 import Sketch from './components/Sketch';
 
 // Cache-bust canvas.html per build (not per page load) — allows HTTP caching across reloads
@@ -227,9 +227,73 @@ const MessageRow = React.memo(function MessageRow({ msg }: { msg: Message }) {
       return msg.content.length > 120
         ? <Collapsible label="error" preview={msg.content.slice(0, 80).replace(/\n/g, ' ')} content={msg.content} color="#ff453a" />
         : <div style={{ ...mono, color: '#ff453a', marginBottom: 3 }}>{msg.content}</div>;
+    case 'permission' as any:
+      return <div style={{ ...mono, color: '#e0a030', marginBottom: 3, fontSize: 12 }}>
+        {msg.pending !== false ? '-- awaiting approval --' : '-- approved --'}
+      </div>;
     default: return null;
   }
 });
+
+// ─── Permission Banner — approve/deny tool execution ───
+function PermissionBanner({ messages, sessionId }: { messages: Message[]; sessionId: string }) {
+  const [handled, setHandled] = useState<Set<string>>(new Set());
+
+  // Find the latest pending permission message that hasn't been handled
+  const perm = [...messages].reverse().find(m => m.type === ('permission' as any) && !handled.has(m.id));
+  if (!perm) return null;
+
+  let tools: { tool: string; input: any }[] = [];
+  try { tools = JSON.parse(perm.content); } catch {}
+  const toolName = tools[0]?.tool || 'Tool';
+  const preview = tools[0]?.input?.command?.slice(0, 80)
+    || tools[0]?.input?.file_path?.split('/').pop()
+    || tools[0]?.input?.pattern?.slice(0, 60)
+    || '';
+
+  const handleApprove = (e: React.PointerEvent) => {
+    e.preventDefault();
+    setHandled(prev => new Set(prev).add(perm.id));
+    approvePermission(sessionId);
+  };
+  const handleDeny = (e: React.PointerEvent) => {
+    e.preventDefault();
+    setHandled(prev => new Set(prev).add(perm.id));
+    denyPermission(sessionId);
+  };
+
+  return (
+    <div style={{
+      position: 'absolute', top: 0, left: 0, right: 0, zIndex: 20,
+      padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 10,
+      backgroundColor: 'rgba(20,20,20,0.97)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+      borderBottom: '1px solid rgba(255,180,48,0.3)',
+    }}>
+      <div style={{ flex: 1, overflow: 'hidden', minWidth: 0 }}>
+        <div style={{ color: '#e0a030', fontSize: 13, fontWeight: 600, fontFamily: 'Menlo, monospace' }}>
+          {toolName}
+        </div>
+        {preview && <div style={{ color: '#888', fontSize: 11, fontFamily: 'Menlo, monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 2 }}>
+          {preview}
+        </div>}
+      </div>
+      <button onPointerDown={handleDeny} style={{
+        padding: '8px 16px', borderRadius: 8, cursor: 'pointer', flexShrink: 0,
+        border: '1px solid rgba(255,59,48,0.4)', backgroundColor: 'rgba(255,59,48,0.12)',
+        color: '#ff453a', fontSize: 14, fontWeight: 700,
+        fontFamily: '-apple-system, system-ui, sans-serif',
+        touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent',
+      }}>Deny</button>
+      <button onPointerDown={handleApprove} style={{
+        padding: '8px 20px', borderRadius: 8, cursor: 'pointer', flexShrink: 0,
+        border: '1px solid rgba(48,209,88,0.4)', backgroundColor: 'rgba(48,209,88,0.12)',
+        color: '#30d158', fontSize: 14, fontWeight: 700,
+        fontFamily: '-apple-system, system-ui, sans-serif',
+        touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent',
+      }}>Approve</button>
+    </div>
+  );
+}
 
 // ─── Terminal Overlay (toggle-able, sits above input bar) ───
 function TerminalOverlay({ messages, visible }: { messages: Message[]; visible: boolean }) {
@@ -884,9 +948,10 @@ function SessionTerminal({ session, messages, onBack, onSend, onInterrupt, keybo
         <span style={{ color: '#777', fontSize: 11, fontFamily: 'Menlo, monospace' }}>{session.id.slice(0, 8)}</span>
       </div>
 
-      {/* Messages + ESC overlay */}
+      {/* Messages + Permission banner + ESC overlay */}
       <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
         <TerminalOverlay messages={messages} visible={true} />
+        <PermissionBanner messages={messages} sessionId={session.id} />
         {(() => { const w = isCompacting ? 'compacting...' : isProcessing ? IDLE_WORDS[Math.floor(Date.now() / 4000) % IDLE_WORDS.length] : 'idle'; return (
         <div style={{ position: 'absolute', bottom: 4, right: 8, display: 'flex', alignItems: 'center', gap: 6, pointerEvents: 'none' }}>
           <span style={{ color: isCompacting ? '#3a8eff' : '#444', fontSize: 11, fontFamily: 'Menlo, monospace' }}>
@@ -1438,6 +1503,7 @@ export default function App() {
           </div>
           <div style={{ flex: '1 1 0', minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
             <TerminalOverlay messages={messages} visible={true} />
+            <PermissionBanner messages={messages} sessionId={FIXED_SESSION_ID} />
             {/* ESC — floating overlay at bottom-right of terminal */}
             {(() => { const w = isCompacting ? 'compacting...' : isProcessing ? IDLE_WORDS[Math.floor(Date.now() / 4000) % IDLE_WORDS.length] : 'idle'; return (
             <div style={{
