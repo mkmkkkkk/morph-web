@@ -7,7 +7,7 @@ function uid() { return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}
 export interface Message {
   id: string;
   role: 'user' | 'agent' | 'system';
-  type: 'text' | 'thinking' | 'tool' | 'tool_result' | 'status' | 'error';
+  type: 'text' | 'thinking' | 'tool' | 'tool_result' | 'status' | 'error' | 'permission';
   content: string;
   name?: string;
   collapsed?: boolean;
@@ -39,6 +39,8 @@ const sessionRelayMap = new Map<string, string>(); // sessionId → relayId
 const sessionListeners = new Map<string, Set<Listener>>();
 const stateListeners = new Set<StateListener>(); // global (tracks primary relay)
 const compactListeners = new Set<() => void>();
+type PermissionListener = (sessionId: string, tools: any[]) => void;
+const permissionListeners = new Set<PermissionListener>();
 
 // ─── Relay accessors ───
 function primaryToken() { return localStorage.getItem('morph-auth') || ''; }
@@ -157,6 +159,23 @@ function connectRelaySocket(relayId: string): void {
     const sid = data?.sessionId;
     const msgs = parseOutput(data);
     if (sid) msgs.forEach(m => routeMessage(sid, m));
+  });
+  conn.socket.on('claude-permission', (data: any) => {
+    const sid = data?.sessionId;
+    if (sid) {
+      const tools = data.tools || [];
+      const label = tools.map((t: any) => t.tool).join(', ');
+      const preview = tools[0]?.input?.command || tools[0]?.input?.file_path || '';
+      const msg: Message = {
+        id: uid(), role: 'system', type: 'permission' as Message['type'],
+        content: JSON.stringify(tools),
+        name: label,
+        pending: true,
+        ts: Date.now(),
+      };
+      routeMessage(sid, msg);
+      permissionListeners.forEach(fn => fn(sid, tools));
+    }
   });
   conn.socket.on('claude-error', (data: any) => {
     const sid = data?.sessionId;
@@ -285,6 +304,26 @@ export function interruptSession(sid: string) {
 export function stopSession(sid: string) {
   const relayId = sessionRelayMap.get(sid) || PRIMARY;
   relayPost(relayId, '/v2/claude/stop', { sessionId: sid }).catch(() => {});
+}
+
+/** Approve tool execution — resume SIGSTOP'd process */
+export function approvePermission(sid: string) {
+  const relayId = sessionRelayMap.get(sid) || PRIMARY;
+  const conn = relayConns.get(relayId);
+  if (conn?.socket) conn.socket.emit('direct-approve', { sessionId: sid });
+}
+
+/** Deny tool execution — resume then interrupt */
+export function denyPermission(sid: string) {
+  const relayId = sessionRelayMap.get(sid) || PRIMARY;
+  const conn = relayConns.get(relayId);
+  if (conn?.socket) conn.socket.emit('direct-deny', { sessionId: sid });
+}
+
+/** Listen for permission requests across all relays */
+export function onPermission(cb: PermissionListener): () => void {
+  permissionListeners.add(cb);
+  return () => { permissionListeners.delete(cb); };
 }
 
 export async function isSessionAlive(sid: string): Promise<boolean> {

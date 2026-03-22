@@ -139,6 +139,9 @@ function spawnClaude({ sessionId, resumeFrom, model }) {
  * Parse stdout JSONL lines and emit to Socket.IO room.
  * Returns a Promise that resolves when the first stdout data arrives (Claude is ready).
  */
+// Tools that require user approval before execution proceeds
+const APPROVAL_TOOLS = new Set(['Bash', 'Edit', 'Write', 'NotebookEdit']);
+
 function pipeOutput(proc, sessionId, io) {
   let buffer = '';
   let readyResolve;
@@ -166,6 +169,35 @@ function pipeOutput(proc, sessionId, io) {
           sessionId,
           data: parsed,
         });
+
+        // ─── Approval gate: SIGSTOP on dangerous tool_use, wait for user ───
+        if (parsed.type === 'assistant' && Array.isArray(parsed.message?.content)) {
+          const dangerous = parsed.message.content.filter(
+            b => b.type === 'tool_use' && APPROVAL_TOOLS.has(b.name)
+          );
+          if (dangerous.length > 0) {
+            const entry = active.get(sessionId);
+            try { proc.kill('SIGSTOP'); } catch {}
+            console.log(`[claude:${sessionId.slice(0,8)}] SIGSTOP — awaiting approval for ${dangerous.map(d => d.name).join(', ')}`);
+            io.to(`direct:${sessionId}`).emit('claude-permission', {
+              sessionId,
+              tools: dangerous.map(b => ({
+                toolUseId: b.id,
+                tool: b.name,
+                input: b.input,
+              })),
+            });
+            // Auto-approve after 120s to prevent hanging
+            if (entry) {
+              if (entry.permissionTimer) clearTimeout(entry.permissionTimer);
+              entry.permissionTimer = setTimeout(() => {
+                console.log(`[claude:${sessionId.slice(0,8)}] auto-approve (timeout)`);
+                try { proc.kill('SIGCONT'); } catch {}
+                entry.permissionTimer = null;
+              }, 120000);
+            }
+          }
+        }
       } catch {
         io.to(`direct:${sessionId}`).emit('claude-output', {
           sessionId,
@@ -731,6 +763,27 @@ export function registerClaudeAPI(app, io, authMiddleware) {
       if (data.sessionId && subscribedSessions.has(data.sessionId)) {
         sendInterrupt(data.sessionId);
       }
+    });
+
+    // Approve tool execution — SIGCONT to resume paused process
+    socket.on('direct-approve', (data) => {
+      if (!data.sessionId || !subscribedSessions.has(data.sessionId)) return;
+      const entry = active.get(data.sessionId);
+      if (!entry?.process || entry.process.killed) return;
+      if (entry.permissionTimer) { clearTimeout(entry.permissionTimer); entry.permissionTimer = null; }
+      console.log(`[claude:${data.sessionId.slice(0,8)}] approved — SIGCONT`);
+      try { entry.process.kill('SIGCONT'); } catch {}
+    });
+
+    // Deny tool execution — SIGCONT then SIGINT
+    socket.on('direct-deny', (data) => {
+      if (!data.sessionId || !subscribedSessions.has(data.sessionId)) return;
+      const entry = active.get(data.sessionId);
+      if (!entry?.process || entry.process.killed) return;
+      if (entry.permissionTimer) { clearTimeout(entry.permissionTimer); entry.permissionTimer = null; }
+      console.log(`[claude:${data.sessionId.slice(0,8)}] denied — SIGCONT + SIGINT`);
+      try { entry.process.kill('SIGCONT'); } catch {}
+      setTimeout(() => { try { sendInterrupt(data.sessionId); } catch {} }, 100);
     });
   });
 }
