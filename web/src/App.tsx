@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, useMotionValue } from 'framer-motion';
-import { connect, send, interrupt, interruptSession, clearSession, setCurrentTab, fetchSessions, onMessage, onState, onCompact, getState, sendToSession, resumeSession, isSessionAlive, loadHistory, subscribe, subscribeSessionMessages, unsubscribeSessionMessages, addRelay, registerSession, approvePermission, denyPermission, type Message, type RelayConfig } from './lib/connection';
+import { connect, send, interrupt, interruptSession, clearSession, setCurrentTab, fetchSessions, onMessage, onState, onCompact, getState, sendToSession, resumeSession, isSessionAlive, loadHistory, subscribe, subscribeSessionMessages, unsubscribeSessionMessages, addRelay, registerSession, approvePermission, denyPermission, stopSession, type Message, type RelayConfig } from './lib/connection';
 import Sketch from './components/Sketch';
 
 // Cache-bust canvas.html per build (not per page load) — allows HTTP caching across reloads
@@ -318,7 +318,7 @@ function TerminalOverlay({ messages, visible }: { messages: Message[]; visible: 
 }
 
 // ─── Input Bar (matches native: dot + attach + terminal toggle + input + send/stop) ───
-function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, onToggleTerminal, hasNew, onAttach, onSketch, pendingSketch, pendingFile, onClearPending, tint, keyboardOpen, isUploading }: {
+function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, onToggleTerminal, hasNew, onAttach, onSketch, pendingSketch, pendingFile, onClearPending, tint, keyboardOpen, isUploading, storageKey }: {
   onSend: (text: string) => void; onStop: () => void; isProcessing: boolean; connected: boolean;
   terminalVisible?: boolean; onToggleTerminal?: () => void; hasNew?: boolean;
   onAttach: () => void;
@@ -329,9 +329,17 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
   tint?: 'amber'; // session terminal color
   keyboardOpen?: boolean;
   isUploading?: boolean;
+  storageKey?: string; // localStorage key to persist draft text across refresh
 }) {
-  const [text, setText] = useState('');
+  const [text, setText] = useState(() => (storageKey ? localStorage.getItem(storageKey) || '' : ''));
   const ref = useRef<HTMLTextAreaElement>(null);
+
+  // Persist draft to localStorage on change
+  useEffect(() => {
+    if (!storageKey) return;
+    if (text) localStorage.setItem(storageKey, text);
+    else localStorage.removeItem(storageKey);
+  }, [text, storageKey]);
 
   const canSend = !!(text.trim() || pendingSketch || pendingFile);
   const handleSend = useCallback(() => {
@@ -339,8 +347,9 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
     if (!t && !pendingSketch && !pendingFile) return;
     onSend(t || '');
     setText('');
+    if (storageKey) localStorage.removeItem(storageKey);
     if (ref.current) ref.current.style.height = '36px';
-  }, [text, onSend, pendingSketch, pendingFile]);
+  }, [text, onSend, pendingSketch, pendingFile, storageKey]);
 
   const isSession = tint === 'amber';
   const accent = isSession ? '#e0a030' : '#30d158';
@@ -432,12 +441,24 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
 // ─── Session Cards (Canvas overlay) ───
 const FIXED_SESSION_ID = 'a0a0a0a0-0e00-4000-a000-000000000002';
 const VIEWED_KEY = 'morph-viewed-sessions';
+const VIEWED_TS_KEY = 'morph-viewed-ts'; // Map<sessionId, lastViewedTimestamp>
 
 function getViewed(): Set<string> {
   try { return new Set(JSON.parse(localStorage.getItem(VIEWED_KEY) || '[]')); } catch { return new Set(); }
 }
+function getViewedTs(): Record<string, number> {
+  try { return JSON.parse(localStorage.getItem(VIEWED_TS_KEY) || '{}'); } catch { return {}; }
+}
 function markViewed(id: string) {
   const s = getViewed(); s.add(id); localStorage.setItem(VIEWED_KEY, JSON.stringify([...s]));
+  const ts = getViewedTs(); ts[id] = Date.now(); localStorage.setItem(VIEWED_TS_KEY, JSON.stringify(ts));
+}
+function hasUnread(s: any): boolean {
+  const ts = getViewedTs();
+  const lastViewed = ts[s.id] || 0;
+  // If never viewed → unread. If viewed but session updated after → unread.
+  if (!lastViewed) return true;
+  return (s.updatedAt || 0) > lastViewed;
 }
 
 // ─── Multi-environment session system ───
@@ -502,12 +523,12 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
 
   const dotColor = (s: any) => {
     if (s.active) return '#30d158';
-    if (!viewed.has(s.id)) return '#ffcc00';
+    if (hasUnread(s)) return '#ffcc00';
     return '#555';
   };
   const borderColor = (s: any) => {
     if (s.active) return 'rgba(48,209,88,0.25)';
-    if (!viewed.has(s.id)) return 'rgba(255,204,0,0.2)';
+    if (hasUnread(s)) return 'rgba(255,204,0,0.2)';
     return 'rgba(255,255,255,0.08)';
   };
 
@@ -694,7 +715,11 @@ function ConfigTab({ connState, onQuickAction, onRefresh }: { connState: string;
     setLoading(false);
   };
 
-  useEffect(() => { loadSessions(); }, []);
+  useEffect(() => {
+    loadSessions();
+    const iv = setInterval(loadSessions, 15_000); // auto-refresh every 15s
+    return () => clearInterval(iv);
+  }, []);
 
   const timeAgo = (ms: number) => {
     const diff = Date.now() - ms;
@@ -742,13 +767,24 @@ function ConfigTab({ connState, onQuickAction, onRefresh }: { connState: string;
               <span style={{ color: '#fff', fontSize: 13, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
                 {s.id.slice(0, 8)} — {s.cwd}
               </span>
+              <button onClick={() => { stopSession(s.id); setTimeout(loadSessions, 500); }} style={{
+                padding: '3px 8px', borderRadius: 6, border: '1px solid rgba(255,59,48,0.3)', cursor: 'pointer',
+                backgroundColor: 'rgba(255,59,48,0.12)', color: '#ff453a', fontSize: 11,
+                fontFamily: 'Menlo, monospace', flexShrink: 0,
+              }}>kill</button>
               <span style={{ color: '#30d158', fontSize: 11 }}>active</span>
             </div>
           </div>
         ))}
 
-        {/* Recent sessions */}
-        {sessions.map((s: any) => (
+        {/* Recent sessions — hide dead sessions (not active + no update in 24h) */}
+        {sessions.filter((s: any) => {
+          const activeIds = new Set(activeSessions.map((a: any) => a.id));
+          if (activeIds.has(s.id)) return true; // still running
+          if (s.active) return true;
+          // Keep if updated within 24h
+          return s.updatedAt && (Date.now() - s.updatedAt < 86400000);
+        }).map((s: any) => (
           <div key={s.id} style={{ padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <div style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: s.active ? '#30d158' : '#555', flexShrink: 0 }} />
@@ -990,6 +1026,7 @@ function SessionTerminal({ session, messages, onBack, onSend, onInterrupt, keybo
         tint="amber"
         keyboardOpen={keyboardOpen}
         isUploading={flow.isUploading}
+        storageKey={`morph-draft-${session.id}`}
       />
       {/* Disabled TabBar — same height as main, keeps InputBar aligned */}
       {!keyboardOpen && <TabBar tab="canvas" onTab={() => {}} disabled />}
@@ -1539,6 +1576,7 @@ export default function App() {
           onClearPending={mainFlow.clearPending}
           keyboardOpen={keyboardOpen}
           isUploading={mainFlow.isUploading}
+          storageKey="morph-draft-main"
         />
       </div>
       {!keyboardOpen && !selectedSession && <TabBar tab={tab} onTab={handleTab} />}

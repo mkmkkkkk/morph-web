@@ -139,9 +139,6 @@ function spawnClaude({ sessionId, resumeFrom, model }) {
  * Parse stdout JSONL lines and emit to Socket.IO room.
  * Returns a Promise that resolves when the first stdout data arrives (Claude is ready).
  */
-// Tools that require user approval before execution proceeds
-const APPROVAL_TOOLS = new Set(['Bash', 'Edit', 'Write', 'NotebookEdit']);
-
 function pipeOutput(proc, sessionId, io) {
   let buffer = '';
   let readyResolve;
@@ -169,35 +166,9 @@ function pipeOutput(proc, sessionId, io) {
           sessionId,
           data: parsed,
         });
-
-        // ─── Approval gate: SIGSTOP on dangerous tool_use, wait for user ───
-        if (parsed.type === 'assistant' && Array.isArray(parsed.message?.content)) {
-          const dangerous = parsed.message.content.filter(
-            b => b.type === 'tool_use' && APPROVAL_TOOLS.has(b.name)
-          );
-          if (dangerous.length > 0) {
-            const entry = active.get(sessionId);
-            try { proc.kill('SIGSTOP'); } catch {}
-            console.log(`[claude:${sessionId.slice(0,8)}] SIGSTOP — awaiting approval for ${dangerous.map(d => d.name).join(', ')}`);
-            io.to(`direct:${sessionId}`).emit('claude-permission', {
-              sessionId,
-              tools: dangerous.map(b => ({
-                toolUseId: b.id,
-                tool: b.name,
-                input: b.input,
-              })),
-            });
-            // Auto-approve after 120s to prevent hanging
-            if (entry) {
-              if (entry.permissionTimer) clearTimeout(entry.permissionTimer);
-              entry.permissionTimer = setTimeout(() => {
-                console.log(`[claude:${sessionId.slice(0,8)}] auto-approve (timeout)`);
-                try { proc.kill('SIGCONT'); } catch {}
-                entry.permissionTimer = null;
-              }, 120000);
-            }
-          }
-        }
+        // bypassPermissions mode — no SIGSTOP gate needed. If Claude ever
+        // outputs a real permission request, PermissionBanner on the client
+        // will handle it (type === 'permission' in message stream).
       } catch {
         io.to(`direct:${sessionId}`).emit('claude-output', {
           sessionId,
