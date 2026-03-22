@@ -468,7 +468,7 @@ function togglePin(envId: string, id: string) { const p = getPinned(envId); if (
 
 // Environment config — stored in localStorage, add more via Config tab
 type EnvConfig = { id: string; label: string; relayUrl: string; token?: string; maxSessions: number };
-const DEFAULT_ENV: EnvConfig = { id: 'workspace', label: '/workspace', relayUrl: '', maxSessions: 6 };
+const DEFAULT_ENV: EnvConfig = { id: 'workspace', label: '/workspace', relayUrl: '', maxSessions: 4 };
 function getEnvironments(): EnvConfig[] {
   try { const stored = JSON.parse(localStorage.getItem('morph-environments') || 'null'); return stored || [DEFAULT_ENV]; }
   catch { return [DEFAULT_ENV]; }
@@ -502,7 +502,7 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
     const applyRaw = (d: any) => {
       const all = d.sessions || [];
       const pins = getPinned(env.id);
-      const filtered = all.filter((s: any) => s.id !== FIXED_SESSION_ID && (s.active || (s.updatedAt && Date.now() - s.updatedAt < 86400000)));
+      const filtered = all.filter((s: any) => s.id !== FIXED_SESSION_ID && (s.active || (s.updatedAt && Date.now() - s.updatedAt < 10800000)));
       const pinnedSessions = filtered.filter((s: any) => pins.has(s.id));
       const unpinned = filtered.filter((s: any) => !pins.has(s.id)).slice(0, limit - pinnedSessions.length);
       setSessions([...pinnedSessions, ...unpinned]);
