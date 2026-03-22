@@ -502,7 +502,7 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
     const applyRaw = (d: any) => {
       const all = d.sessions || [];
       const pins = getPinned(env.id);
-      const filtered = all.filter((s: any) => s.id !== FIXED_SESSION_ID);
+      const filtered = all.filter((s: any) => s.id !== FIXED_SESSION_ID && (s.active || (s.updatedAt && Date.now() - s.updatedAt < 86400000)));
       const pinnedSessions = filtered.filter((s: any) => pins.has(s.id));
       const unpinned = filtered.filter((s: any) => !pins.has(s.id)).slice(0, limit - pinnedSessions.length);
       setSessions([...pinnedSessions, ...unpinned]);
@@ -557,8 +557,8 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
         {unviewedCount > 0 && <span style={{ fontSize: 9, color: '#ffcc00' }}>{unviewedCount} new</span>}
         <span style={{ color: '#888', fontSize: 10 }}>{expanded ? '▾' : '▸'}</span>
         <span
-          onClick={(e) => { e.stopPropagation(); onNewSession?.(env.id, env.relayUrl, env.token); }}
-          style={{ marginLeft: 'auto', color: '#555', fontSize: 18, lineHeight: 1, padding: '0 2px', cursor: 'pointer', userSelect: 'none' }}
+          onClick={(e) => { e.stopPropagation(); if (window.confirm('Create a new session?')) onNewSession?.(env.id, env.relayUrl, env.token); }}
+          style={{ marginLeft: 'auto', color: '#636AFF', fontSize: 20, lineHeight: 1, padding: '6px 10px', margin: '-6px -10px', cursor: 'pointer', userSelect: 'none', pointerEvents: 'auto', WebkitTapHighlightColor: 'transparent' }}
         >+</span>
       </div>
       <AnimatePresence>
@@ -767,7 +767,7 @@ function ConfigTab({ connState, onQuickAction, onRefresh }: { connState: string;
               <span style={{ color: '#fff', fontSize: 13, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
                 {s.id.slice(0, 8)} — {s.cwd}
               </span>
-              <button onClick={() => { stopSession(s.id); setTimeout(loadSessions, 500); }} style={{
+              <button onClick={() => { if (window.confirm(`Kill session ${s.id.slice(0, 8)}?`)) { stopSession(s.id); setTimeout(loadSessions, 500); } }} style={{
                 padding: '3px 8px', borderRadius: 6, border: '1px solid rgba(255,59,48,0.3)', cursor: 'pointer',
                 backgroundColor: 'rgba(255,59,48,0.12)', color: '#ff453a', fontSize: 11,
                 fontFamily: 'Menlo, monospace', flexShrink: 0,
