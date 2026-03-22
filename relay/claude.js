@@ -27,29 +27,26 @@ let _sessionsCacheTs = 0;
 const SESSIONS_CACHE_TTL = 30000; // 30s — matches client-side envSessionsCache TTL
 
 // ─── Live session detection ───
-// Returns set of session IDs that have open .jsonl file handles.
-// Strategy: broad lsof scan for .claude/**/*.jsonl (process-agnostic).
-// Fallback: sessions modified within last 4 hours.
+// Strategy: count running `claude` processes via `ps`, then pick the N most
+// recently-modified sessions. Claude doesn't hold .jsonl FDs open, so lsof
+// won't work. But each running process writes to exactly one .jsonl, so the
+// N most-recent sessions map 1:1 to the N running processes.
 function getLiveSessionIds(allSessions) {
   const live = new Set();
-  // lsof on macOS scans all kernel FDs — can take 3-10s even with timeout (SIGTERM doesn't interrupt kernel calls)
-  // Skip on darwin; 24hr fallback below is sufficient
-  if (process.platform !== 'darwin') {
-    try {
-      // Scan ALL processes — catches both native `claude` binary and node-launched variants
-      const out = execSync("lsof 2>/dev/null | grep -E '\\.claude.*\\.jsonl'", { encoding: 'utf-8', timeout: 500, shell: true });
-      for (const line of out.split('\n')) {
-        const m = line.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl/i);
-        if (m) live.add(m[1]);
-      }
-    } catch {}
-  }
+  if (!allSessions || allSessions.length === 0) return live;
 
-  // Fallback: on macOS (where lsof is skipped), include recently-modified sessions
-  if (process.platform === 'darwin' && allSessions && allSessions.length > 0) {
-    const cutoff = Date.now() - 4 * 60 * 60 * 1000;
-    for (const s of allSessions) {
-      if (s.updatedAt > cutoff) live.add(s.id);
+  let processCount = 0;
+  try {
+    // Count running `claude` main processes (not defunct/zombie)
+    const out = execSync("ps -eo stat,args 2>/dev/null | grep -E 'claude$' | grep -v defunct | grep -v grep", { encoding: 'utf-8', timeout: 500, shell: true });
+    processCount = out.trim().split('\n').filter(l => l.trim()).length;
+  } catch {}
+
+  if (processCount > 0) {
+    // Take the N most recently-modified sessions (allSessions is already sorted by updatedAt desc)
+    const sorted = [...allSessions].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    for (let i = 0; i < Math.min(processCount, sorted.length); i++) {
+      live.add(sorted[i].id);
     }
   }
 
