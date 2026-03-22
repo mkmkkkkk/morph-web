@@ -37,9 +37,13 @@ function getLiveSessionIds(allSessions) {
 
   let processCount = 0;
   try {
-    // Count running `claude` main processes (not defunct/zombie)
-    const out = execSync("ps -eo stat,args 2>/dev/null | grep -E 'claude$' | grep -v defunct | grep -v grep", { encoding: 'utf-8', timeout: 500, shell: true });
-    processCount = out.trim().split('\n').filter(l => l.trim()).length;
+    // pgrep -x matches exact process name — works on both Linux and macOS.
+    // Then filter out zombies (stat starts with Z) via ps.
+    const pids = execSync("pgrep -x claude 2>/dev/null", { encoding: 'utf-8', timeout: 500, shell: true }).trim().split('\n').filter(Boolean);
+    if (pids.length > 0) {
+      const stats = execSync(`ps -o stat= -p ${pids.join(',')} 2>/dev/null`, { encoding: 'utf-8', timeout: 500, shell: true });
+      processCount = stats.trim().split('\n').filter(l => l.trim() && !l.trim().startsWith('Z')).length;
+    }
   } catch {}
 
   if (processCount > 0) {
