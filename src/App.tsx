@@ -502,7 +502,7 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
     const applyRaw = (d: any) => {
       const all = d.sessions || [];
       const pins = getPinned(env.id);
-      const filtered = all.filter((s: any) => s.id !== FIXED_SESSION_ID && (s.active || (s.updatedAt && Date.now() - s.updatedAt < 10800000)));
+      const filtered = all.filter((s: any) => s.id !== FIXED_SESSION_ID && (s.active || pins.has(s.id)));
       const pinnedSessions = filtered.filter((s: any) => pins.has(s.id));
       const unpinned = filtered.filter((s: any) => !pins.has(s.id)).slice(0, limit - pinnedSessions.length);
       setSessions([...pinnedSessions, ...unpinned]);
