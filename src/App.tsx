@@ -23,7 +23,6 @@ setInterval(() => {
   const batch = _dbgQueue.splice(0);
   const relay = localStorage.getItem('morph-relay-url') || '';
   const token = localStorage.getItem('morph-auth') || '';
-  if (!relay) return;
   fetch(`${relay}/v2/debug/log`, {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
     body: JSON.stringify({ lines: batch }),
@@ -225,7 +224,11 @@ function Collapsible({ label, preview, content, color }: { label: string; previe
       }} style={{ cursor: 'pointer', color, fontSize: 13, fontFamily: 'Menlo, monospace', lineHeight: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', userSelect: 'none', WebkitUserSelect: 'none' as any, padding: '0 12px' }}>
         {open ? '▾' : '▸'} {label}{!open && preview ? `: ${preview}` : ''}
       </div>
-      {open && <pre data-sel style={{ color, opacity: 0.7, fontSize: 13, fontFamily: 'Menlo, monospace', lineHeight: '20px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', overflow: 'hidden', maxWidth: '100%', margin: 0, padding: '0 12px 0 28px', userSelect: 'text', WebkitUserSelect: 'text' as any }}>{content}</pre>}
+      {open && <pre style={{ color, opacity: 0.7, fontSize: 13, fontFamily: 'Menlo, monospace', lineHeight: '20px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', overflow: 'hidden', maxWidth: '100%', margin: 0, padding: '0 12px 0 28px', userSelect: 'none', WebkitUserSelect: 'none' as any }}>{
+        content.split('\n').map((line, i, arr) => (
+          <React.Fragment key={i}><span data-sel style={{ userSelect: 'text', WebkitUserSelect: 'text' } as any}>{line}</span>{i < arr.length - 1 && '\n'}</React.Fragment>
+        ))
+      }</pre>}
     </div>
   );
 }
@@ -234,13 +237,22 @@ function Collapsible({ label, preview, content, color }: { label: string; previe
 const MessageRow = React.memo(function MessageRow({ msg }: { msg: Message }) {
   // Outer div is non-selectable block; only inner <span> is selectable.
   // Prevents iOS from selecting entire block when touch lands on left padding.
-  const monoOuter = { fontFamily: 'Menlo, monospace', fontSize: 14, lineHeight: '20px', overflow: 'hidden' as const, maxWidth: '100%', userSelect: 'none' as const, WebkitUserSelect: 'none' as any } as const;
-  const sel = { userSelect: 'text' as const, WebkitUserSelect: 'text' as any, display: 'block' as const, padding: '0 12px' } as const;
+  const monoOuter = { fontFamily: 'Menlo, monospace', fontSize: 14, lineHeight: '20px', overflow: 'hidden' as const, maxWidth: '100%', padding: '0 12px', userSelect: 'none' as const, WebkitUserSelect: 'none' as any } as const;
+  const sel = { userSelect: 'text' as const, WebkitUserSelect: 'text' as any, display: 'block' as const } as const;
   switch (msg.type) {
     case 'text':
       return msg.role === 'user'
         ? <div style={{ ...monoOuter, color: '#30d158', marginBottom: 3, opacity: msg.pending ? 0.5 : 1 }}><span style={sel} data-sel>&gt; {msg.content}</span></div>
-        : <div style={{ ...monoOuter, color: '#e0e0e0', marginBottom: 3, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}><span style={sel} data-sel>{msg.content}</span></div>;
+        : <div style={{ ...monoOuter, color: '#e0e0e0', marginBottom: 3, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{
+            msg.content.split('\n').map((line, i) => (
+              <React.Fragment key={i}>
+                {line === ''
+                  ? <div style={{ height: '10px', userSelect: 'none', WebkitUserSelect: 'none' } as any} />
+                  : <span style={sel} data-sel>{line}</span>
+                }
+              </React.Fragment>
+            ))
+          }</div>;
     case 'thinking':
       return <Collapsible label="thinking" preview={msg.content.slice(0, 60)} content={msg.content} color="#636366" />;
     case 'tool':
@@ -335,87 +347,6 @@ function TerminalOverlay({ messages, visible }: { messages: Message[]; visible: 
       el.scrollTop = el.scrollHeight;
     }
   }, [messages.length]);
-
-  // iOS Safari: block selection from starting outside [data-sel] spans.
-  React.useEffect(() => {
-    const container = scrollRef.current;
-    if (!container) return;
-    function blockNonSel(e: TouchEvent) {
-      const t = e.target as HTMLElement;
-      const hasSel = !!t.closest?.('[data-sel]');
-      const tag = t.tagName;
-      const x = Math.round(e.touches[0]?.clientX || 0);
-      const y = Math.round(e.touches[0]?.clientY || 0);
-      dbg(`touchstart: tag=${tag} data-sel=${hasSel} xy=${x},${y}`);
-      if (!hasSel) {
-        dbg(`  → preventDefault (no data-sel)`);
-        e.preventDefault();
-      }
-    }
-    container.addEventListener('touchstart', blockNonSel, { passive: false });
-    return () => container.removeEventListener('touchstart', blockNonSel);
-  }, []);
-
-  // Log selectstart events
-  React.useEffect(() => {
-    const container = scrollRef.current;
-    if (!container) return;
-    function logSelectStart(e: Event) {
-      const t = e.target as HTMLElement;
-      dbg(`selectstart: tag=${t.tagName} data-sel=${!!t.closest?.('[data-sel]')} class=${t.className?.slice?.(0,30)||''}`);
-    }
-    container.addEventListener('selectstart', logSelectStart);
-    return () => container.removeEventListener('selectstart', logSelectStart);
-  }, []);
-
-  // iOS Safari: clamp selection to single [data-sel] span (WebKit Bug #231161).
-  React.useEffect(() => {
-    const container = scrollRef.current;
-    if (!container) return;
-    function iosClear() {
-      const sel = document.getSelection();
-      if (sel) sel.removeAllRanges();
-      const tmp = document.createElement('input');
-      tmp.style.position = 'fixed'; tmp.style.left = '-9999px'; tmp.style.opacity = '0';
-      document.body.appendChild(tmp); tmp.focus(); tmp.blur(); tmp.remove();
-    }
-    let clampCount = 0;
-    function clamp() {
-      const sel = document.getSelection();
-      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
-      const range = sel.getRangeAt(0);
-      const startEl = range.startContainer.nodeType === Node.TEXT_NODE
-        ? range.startContainer.parentElement : range.startContainer as Element;
-      const endEl = range.endContainer.nodeType === Node.TEXT_NODE
-        ? range.endContainer.parentElement : range.endContainer as Element;
-      const startSpan = startEl?.closest?.('[data-sel]');
-      const endSpan = endEl?.closest?.('[data-sel]');
-      const selText = sel.toString().slice(0, 40);
-      // Throttle log — only log every 5th selectionchange to avoid spam
-      clampCount++;
-      if (clampCount % 5 === 1) {
-        dbg(`selchange: startSel=${!!startSpan} endSel=${!!endSpan} same=${startSpan===endSpan} startTag=${startEl?.tagName} endTag=${endEl?.tagName} text="${selText}"`);
-      }
-      if (!startSpan && container.contains(range.startContainer)) {
-        dbg(`  → iosClear (no startSpan)`);
-        iosClear();
-        return;
-      }
-      if (startSpan && endSpan && startSpan !== endSpan) {
-        dbg(`  → clamp cross-span`);
-        const nr = document.createRange();
-        nr.setStart(range.startContainer, range.startOffset);
-        const walker = document.createTreeWalker(startSpan, NodeFilter.SHOW_TEXT);
-        let last = walker.nextNode();
-        while (walker.nextNode()) last = walker.currentNode;
-        if (last) nr.setEnd(last, (last as Text).length);
-        else nr.selectNodeContents(startSpan);
-        sel.removeAllRanges(); sel.addRange(nr);
-      }
-    }
-    document.addEventListener('selectionchange', clamp);
-    return () => document.removeEventListener('selectionchange', clamp);
-  }, []);
 
   const onScroll = React.useCallback(() => {
     const el = scrollRef.current;
@@ -744,6 +675,22 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
                 <span style={{ color: '#ddd', fontSize: 13, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
                   {s.display || s.id.slice(0, 8)}
                 </span>
+                {s.active && (
+                  <span onClick={(e) => {
+                    e.stopPropagation();
+                    if (window.confirm(`Kill session ${(s.display || s.id).slice(0, 12)}?`)) {
+                      stopSession(s.id);
+                      // Invalidate cache + refetch
+                      const cacheKey = `${env.id}:${env.relayUrl}:${limit}`;
+                      envSessionsCache.delete(cacheKey);
+                      setTimeout(() => setVisKey(k => k + 1), 500);
+                    }
+                  }} style={{
+                    padding: '3px 8px', borderRadius: 6, border: '1px solid rgba(255,59,48,0.3)', cursor: 'pointer',
+                    backgroundColor: 'rgba(255,59,48,0.12)', color: '#ff453a', fontSize: 10,
+                    fontFamily: 'Menlo, monospace', flexShrink: 0, pointerEvents: 'auto',
+                  }}>kill</span>
+                )}
                 <span style={{ color: '#777', fontSize: 11, flexShrink: 0 }}>{timeAgo(s.updatedAt)}</span>
                 <span onClick={(e) => { e.stopPropagation(); setPinned(togglePin(env.id, s.id)); }} style={{ cursor: 'pointer', padding: '8px 10px', margin: '-8px -10px -8px 0', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill={pinned.has(s.id) ? '#888' : 'none'} stroke={pinned.has(s.id) ? '#888' : '#444'} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg>
@@ -858,14 +805,36 @@ function ConfigTab({ connState, onQuickAction, onRefresh }: { connState: string;
   const loadSessions = async () => {
     setLoading(true);
     try {
-      const [sessRes, actRes] = await Promise.all([
-        fetch('/v2/claude/sessions?limit=30', { headers: headers() }),
-        fetch('/v2/claude/active', { headers: headers() }),
-      ]);
-      const sessData = await sessRes.json();
-      const actData = await actRes.json();
-      setSessions(sessData.sessions || []);
-      setActiveSessions(actData.sessions || []);
+      const envs = getEnvironments();
+      const mainToken = token();
+      // Fetch sessions + active from all environments in parallel
+      const results = await Promise.all(envs.map(async (env) => {
+        const base = env.relayUrl || '';
+        const t = env.token || mainToken;
+        const hdrs = { 'Authorization': `Bearer ${t}` };
+        try {
+          const [sessRes, actRes] = await Promise.all([
+            fetch(`${base}/v2/claude/sessions?limit=30`, { headers: hdrs }),
+            fetch(`${base}/v2/claude/active`, { headers: hdrs }).catch(() => null),
+          ]);
+          const sessData = await sessRes.json();
+          const actData = actRes ? await actRes.json() : { sessions: [] };
+          return {
+            env,
+            sessions: (sessData.sessions || []).filter((s: any) => s.id !== FIXED_SESSION_ID),
+            active: actData.sessions || [],
+          };
+        } catch { return { env, sessions: [], active: [] }; }
+      }));
+      // Merge all, tagging with env label
+      const allSessions: any[] = [];
+      const allActive: any[] = [];
+      for (const r of results) {
+        for (const s of r.sessions) allSessions.push({ ...s, _envLabel: r.env.label, _envId: r.env.id, _relayUrl: r.env.relayUrl });
+        for (const s of r.active) allActive.push({ ...s, _envLabel: r.env.label, _envId: r.env.id, _relayUrl: r.env.relayUrl });
+      }
+      setSessions(allSessions);
+      setActiveSessions(allActive);
     } catch {}
     setLoading(false);
   };
@@ -922,18 +891,19 @@ function ConfigTab({ connState, onQuickAction, onRefresh }: { connState: string;
 
         {/* Active sessions first */}
         {activeSessions.map((s: any) => (
-          <div key={s.id} style={{ padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+          <div key={`${s._envId}-${s.id}`} style={{ padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <div style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#30d158', flexShrink: 0 }} />
               <span style={{ color: '#fff', fontSize: 13, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
                 {s.id.slice(0, 8)} — {s.cwd}
               </span>
-              <button onClick={() => { if (window.confirm(`Kill session ${s.id.slice(0, 8)}?`)) { stopSession(s.id); setTimeout(loadSessions, 500); } }} style={{
+              <button onClick={() => { if (window.confirm(`Kill session ${s.id.slice(0, 8)}?`)) { if (s._envId && s._envId !== 'workspace') registerSession(s.id, s._envId); stopSession(s.id); setTimeout(loadSessions, 500); } }} style={{
                 padding: '3px 8px', borderRadius: 6, border: '1px solid rgba(255,59,48,0.3)', cursor: 'pointer',
                 backgroundColor: 'rgba(255,59,48,0.12)', color: '#ff453a', fontSize: 11,
                 fontFamily: 'Menlo, monospace', flexShrink: 0,
               }}>kill</button>
               <span style={{ color: '#30d158', fontSize: 11 }}>active</span>
+              {s._envLabel && <span style={{ color: '#636AFF', fontSize: 10, flexShrink: 0 }}>{s._envLabel}</span>}
             </div>
           </div>
         ))}
@@ -946,12 +916,13 @@ function ConfigTab({ connState, onQuickAction, onRefresh }: { connState: string;
           // Keep if updated within 24h
           return s.updatedAt && (Date.now() - s.updatedAt < 86400000);
         }).map((s: any) => (
-          <div key={s.id} style={{ padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+          <div key={`${s._envId}-${s.id}`} style={{ padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <div style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: s.active ? '#30d158' : '#555', flexShrink: 0 }} />
               <span style={{ color: '#e0e0e0', fontSize: 13, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
                 {s.display || s.id.slice(0, 8)}
               </span>
+              {s._envLabel && <span style={{ color: '#636AFF', fontSize: 10, flexShrink: 0 }}>{s._envLabel}</span>}
               <span style={{ color: '#888', fontSize: 11, flexShrink: 0 }}>{timeAgo(s.updatedAt)}</span>
             </div>
             <div style={{ fontSize: 11, color: '#777', fontFamily: 'Menlo, monospace', marginTop: 2, marginLeft: 12 }}>
