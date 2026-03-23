@@ -351,8 +351,6 @@ function TerminalOverlay({ messages, visible }: { messages: Message[]; visible: 
   // iOS Safari: when selection handle escapes a [data-sel] span into a parent
   // non-selectable div, clear the runaway selection immediately.
   React.useEffect(() => {
-    const container = scrollRef.current;
-    if (!container) return;
     let clearing = false;
     function guard() {
       if (clearing) return;
@@ -363,9 +361,10 @@ function TerminalOverlay({ messages, visible }: { messages: Message[]; visible: 
       const eEl = r.endContainer.nodeType === Node.TEXT_NODE ? (r.endContainer as Text).parentElement : r.endContainer as Element;
       const sIn = sEl?.closest?.('[data-sel]');
       const eIn = eEl?.closest?.('[data-sel]');
-      // Only act when anchor escaped span but is still inside terminal
-      if ((!sIn || !eIn) && container.contains(r.startContainer)) {
-        dbg(`SEL-GUARD: escaped span → clear (startSel=${!!sIn} endSel=${!!eIn} len=${sel.toString().length})`);
+      // Only act when anchor escaped span but is still inside terminal container
+      const container = scrollRef.current;
+      if ((!sIn || !eIn) && container && container.contains(r.startContainer)) {
+        dbg(`SEL-GUARD: escaped → clear (startSel=${!!sIn} endSel=${!!eIn} len=${sel.toString().length})`);
         clearing = true;
         sel.removeAllRanges();
         setTimeout(() => { clearing = false; }, 50);
@@ -899,6 +898,7 @@ function ConfigTab({ connState, onQuickAction, onRefresh }: { connState: string;
         <button onClick={loadSessions} style={{ padding: '6px', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 12, width: '100%', backgroundColor: 'rgba(255,255,255,0.08)', color: '#888', marginBottom: 8 }}>
           {loading ? 'Loading...' : 'Refresh'}
         </button>
+        <div style={{ maxHeight: 320, overflowY: 'auto', WebkitOverflowScrolling: 'touch' as any }}>
 
         {/* Active sessions first */}
         {activeSessions.map((s: any) => (
@@ -943,6 +943,7 @@ function ConfigTab({ connState, onQuickAction, onRefresh }: { connState: string;
             </div>
           </div>
         ))}
+        </div>
       </Section>
 
       <EnvManagerSection />
