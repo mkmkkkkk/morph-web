@@ -197,10 +197,10 @@ function Collapsible({ label, preview, content, color }: { label: string; previe
   const [open, setOpen] = useState(false);
   return (
     <div style={{ marginBottom: 2, overflow: 'hidden', maxWidth: '100%' }}>
-      <div onClick={() => setOpen(!open)} style={{ cursor: 'pointer', color, fontSize: 13, fontFamily: 'Menlo, monospace', lineHeight: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', userSelect: 'none', WebkitUserSelect: 'none' as any }}>
+      <div onPointerDown={(e) => { e.preventDefault(); setOpen(!open); }} style={{ cursor: 'pointer', color, fontSize: 13, fontFamily: 'Menlo, monospace', lineHeight: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', userSelect: 'none', WebkitUserSelect: 'none' as any, padding: '0 12px' }}>
         {open ? '▾' : '▸'} {label}{!open && preview ? `: ${preview}` : ''}
       </div>
-      {open && <pre data-sel style={{ color, opacity: 0.7, fontSize: 13, fontFamily: 'Menlo, monospace', lineHeight: '20px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', overflow: 'hidden', maxWidth: '100%', margin: 0, marginLeft: 16, userSelect: 'text', WebkitUserSelect: 'text' as any }}>{content}</pre>}
+      {open && <pre data-sel style={{ color, opacity: 0.7, fontSize: 13, fontFamily: 'Menlo, monospace', lineHeight: '20px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', overflow: 'hidden', maxWidth: '100%', margin: 0, padding: '0 12px 0 28px', userSelect: 'text', WebkitUserSelect: 'text' as any }}>{content}</pre>}
     </div>
   );
 }
@@ -210,7 +210,7 @@ const MessageRow = React.memo(function MessageRow({ msg }: { msg: Message }) {
   // Outer div is non-selectable block; only inner <span> is selectable.
   // Prevents iOS from selecting entire block when touch lands on left padding.
   const monoOuter = { fontFamily: 'Menlo, monospace', fontSize: 14, lineHeight: '20px', overflow: 'hidden' as const, maxWidth: '100%', userSelect: 'none' as const, WebkitUserSelect: 'none' as any } as const;
-  const sel = { userSelect: 'text' as const, WebkitUserSelect: 'text' as any } as const;
+  const sel = { userSelect: 'text' as const, WebkitUserSelect: 'text' as any, display: 'block' as const, padding: '0 12px' } as const;
   switch (msg.type) {
     case 'text':
       return msg.role === 'user'
@@ -311,11 +311,31 @@ function TerminalOverlay({ messages, visible }: { messages: Message[]; visible: 
     }
   }, [messages.length]);
 
-  // iOS Safari: clamp selection to single [data-sel] span.
-  // WebKit ignores user-select:none for selection expansion (Bug #231161).
+  // iOS Safari: block selection from starting outside [data-sel] spans.
+  // touchstart preventDefault is the only reliable way on iOS (selectstart is ignored).
   React.useEffect(() => {
     const container = scrollRef.current;
     if (!container) return;
+    function blockNonSel(e: TouchEvent) {
+      const t = e.target as HTMLElement;
+      if (!t.closest?.('[data-sel]')) e.preventDefault();
+    }
+    container.addEventListener('touchstart', blockNonSel, { passive: false });
+    return () => container.removeEventListener('touchstart', blockNonSel);
+  }, []);
+
+  // iOS Safari: clamp selection to single [data-sel] span (WebKit Bug #231161).
+  React.useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+    function iosClear() {
+      const sel = document.getSelection();
+      if (sel) sel.removeAllRanges();
+      // iOS ignores removeAllRanges — force-clear via temp input focus/blur
+      const tmp = document.createElement('input');
+      tmp.style.position = 'fixed'; tmp.style.left = '-9999px'; tmp.style.opacity = '0';
+      document.body.appendChild(tmp); tmp.focus(); tmp.blur(); tmp.remove();
+    }
     function clamp() {
       const sel = document.getSelection();
       if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
@@ -326,17 +346,16 @@ function TerminalOverlay({ messages, visible }: { messages: Message[]; visible: 
         ? range.endContainer.parentElement : range.endContainer as Element;
       const startSpan = startEl?.closest?.('[data-sel]');
       const endSpan = endEl?.closest?.('[data-sel]');
-      // Selection started outside any selectable span → kill
-      if (!startSpan && container.contains(range.startContainer)) {
-        sel.removeAllRanges(); return;
-      }
-      // Selection crosses span boundaries → clamp to start span
+      if (!startSpan && container.contains(range.startContainer)) { iosClear(); return; }
       if (startSpan && endSpan && startSpan !== endSpan) {
         const nr = document.createRange();
-        nr.selectNodeContents(startSpan);
         nr.setStart(range.startContainer, range.startOffset);
-        sel.removeAllRanges();
-        sel.addRange(nr);
+        const walker = document.createTreeWalker(startSpan, NodeFilter.SHOW_TEXT);
+        let last = walker.nextNode();
+        while (walker.nextNode()) last = walker.currentNode;
+        if (last) nr.setEnd(last, (last as Text).length);
+        else nr.selectNodeContents(startSpan);
+        sel.removeAllRanges(); sel.addRange(nr);
       }
     }
     document.addEventListener('selectionchange', clamp);
@@ -363,11 +382,7 @@ function TerminalOverlay({ messages, visible }: { messages: Message[]; visible: 
     }}>
       {/* Spacer pushes content to bottom when messages don't fill the container */}
       <div style={{ flex: '1 1 0' }} />
-      <div style={{ padding: '8px 12px' }} onSelectStart={(e) => {
-        // Block selection starting outside selectable spans (padding area)
-        const t = e.target as HTMLElement;
-        if (!t.closest?.('[data-sel]')) e.preventDefault();
-      }}>
+      <div style={{ padding: '8px 0' }}>
         {messages.length === 0
           ? <div style={{ color: '#4a4a4a', fontSize: 13, textAlign: 'center', padding: 16, fontFamily: 'Menlo, monospace' }}>waiting for session...</div>
           : messages.map(msg => <MessageRow key={msg.id} msg={msg} />)
