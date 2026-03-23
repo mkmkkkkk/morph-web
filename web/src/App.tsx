@@ -1198,7 +1198,7 @@ export default function App() {
   const [canvasLoaded, setCanvasLoaded] = useState(false);
   const mainFlow = useSendFlow(send);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
-  const [selectedSession, setSelectedSession] = useState<{ id: string; display: string; relayUrl?: string; relayToken?: string; project?: string; envId?: string } | null>(() => {
+  const [selectedSession, setSelectedSession] = useState<{ id: string; display: string; relayUrl?: string; relayToken?: string; project?: string; envId?: string; isNew?: boolean } | null>(() => {
     try { const s = sessionStorage.getItem('morph-selected-session'); return s ? JSON.parse(s) : null; } catch { return null; }
   });
   const [sessionMessages, setSessionMessages] = useState<Message[]>([]);
@@ -1603,7 +1603,7 @@ export default function App() {
               liveSessionIdRef.current = null;
               sessionSendQueue.current = [];
               sessionSendBusy.current = false;
-              setSelectedSession({ id: sid, display: 'New Session', relayUrl, relayToken, envId });
+              setSelectedSession({ id: sid, display: 'New Session', relayUrl, relayToken, envId, isNew: true });
             }}
           />
           {/* Canvas iframe — fills full area */}
@@ -1806,6 +1806,15 @@ export default function App() {
                   const liveId = liveSessionIdRef.current || snapSession.id;
                   const token = snapSession.relayToken || localStorage.getItem('morph-auth') || '';
                   const base = snapSession.relayUrl || '';
+
+                  // New session: relay /send auto-spawns a new claude process, no resume needed
+                  if (snapSession.isNew) {
+                    await sendToSession(snapSession.id, text);
+                    liveSessionIdRef.current = snapSession.id;
+                    sessionAliveCache.current.set(snapSession.id, { alive: true, ts: Date.now() });
+                    // Clear isNew flag after first send
+                    setSelectedSession(prev => prev ? { ...prev, isNew: false } : prev);
+                  } else {
                   // Use pre-fetched alive status (5s TTL) to skip the blocking check on first send
                   const ALIVE_TTL = 5_000;
                   const cachedAlive = sessionAliveCache.current.get(liveId);
@@ -1841,6 +1850,7 @@ export default function App() {
                       }
                     }
                   }
+                  } // end else (!isNew)
                   // Confirm sent
                   setSessionMessages(prev => prev.map(m => m.id === msgId ? { ...m, pending: false } : m));
                 } catch (err: any) {
