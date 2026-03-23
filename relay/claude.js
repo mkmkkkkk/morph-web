@@ -600,17 +600,20 @@ export function registerClaudeAPI(app, io, authMiddleware) {
     const cwd = request.query.cwd || process.env.DEFAULT_CWD || '/workspace';
     const limit = parseInt(request.query.limit) || 20;
     const allSessions = listClaudeSessions(cwd);
-    const osLive = getLiveSessionIds(allSessions);
-    // Merge relay-managed active sessions
-    for (const id of active.keys()) osLive.add(id);
+    const activeIds = new Set(active.keys());
+
+    // Recency threshold: sessions updated within last 10 min are likely still running
+    // (catches terminal sessions not in relay active map)
+    const RECENCY_MS = 10 * 60 * 1000;
+    const now = Date.now();
 
     const sessions = allSessions
-      .filter(s => osLive.has(s.id))
+      .filter(s => activeIds.has(s.id) || (s.updatedAt && (now - s.updatedAt) < RECENCY_MS))
       .slice(0, limit);
 
     for (const s of sessions) {
       s.active = active.has(s.id);
-      s.live = true; // all returned sessions are live (filtered by osLive)
+      s.live = true;
     }
     return { sessions };
   });
