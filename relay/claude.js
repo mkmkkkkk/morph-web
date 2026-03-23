@@ -762,6 +762,31 @@ export function registerClaudeAPI(app, io, authMiddleware) {
     }
   });
 
+  // ─── REST: Remote debug log (phone → relay, CTO reads via GET) ───
+  const _debugLines = [];
+  const MAX_DEBUG_LINES = 500;
+
+  app.post('/v2/debug/log', { preHandler: authMiddleware }, async (request) => {
+    const { lines } = request.body || {};
+    if (!Array.isArray(lines)) return { error: 'lines[] required' };
+    for (const l of lines) {
+      _debugLines.push(l);
+      if (_debugLines.length > MAX_DEBUG_LINES) _debugLines.shift();
+    }
+    return { ok: true, count: _debugLines.length };
+  });
+
+  app.get('/v2/debug/logs', { preHandler: authMiddleware }, async (request) => {
+    const since = parseInt(request.query.since) || 0;
+    const lines = since > 0 ? _debugLines.slice(since) : _debugLines;
+    return { lines, total: _debugLines.length };
+  });
+
+  app.post('/v2/debug/clear', { preHandler: authMiddleware }, async () => {
+    _debugLines.length = 0;
+    return { ok: true };
+  });
+
   // ─── Socket.IO: direct mode events ───
 
   io.on('connection', (socket) => {

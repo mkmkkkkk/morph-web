@@ -4,6 +4,20 @@ const FIXED_SESSION = 'a0a0a0a0-0e00-4000-a000-000000000002';
 const PRIMARY = 'primary';
 function uid() { return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`; }
 
+// ─── Connection debug log (ring buffer, last 100 entries) ───
+const _connLog: { ts: number; event: string; detail?: string }[] = [];
+function clog(event: string, detail?: string) {
+  const entry = { ts: Date.now(), event, detail };
+  _connLog.push(entry);
+  if (_connLog.length > 100) _connLog.shift();
+  if (typeof console !== 'undefined') console.debug(`[conn] ${event}`, detail || '');
+}
+// Expose for debugging: window.__connLog()
+if (typeof window !== 'undefined') {
+  (window as any).__connLog = () => _connLog.map(e => `${new Date(e.ts).toISOString().slice(11,23)} ${e.event} ${e.detail || ''}`).join('\n');
+  (window as any).__connLogRaw = () => [..._connLog];
+}
+
 export interface Message {
   id: string;
   role: 'user' | 'agent' | 'system';
@@ -138,7 +152,9 @@ function connectRelaySocket(relayId: string): void {
     reconnectionDelayMax: 5000,
   });
 
+  clog('socket-init', `relay=${relayId} url=${socketUrl} path=${socketPath}`);
   conn.socket.on('connect', () => {
+    clog('connected', `relay=${relayId} id=${conn.socket!.id}`);
     // Re-subscribe all sessions belonging to this relay
     for (const [sid, rid] of sessionRelayMap.entries()) {
       if (rid === relayId) conn.socket!.emit('direct-subscribe', { sessionId: sid });
@@ -151,8 +167,10 @@ function connectRelaySocket(relayId: string): void {
     }
     setConnState('connected');
   });
-  conn.socket.on('disconnect', () => setConnState('disconnected'));
-  conn.socket.on('connect_error', () => setConnState('error'));
+  conn.socket.on('disconnect', (reason) => { clog('disconnected', `relay=${relayId} reason=${reason}`); setConnState('disconnected'); });
+  conn.socket.on('connect_error', (err) => { clog('connect_error', `relay=${relayId} err=${err.message}`); setConnState('error'); });
+  conn.socket.io.on('reconnect_attempt', (n: number) => clog('reconnect_attempt', `relay=${relayId} attempt=${n}`));
+  conn.socket.io.on('reconnect', () => clog('reconnect_ok', `relay=${relayId}`));
   conn.socket.on('claude-compact', () => compactListeners.forEach(fn => fn()));
 
   conn.socket.on('claude-output', (data: any) => {
@@ -450,12 +468,19 @@ export function unsubscribeSessionMessages() {
   if (_sessionUnsub) { _sessionUnsub(); _sessionUnsub = null; }
 }
 
-// Bypass socket.io reconnection delay when page comes back to foreground
+// Instant reconnect when page comes back to foreground
+// Socket.IO's built-in reconnection uses exponential backoff — up to 5s delay.
+// Force-disconnect then immediately reconnect to skip the wait.
 if (typeof document !== 'undefined') {
   document.addEventListener('visibilitychange', () => {
+    clog('visibility', document.visibilityState);
     if (document.visibilityState !== 'visible') return;
-    for (const [, conn] of relayConns) {
-      if (conn.socket && !conn.socket.connected) conn.socket.connect();
+    for (const [relayId, conn] of relayConns) {
+      if (!conn.socket) continue;
+      if (conn.socket.connected) { clog('resume-skip', `relay=${relayId} already connected`); continue; }
+      clog('resume-reconnect', `relay=${relayId} forcing disconnect+connect`);
+      conn.socket.disconnect();
+      conn.socket.connect();
     }
   });
 }
