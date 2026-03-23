@@ -691,7 +691,7 @@ export function registerClaudeAPI(app, io, authMiddleware) {
     const termCount = _getTerminalClaudeCount();
     const terminalIds = new Set(
       allSessions
-        .filter(s => !activeIds.has(s.id))
+        .filter(s => !activeIds.has(s.id) && !_killedIds.has(s.id))
         .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
         .slice(0, termCount)
         .map(s => s.id)
@@ -702,7 +702,7 @@ export function registerClaudeAPI(app, io, authMiddleware) {
       .slice(0, limit);
 
     for (const s of sessions) {
-      s.active = active.has(s.id);
+      s.active = active.has(s.id) || terminalIds.has(s.id);
       s.live = true;
     }
     return { sessions };
