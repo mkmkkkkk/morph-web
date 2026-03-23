@@ -297,16 +297,35 @@ function PermissionBanner({ messages, sessionId }: { messages: Message[]; sessio
 
 // ─── Terminal Overlay (toggle-able, sits above input bar) ───
 function TerminalOverlay({ messages, visible }: { messages: Message[]; visible: boolean }) {
+  const scrollRef = React.useRef<HTMLDivElement>(null);
+  const stickRef = React.useRef(true); // auto-scroll when near bottom
+
+  // Auto-scroll to bottom on new messages (if user hasn't scrolled up)
+  React.useEffect(() => {
+    const el = scrollRef.current;
+    if (el && stickRef.current) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [messages.length]);
+
+  const onScroll = React.useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    // Stick if within 60px of bottom
+    stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+  }, []);
+
   if (!visible) return null;
   return (
-    <div style={{
+    <div ref={scrollRef} onScroll={onScroll} style={{
       flex: '1 1 0', minHeight: 0, overflowY: 'scroll', overflowX: 'hidden',
-      display: 'flex', flexDirection: 'column-reverse',
+      display: 'flex', flexDirection: 'column',
       borderTop: '1px solid rgba(255,255,255,0.08)', backgroundColor: '#111',
       WebkitOverflowScrolling: 'touch' as any,
       userSelect: 'text', WebkitUserSelect: 'text' as any,
     }}>
-      {/* column-reverse: browser natively anchors scroll to bottom. Inner div keeps message order correct. */}
+      {/* Spacer pushes content to bottom when messages don't fill the container */}
+      <div style={{ flex: '1 1 0' }} />
       <div style={{ padding: '8px 12px' }}>
         {messages.length === 0
           ? <div style={{ color: '#4a4a4a', fontSize: 13, textAlign: 'center', padding: 16, fontFamily: 'Menlo, monospace' }}>waiting for session...</div>
@@ -485,6 +504,16 @@ const timeAgo = (ms: number) => {
 
 // Module-level session list cache per environment (30 s TTL) — avoids redundant fetches on every mount
 const envSessionsCache = new Map<string, { data: any; ts: number }>();
+const STALE_TTL = 30_000;  // fresh — skip fetch entirely
+const MAX_TTL = 300_000;   // stale-while-revalidate window (5 min)
+
+// Global visibility-resume counter — bumped when app returns to foreground
+let _visResumeCount = 0;
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') _visResumeCount++;
+  });
+}
 
 // Reusable environment group — renders session cards for one environment
 function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpanded = true }: { env: EnvConfig; onSelect: (sessionId: string, display?: string, relayUrl?: string, relayToken?: string, project?: string, envId?: string) => void; onNewSession?: (envId: string, relayUrl?: string, relayToken?: string) => void; maxVisible?: number; initialExpanded?: boolean }) {
@@ -492,7 +521,15 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
   const [viewed, setViewed] = useState<Set<string>>(getViewed);
   const [pinned, setPinned] = useState<Set<string>>(() => getPinned(env.id));
   const [expanded, setExpanded] = useState(initialExpanded);
+  const [visKey, setVisKey] = useState(_visResumeCount);
   const limit = maxVisible ?? env.maxSessions;
+
+  // Listen for visibility resume to trigger refetch
+  useEffect(() => {
+    const onVis = () => { if (document.visibilityState === 'visible') setVisKey(_visResumeCount); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, []);
 
   useEffect(() => {
     if (!expanded) return; // skip fetch while collapsed — will run on first expand
@@ -508,18 +545,25 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
       setSessions([...pinnedSessions, ...unpinned]);
     };
     const cached = envSessionsCache.get(cacheKey);
-    if (cached && Date.now() - cached.ts < 30_000) {
+    const age = cached ? Date.now() - cached.ts : Infinity;
+    // Fresh cache — use directly, no fetch
+    if (cached && age < STALE_TTL) {
       applyRaw(cached.data);
       return;
     }
+    // Stale cache — show immediately, then revalidate in background
+    if (cached && age < MAX_TTL) {
+      applyRaw(cached.data);
+    }
+    // Fetch (either revalidate or cold)
     fetch(`${base}/v2/claude/sessions?limit=${env.maxSessions || 30}`, { headers: { 'Authorization': `Bearer ${token}` } })
       .then(r => r.json())
       .then(d => {
         envSessionsCache.set(cacheKey, { data: d, ts: Date.now() });
         applyRaw(d);
       })
-      .catch(() => setSessions([]));
-  }, [env.id, env.relayUrl, limit, expanded]);
+      .catch(() => {});  // on error, keep showing stale data
+  }, [env.id, env.relayUrl, limit, expanded, visKey]);
 
   const dotColor = (s: any) => {
     if (s.active) return '#30d158';
@@ -717,8 +761,14 @@ function ConfigTab({ connState, onQuickAction, onRefresh }: { connState: string;
 
   useEffect(() => {
     loadSessions();
-    const iv = setInterval(loadSessions, 30_000); // auto-refresh every 30s
-    return () => clearInterval(iv);
+    let iv = setInterval(loadSessions, 30_000);
+    // Pause polling while hidden, resume immediately on visible
+    const onVis = () => {
+      if (document.visibilityState === 'hidden') { clearInterval(iv); }
+      else { loadSessions(); iv = setInterval(loadSessions, 30_000); }
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
   }, []);
 
   const timeAgo = (ms: number) => {
