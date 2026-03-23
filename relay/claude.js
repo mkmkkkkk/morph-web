@@ -626,6 +626,9 @@ export function registerClaudeAPI(app, io, authMiddleware) {
       // Process tree for diagnostics
       let psTree = '';
       try { psTree = execSync("ps -eo pid,ppid,stat,comm 2>/dev/null | grep claude | grep -v defunct", { encoding: 'utf-8', timeout: 2000, shell: true }); } catch {}
+      // Debug: show parent comm for each claude process
+      let parentComms = '';
+      try { parentComms = execSync(`ps -eo pid,ppid,stat,comm 2>/dev/null | awk '$4=="claude" && $3!~/Z/{print $1, $2}' | while read pid pp; do pcomm=$(ps -o comm= -p "$pp" 2>/dev/null); bname=$(basename "$pcomm" 2>/dev/null); echo "claude:$pid ppid:$pp comm:$pcomm base:$bname"; done`, { encoding: 'utf-8', timeout: 3000, shell: true }); } catch (e) { parentComms = 'error: ' + e.message; }
       return {
         lsofLines: lsofOut.split('\n').filter(Boolean),
         liveIds,
@@ -633,6 +636,7 @@ export function registerClaudeAPI(app, io, authMiddleware) {
         recentSessions,
         cwd,
         psTree: psTree.trim().split('\n').filter(Boolean),
+        parentComms: typeof parentComms === 'string' ? parentComms.trim().split('\n').filter(Boolean) : parentComms,
         terminalCount: _getTerminalClaudeCount(),
       };
     } catch (e) { return { error: e.message }; }
