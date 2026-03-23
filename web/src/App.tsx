@@ -626,6 +626,7 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
   const [expanded, setExpanded] = useState(initialExpanded);
   const [visKey, setVisKey] = useState(_visResumeCount);
   const [killTarget, setKillTarget] = useState<any>(null);
+  const [newSessionConfirm, setNewSessionConfirm] = useState(false);
   const killedRef = useRef<Set<string>>(null);
   if (!killedRef.current) {
     try { killedRef.current = new Set(JSON.parse(sessionStorage.getItem('morph-killed') || '[]')); } catch { killedRef.current = new Set(); }
@@ -747,7 +748,7 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
         {unviewedCount > 0 && <span style={{ fontSize: 9, color: '#ffcc00' }}>{unviewedCount} new</span>}
         <span style={{ color: '#888', fontSize: 10 }}>{expanded ? '▾' : '▸'}</span>
         <span
-          onClick={(e) => { e.stopPropagation(); if (window.confirm('Create a new session?')) onNewSession?.(env.id, env.relayUrl, env.token); }}
+          onClick={(e) => { e.stopPropagation(); setNewSessionConfirm(true); }}
           style={{ marginLeft: 'auto', color: '#fff', fontSize: 20, lineHeight: 1, padding: '6px 10px', margin: '-6px -10px', cursor: 'pointer', userSelect: 'none', pointerEvents: 'auto', WebkitTapHighlightColor: 'transparent' }}
         >+</span>
       </div>
@@ -790,6 +791,36 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
         )}
       </AnimatePresence>
       {killTarget && <KillConfirmModal sessionLabel={(killTarget.display || killTarget.id).slice(0, 16)} onConfirm={confirmKill} onCancel={() => setKillTarget(null)} />}
+      {newSessionConfirm && createPortal(
+        <AnimatePresence>
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            onClick={() => setNewSessionConfirm(false)}
+            style={{ position: 'fixed', inset: 0, zIndex: 99999, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', paddingBottom: 40, backgroundColor: 'rgba(0,0,0,0.5)', WebkitBackdropFilter: 'blur(8px)', backdropFilter: 'blur(8px)' }}
+          >
+            <motion.div
+              initial={{ y: 30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 30, opacity: 0 }}
+              transition={{ type: 'spring', damping: 28, stiffness: 350 }}
+              onClick={(e) => e.stopPropagation()}
+              style={{ width: 'calc(100% - 32px)', maxWidth: 320, display: 'flex', flexDirection: 'column', gap: 8 }}
+            >
+              <div style={{ backgroundColor: 'rgba(44,44,46,0.95)', borderRadius: 14, overflow: 'hidden' }}>
+                <div style={{ padding: '18px 16px 14px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 13, color: '#999', lineHeight: 1.5 }}>
+                    Create a new session?
+                  </div>
+                </div>
+                <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                  <button onClick={() => { setNewSessionConfirm(false); onNewSession?.(env.id, env.relayUrl, env.token); }} style={{ width: '100%', padding: '16px 0', border: 'none', cursor: 'pointer', fontSize: 17, fontWeight: 600, color: '#007aff', backgroundColor: 'transparent', fontFamily: 'inherit' }}>New Session</button>
+                </div>
+              </div>
+              <button onClick={() => setNewSessionConfirm(false)} style={{ width: '100%', padding: '16px 0', border: 'none', cursor: 'pointer', fontSize: 17, fontWeight: 600, color: '#999', backgroundColor: 'rgba(44,44,46,0.95)', borderRadius: 14, fontFamily: 'inherit' }}>Cancel</button>
+            </motion.div>
+          </motion.div>
+        </AnimatePresence>,
+        document.body
+      )}
     </div>
   );
 }
