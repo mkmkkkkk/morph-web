@@ -613,12 +613,17 @@ export function registerClaudeAPI(app, io, authMiddleware) {
       const liveIds = [...new Set(active.keys())];
       const cutoff = Date.now() - 4 * 60 * 60 * 1000;
       const recentSessions = allSessions.filter(s => s.updatedAt > cutoff).map(s => s.id);
+      // Process tree for diagnostics
+      let psTree = '';
+      try { psTree = execSync("ps -eo pid,ppid,stat,comm 2>/dev/null | grep claude | grep -v defunct", { encoding: 'utf-8', timeout: 2000, shell: true }); } catch {}
       return {
         lsofLines: lsofOut.split('\n').filter(Boolean),
         liveIds,
         totalSessions: allSessions.length,
         recentSessions,
         cwd,
+        psTree: psTree.trim().split('\n').filter(Boolean),
+        terminalCount: _getTerminalClaudeCount(),
       };
     } catch (e) { return { error: e.message }; }
   });
