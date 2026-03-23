@@ -197,7 +197,7 @@ function Collapsible({ label, preview, content, color }: { label: string; previe
   const [open, setOpen] = useState(false);
   return (
     <div style={{ marginBottom: 2, overflow: 'hidden', maxWidth: '100%' }}>
-      <div onClick={() => setOpen(!open)} style={{ cursor: 'pointer', color, fontSize: 13, fontFamily: 'Menlo, monospace', lineHeight: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <div onClick={() => setOpen(!open)} style={{ cursor: 'pointer', color, fontSize: 13, fontFamily: 'Menlo, monospace', lineHeight: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', userSelect: 'none', WebkitUserSelect: 'none' as any }}>
         {open ? '▾' : '▸'} {label}{!open && preview ? `: ${preview}` : ''}
       </div>
       {open && <pre style={{ color, opacity: 0.7, fontSize: 13, fontFamily: 'Menlo, monospace', lineHeight: '20px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', overflow: 'hidden', maxWidth: '100%', margin: 0, marginLeft: 16 }}>{content}</pre>}
@@ -322,11 +322,11 @@ function TerminalOverlay({ messages, visible }: { messages: Message[]; visible: 
       display: 'flex', flexDirection: 'column',
       borderTop: '1px solid rgba(255,255,255,0.08)', backgroundColor: '#111',
       WebkitOverflowScrolling: 'touch' as any,
-      userSelect: 'text', WebkitUserSelect: 'text' as any,
+      userSelect: 'none', WebkitUserSelect: 'none' as any,
     }}>
       {/* Spacer pushes content to bottom when messages don't fill the container */}
       <div style={{ flex: '1 1 0' }} />
-      <div style={{ padding: '8px 12px' }}>
+      <div style={{ padding: '8px 12px', userSelect: 'text', WebkitUserSelect: 'text' as any }}>
         {messages.length === 0
           ? <div style={{ color: '#4a4a4a', fontSize: 13, textAlign: 'center', padding: 16, fontFamily: 'Menlo, monospace' }}>waiting for session...</div>
           : messages.map(msg => <MessageRow key={msg.id} msg={msg} />)
