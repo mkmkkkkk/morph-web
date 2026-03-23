@@ -34,36 +34,36 @@ let _sessionsCache = null;
 let _sessionsCacheTs = 0;
 const SESSIONS_CACHE_TTL = 120000; // 120s — 291 files × statSync is expensive
 
-// Cache for ps-based process count — avoids double execSync on every request
-let _psCount = 0;
-let _psCountTs = 0;
-const PS_CACHE_TTL = 5000; // 5s — process count changes slowly
+// Cache for terminal claude PIDs — avoids double execSync on every request
+let _terminalPids = [];
+let _termPidsTs = 0;
+const PS_CACHE_TTL = 5000; // 5s — process list changes slowly
 
-// Count terminal claude processes: parent is shell/init (not claude or node)
+// Get PIDs of terminal claude processes (not relay-spawned, not subagents)
 // Docker: PPID=0 | Bare metal: PPID=bash/zsh/tmux/screen
 // Excludes: relay-spawned (PPID=node), subagents (PPID=claude)
-function _getTerminalClaudeCount() {
+function _getTerminalClaudePids() {
   const now = Date.now();
-  if (now - _psCountTs < PS_CACHE_TTL) return _psCount;
+  if (now - _termPidsTs < PS_CACHE_TTL) return _terminalPids;
   try {
-    // Get all non-zombie claude PIDs, check parent comm.
-    // Blacklist: parent=claude (subagent), parent=node (relay-spawned).
-    // Everything else = terminal session (covers launchd, iTerm2, Terminal, shells, etc.)
-    // macOS ps -eo comm prints full path (/usr/local/bin/claude), Linux prints basename (claude)
-    // Use awk to match comm field ending with /claude or exactly "claude"
-    const script = `ps -eo pid,ppid,stat,comm 2>/dev/null | awk '($4=="claude" || $4~/\\/claude$/) && $3!~/Z/{print $2}' | while read pp; do
-      if [ "$pp" = "0" ]; then echo terminal; else
+    // macOS ps -eo comm prints full path (/usr/local/bin/claude), Linux prints basename
+    const script = `ps -eo pid,ppid,stat,comm 2>/dev/null | awk '($4=="claude" || $4~/\\/claude$/) && $3!~/Z/{print $1, $2}' | while read cpid pp; do
+      if [ "$pp" = "0" ]; then echo "$cpid"; else
         pcomm=$(ps -o comm= -p "$pp" 2>/dev/null)
         pcomm="\${pcomm##*/}"
         pcomm="\${pcomm#-}"
-        case "$pcomm" in claude|node) ;; *) echo terminal;; esac
+        case "$pcomm" in claude|node) ;; *) echo "$cpid";; esac
       fi
-    done | wc -l`;
+    done`;
     const out = execSync(script, { encoding: 'utf-8', timeout: 2000, shell: true });
-    _psCount = parseInt(out.trim()) || 0;
-  } catch { _psCount = 0; }
-  _psCountTs = now;
-  return _psCount;
+    _terminalPids = out.trim().split('\n').filter(Boolean);
+  } catch { _terminalPids = []; }
+  _termPidsTs = now;
+  return _terminalPids;
+}
+
+function _getTerminalClaudeCount() {
+  return _getTerminalClaudePids().length;
 }
 
 /**
@@ -494,6 +494,31 @@ export function registerClaudeAPI(app, io, authMiddleware) {
             process.kill(parseInt(pid), 'SIGTERM');
             _sessionsCacheTs = 0;
             return { ok: true, method: 'pid' };
+          }
+        } catch {}
+      }
+    } catch {}
+
+    // 2b) Terminal-detected — match PID to session via open file descriptors
+    try {
+      const termPids = _getTerminalClaudePids();
+      for (const pid of termPids) {
+        try {
+          // Linux: check /proc/<pid>/fd symlinks for sessionId
+          let hasFile = false;
+          try {
+            const links = execSync(`readlink /proc/${pid}/fd/* 2>/dev/null`, { encoding: 'utf-8', timeout: 2000 });
+            hasFile = links.includes(sessionId);
+          } catch {
+            // macOS: lsof fallback
+            const out = execSync(`lsof -p ${pid} 2>/dev/null`, { encoding: 'utf-8', timeout: 3000 });
+            hasFile = out.includes(sessionId);
+          }
+          if (hasFile) {
+            process.kill(parseInt(pid), 'SIGTERM');
+            _sessionsCacheTs = 0;
+            _termPidsTs = 0; // bust terminal PID cache
+            return { ok: true, method: 'terminal-fd' };
           }
         } catch {}
       }
