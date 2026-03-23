@@ -702,7 +702,7 @@ export function registerClaudeAPI(app, io, authMiddleware) {
       .slice(0, limit);
 
     for (const s of sessions) {
-      s.active = active.has(s.id) || terminalIds.has(s.id);
+      s.active = active.has(s.id);
       s.live = true;
     }
     return { sessions };
