@@ -52,8 +52,8 @@ function _getTerminalClaudeCount() {
     const script = `ps -eo pid,ppid,stat,comm 2>/dev/null | awk '$4=="claude" && $3!~/Z/{print $2}' | while read pp; do
       if [ "$pp" = "0" ]; then echo terminal; else
         pcomm=$(ps -o comm= -p "$pp" 2>/dev/null)
-        pcomm=$(basename -- "$pcomm" 2>/dev/null)
-        pcomm=${pcomm#-}
+        pcomm="${pcomm##*/}"
+        pcomm="${pcomm#-}"
         case "$pcomm" in bash|zsh|sh|dash|fish|tmux*|screen|sshd|login|sudo|su) echo terminal;; esac
       fi
     done | wc -l`;
@@ -630,7 +630,7 @@ export function registerClaudeAPI(app, io, authMiddleware) {
       try { psTree = execSync("ps -eo pid,ppid,stat,comm 2>/dev/null | grep claude | grep -v defunct", { encoding: 'utf-8', timeout: 2000, shell: true }); } catch {}
       // Debug: show parent comm for each claude process
       let parentComms = '';
-      try { parentComms = execSync(`ps -eo pid,ppid,stat,comm 2>/dev/null | awk '$4=="claude" && $3!~/Z/{print $1, $2}' | while read pid pp; do pcomm=$(ps -o comm= -p "$pp" 2>/dev/null); bname=$(basename "$pcomm" 2>/dev/null); echo "claude:$pid ppid:$pp comm:$pcomm base:$bname"; done`, { encoding: 'utf-8', timeout: 3000, shell: true }); } catch (e) { parentComms = 'error: ' + e.message; }
+      try { parentComms = execSync(`ps -eo pid,ppid,stat,comm 2>/dev/null | awk '$4=="claude" && $3!~/Z/{print $1, $2}' | while read pid pp; do pcomm=$(ps -o comm= -p "$pp" 2>/dev/null); bname="\${pcomm##*/}"; bname="\${bname#-}"; echo "claude:$pid ppid:$pp comm:$pcomm base:$bname"; done`, { encoding: 'utf-8', timeout: 3000, shell: true }); } catch (e) { parentComms = 'error: ' + e.message; }
       return {
         lsofLines: lsofOut.split('\n').filter(Boolean),
         liveIds,
