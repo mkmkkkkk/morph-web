@@ -51,9 +51,9 @@ function _getTerminalClaudeCount() {
     // Everything else = terminal session (covers launchd, iTerm2, Terminal, shells, etc.)
     const script = `ps -eo pid,ppid,stat,comm 2>/dev/null | awk '$4=="claude" && $3!~/Z/{print $2}' | while read pp; do
       if [ "$pp" = "0" ]; then echo terminal; else
-        pcomm=$(ps -o comm= -p "$pp" 2>/dev/null)
-        pcomm="${pcomm##*/}"
-        pcomm="${pcomm#-}"
+        pcomm=\\$(ps -o comm= -p "$pp" 2>/dev/null)
+        pcomm="\${pcomm##*/}"
+        pcomm="\${pcomm#-}"
         case "$pcomm" in claude|node) ;; *) echo terminal;; esac
       fi
     done | wc -l`;
