@@ -49,7 +49,9 @@ function _getTerminalClaudeCount() {
     // Get all non-zombie claude PIDs, check parent comm.
     // Blacklist: parent=claude (subagent), parent=node (relay-spawned).
     // Everything else = terminal session (covers launchd, iTerm2, Terminal, shells, etc.)
-    const script = `ps -eo pid,ppid,stat,comm 2>/dev/null | awk '$4=="claude" && $3!~/Z/{print $2}' | while read pp; do
+    // macOS ps -eo comm prints full path (/usr/local/bin/claude), Linux prints basename (claude)
+    // Use awk to match comm field ending with /claude or exactly "claude"
+    const script = `ps -eo pid,ppid,stat,comm 2>/dev/null | awk '($4=="claude" || $4~/\\/claude$/) && $3!~/Z/{print $2}' | while read pp; do
       if [ "$pp" = "0" ]; then echo terminal; else
         pcomm=$(ps -o comm= -p "$pp" 2>/dev/null)
         pcomm="\${pcomm##*/}"
