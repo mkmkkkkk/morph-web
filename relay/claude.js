@@ -12,7 +12,7 @@
  */
 
 import { spawn, execSync } from 'child_process';
-import { readdirSync, readFileSync, statSync, writeFileSync, mkdirSync, openSync, readSync, closeSync } from 'fs';
+import { readdirSync, readFileSync, statSync, writeFileSync, mkdirSync, openSync, readSync, closeSync, existsSync, renameSync } from 'fs';
 import { join, resolve } from 'path';
 import { homedir } from 'os';
 import { randomUUID } from 'crypto';
@@ -20,6 +20,43 @@ import { randomUUID } from 'crypto';
 // Active Claude processes: sessionId → { process, cwd, claudeSessionId }
 const active = new Map();
 const MAX_CONCURRENT_SESSIONS = 6;
+
+// ─── Persistence: active map + killed blacklist ───
+const ACTIVE_FILE = '/tmp/morph-active.json';
+const KILLED_FILE = '/tmp/morph-killed.json';
+
+function _loadKilled() {
+  try { return new Set(JSON.parse(readFileSync(KILLED_FILE, 'utf-8'))); } catch { return new Set(); }
+}
+function _saveKilled(set) {
+  try { writeFileSync(KILLED_FILE, JSON.stringify([...set])); } catch {}
+}
+function _persistActive() {
+  const entries = [];
+  for (const [sid, info] of active) {
+    if (info.process && !info.process.killed) {
+      entries.push({ sid, pid: info.process.pid });
+    }
+  }
+  try { writeFileSync(ACTIVE_FILE, JSON.stringify(entries)); } catch {}
+}
+// On startup: restore orphaned relay-spawned sessions (process still alive but lost from active map)
+function _restoreActive() {
+  try {
+    const entries = JSON.parse(readFileSync(ACTIVE_FILE, 'utf-8'));
+    for (const { sid, pid } of entries) {
+      if (active.has(sid)) continue; // already managed
+      try {
+        process.kill(pid, 0); // check if alive (signal 0)
+        // Process alive but we lost stdin — mark as active (read-only)
+        active.set(sid, { process: { pid, killed: false, kill: (sig) => { try { process.kill(pid, sig); } catch {} } }, cwd: WORK_DIR, orphaned: true });
+        console.log(`[restore] session ${sid.slice(0,8)} pid=${pid} — re-attached (read-only)`);
+      } catch {
+        // Process dead — skip
+      }
+    }
+  } catch {}
+}
 
 // Error ring buffer — queryable via GET /v2/claude/errors
 const _errorLog = [];
@@ -215,6 +252,7 @@ function pipeOutput(proc, sessionId, io) {
     }
     io.to(`direct:${sessionId}`).emit('claude-exit', { sessionId, code, signal });
     active.delete(sessionId);
+    _persistActive();
   });
 
   proc.on('error', (err) => {
@@ -225,6 +263,7 @@ function pipeOutput(proc, sessionId, io) {
       text: `Process error: ${err.message}`,
     });
     active.delete(sessionId);
+    _persistActive();
   });
 }
 
@@ -356,6 +395,12 @@ function listAllProjects() {
 /**
  * Register v2 REST routes and Socket.IO events.
  */
+// Server-side killed set — prevents dead sessions from reappearing via terminal detection
+const _killedIds = _loadKilled();
+
+// Restore orphaned relay-spawned sessions on startup
+_restoreActive();
+
 export function registerClaudeAPI(app, io, authMiddleware) {
 
   // ─── REST: List configured relay environments (server-defined, no per-device config needed) ───
@@ -406,8 +451,15 @@ export function registerClaudeAPI(app, io, authMiddleware) {
     }
     const sessionId = existingId || randomUUID();
 
+    // Un-blacklist if previously killed
+    if (_killedIds.has(sessionId)) {
+      _killedIds.delete(sessionId);
+      _saveKilled(_killedIds);
+    }
+
     const proc = spawnClaude({ sessionId, model });
     active.set(sessionId, { process: proc, cwd: WORK_DIR, startedAt: Date.now() });
+    _persistActive();
     pipeOutput(proc, sessionId, io);
 
     // Wait for Claude to be ready (first stdout), then send
@@ -427,6 +479,7 @@ export function registerClaudeAPI(app, io, authMiddleware) {
 
     const proc = spawnClaude({ sessionId, resumeFrom, model });
     active.set(sessionId, { process: proc, cwd: WORK_DIR, resumedFrom: resumeFrom, startedAt: Date.now() });
+    _persistActive();
     pipeOutput(proc, sessionId, io);
 
     // Optionally send a follow-up message — wait for ready
@@ -480,6 +533,9 @@ export function registerClaudeAPI(app, io, authMiddleware) {
     if (session) {
       session.process.kill('SIGTERM');
       active.delete(sessionId);
+      _persistActive();
+      _killedIds.add(sessionId);
+      _saveKilled(_killedIds);
       _sessionsCacheTs = 0; // bust sessions cache
       return { ok: true, method: 'relay' };
     }
@@ -492,6 +548,8 @@ export function registerClaudeAPI(app, io, authMiddleware) {
           const cmdline = readFileSync(`/proc/${pid}/cmdline`, 'utf-8');
           if (cmdline.includes(sessionId)) {
             process.kill(parseInt(pid), 'SIGTERM');
+            _killedIds.add(sessionId);
+            _saveKilled(_killedIds);
             _sessionsCacheTs = 0;
             return { ok: true, method: 'pid' };
           }
@@ -516,6 +574,8 @@ export function registerClaudeAPI(app, io, authMiddleware) {
           }
           if (hasFile) {
             process.kill(parseInt(pid), 'SIGTERM');
+            _killedIds.add(sessionId);
+            _saveKilled(_killedIds);
             _sessionsCacheTs = 0;
             _termPidsTs = 0; // bust terminal PID cache
             return { ok: true, method: 'terminal-fd' };
@@ -531,11 +591,17 @@ export function registerClaudeAPI(app, io, authMiddleware) {
       const claudeDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
       const jsonlPath = join(claudeDir, 'projects', projectId, `${sessionId}.jsonl`);
       execSync(`fuser -k "${jsonlPath}" 2>/dev/null`, { timeout: 2000, shell: true });
+      _killedIds.add(sessionId);
+      _saveKilled(_killedIds);
       _sessionsCacheTs = 0;
       return { ok: true, method: 'fuser' };
     } catch {}
 
-    return { error: 'no_process_found' };
+    // Process not found but user wants it gone — blacklist so it won't reappear
+    _killedIds.add(sessionId);
+    _saveKilled(_killedIds);
+    _sessionsCacheTs = 0;
+    return { ok: true, method: 'blacklist' };
   });
 
   // ─── REST: Session history (last N messages from JSONL) ───
@@ -632,7 +698,7 @@ export function registerClaudeAPI(app, io, authMiddleware) {
     );
 
     const sessions = allSessions
-      .filter(s => activeIds.has(s.id) || terminalIds.has(s.id))
+      .filter(s => !_killedIds.has(s.id) && (activeIds.has(s.id) || terminalIds.has(s.id)))
       .slice(0, limit);
 
     for (const s of sessions) {
