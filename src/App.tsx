@@ -216,11 +216,7 @@ function Collapsible({ label, preview, content, color }: { label: string; previe
   return (
     <div style={{ marginBottom: 2, overflow: 'hidden', maxWidth: '100%' }}>
       <div style={{ color, fontSize: 13, fontFamily: 'Menlo, monospace', lineHeight: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', userSelect: 'none', WebkitUserSelect: 'none' as any, padding: '0 12px' }}>
-        <span onPointerDown={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          setOpen(!open);
-        }} style={{ cursor: 'pointer', touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' as any }}>{open ? '▾' : '▸'} {label}</span>{!open && preview ? `: ${preview}` : ''}
+        <span onClick={() => setOpen(!open)} style={{ cursor: 'pointer', touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' as any, padding: '6px 12px 6px 0', margin: '-6px -12px -6px 0', display: 'inline-block' }}>{open ? '▾' : '▸'} {label}</span>{!open && preview ? `: ${preview}` : ''}
       </div>
       {open && <pre style={{ color, opacity: 0.7, fontSize: 13, fontFamily: 'Menlo, monospace', lineHeight: '16px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', overflow: 'hidden', maxWidth: '100%', margin: 0, padding: '0 12px 0 28px', userSelect: 'none', WebkitUserSelect: 'none' as any }}>{
         content.split('\n').map((line, i, arr) => (
@@ -722,7 +718,7 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
   const unviewedCount = sessions.filter(s => !s.active && !viewed.has(s.id)).length;
 
   return (
-    <div style={{ marginBottom: 12, pointerEvents: 'none', userSelect: 'none' }}>
+    <div style={{ marginBottom: 12, pointerEvents: 'none', userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none' }}>
       <div
         onClick={() => setExpanded(v => !v)}
         style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: expanded ? 6 : 0, cursor: 'pointer', pointerEvents: 'auto' }}
@@ -759,6 +755,7 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
                   backgroundColor: 'rgba(28,28,30,0.92)',
                   borderRadius: 10, cursor: 'pointer',
                   border: `1px solid ${borderColor(s)}`,
+                  userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none',
                 }}
               >
                 <div style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: dotColor(s), flexShrink: 0 }} />
