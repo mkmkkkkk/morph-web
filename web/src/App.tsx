@@ -220,10 +220,10 @@ function Collapsible({ label, preview, content, color }: { label: string; previe
           e.preventDefault();
           e.stopPropagation();
           setOpen(!open);
-        }} style={{ cursor: 'pointer', padding: '4px 8px 4px 0', flexShrink: 0, touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' as any }}>{open ? '▾' : '▸'}</span>
+        }} style={{ cursor: 'pointer', padding: '8px 12px 8px 0', flexShrink: 0, touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' as any }}>{open ? '▾' : '▸'}</span>
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}{!open && preview ? `: ${preview}` : ''}</span>
       </div>
-      {open && <pre style={{ color, opacity: 0.7, fontSize: 13, fontFamily: 'Menlo, monospace', lineHeight: '20px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', overflow: 'hidden', maxWidth: '100%', margin: 0, padding: '0 12px 0 28px', userSelect: 'none', WebkitUserSelect: 'none' as any }}>{
+      {open && <pre style={{ color, opacity: 0.7, fontSize: 13, fontFamily: 'Menlo, monospace', lineHeight: '16px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', overflow: 'hidden', maxWidth: '100%', margin: 0, padding: '0 12px 0 28px', userSelect: 'none', WebkitUserSelect: 'none' as any }}>{
         content.split('\n').map((line, i, arr) => (
           <React.Fragment key={i}><span data-sel style={{ userSelect: 'text', WebkitUserSelect: 'text' } as any}>{line}</span>{i < arr.length - 1 && '\n'}</React.Fragment>
         ))
@@ -811,6 +811,18 @@ function ConfigTab({ connState, onQuickAction, onRefresh }: { connState: string;
   const token = () => localStorage.getItem('morph-auth') || '';
   const headers = () => ({ 'Authorization': `Bearer ${token()}` });
 
+  // Long-press helper: returns event handlers for touch + mouse, triggers callback after ms
+  const longPress = (cb: () => void, ms = 500) => {
+    let timer: any = null;
+    const start = () => { timer = setTimeout(cb, ms); };
+    const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } };
+    return {
+      onTouchStart: start, onTouchEnd: cancel, onTouchMove: cancel,
+      onMouseDown: start, onMouseUp: cancel, onMouseLeave: cancel,
+      onContextMenu: (e: any) => e.preventDefault(),
+    };
+  };
+
   const loadSessions = async () => {
     setLoading(true);
     try {
@@ -901,7 +913,7 @@ function ConfigTab({ connState, onQuickAction, onRefresh }: { connState: string;
 
         {/* Active sessions first */}
         {activeSessions.map((s: any) => (
-          <div key={`${s._envId}-${s.id}`} onClick={() => { if (window.confirm(`Kill session ${s.id.slice(0, 8)}?`)) { if (s._envId && s._envId !== 'workspace') registerSession(s.id, s._envId); stopSession(s.id); setTimeout(loadSessions, 500); } }} style={{ padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.08)', cursor: 'pointer' }}>
+          <div key={`${s._envId}-${s.id}`} {...longPress(() => { if (window.confirm(`Kill session ${s.id.slice(0, 8)}?`)) { if (s._envId && s._envId !== 'workspace') registerSession(s.id, s._envId); stopSession(s.id); setTimeout(loadSessions, 500); } })} style={{ padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.08)', cursor: 'pointer', userSelect: 'none', WebkitUserSelect: 'none' as any }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <div style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#30d158', flexShrink: 0 }} />
               <span style={{ color: '#fff', fontSize: 13, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
@@ -921,7 +933,7 @@ function ConfigTab({ connState, onQuickAction, onRefresh }: { connState: string;
           // Keep if updated within 24h
           return s.updatedAt && (Date.now() - s.updatedAt < 86400000);
         }).map((s: any) => (
-          <div key={`${s._envId}-${s.id}`} onClick={() => { if (window.confirm(`Kill session ${(s.display || s.id).slice(0, 12)}?`)) { if (s._envId && s._envId !== 'workspace') registerSession(s.id, s._envId); stopSession(s.id); setTimeout(loadSessions, 500); } }} style={{ padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.08)', cursor: 'pointer' }}>
+          <div key={`${s._envId}-${s.id}`} {...longPress(() => { if (window.confirm(`Kill session ${(s.display || s.id).slice(0, 12)}?`)) { if (s._envId && s._envId !== 'workspace') registerSession(s.id, s._envId); stopSession(s.id); setTimeout(loadSessions, 500); } })} style={{ padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.08)', cursor: 'pointer', userSelect: 'none', WebkitUserSelect: 'none' as any }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <div style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: s.active ? '#30d158' : '#555', flexShrink: 0 }} />
               <span style={{ color: '#e0e0e0', fontSize: 13, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
