@@ -454,6 +454,19 @@ export function registerClaudeAPI(app, io, authMiddleware) {
     // If session exists and process is alive, send to stdin
     if (existingId && active.has(existingId)) {
       const result = sendMessage(existingId, message);
+      // Orphaned terminal session — auto-resume with a new process
+      if (result.error === 'session_readonly') {
+        const old = active.get(existingId);
+        active.delete(existingId);
+        console.log(`[send] session ${existingId.slice(0,8)} is orphaned — auto-resuming`);
+        const proc = spawnClaude({ sessionId: existingId, resumeFrom: existingId, model });
+        active.set(existingId, { process: proc, cwd: WORK_DIR, resumedFrom: existingId, startedAt: Date.now() });
+        _persistActive();
+        pipeOutput(proc, existingId, io);
+        const timeout = new Promise(r => setTimeout(r, 2000));
+        Promise.race([proc._ready, timeout]).then(() => sendMessage(existingId, message));
+        return { sessionId: existingId, cwd: WORK_DIR, status: 'resumed' };
+      }
       return { sessionId: existingId, ...result };
     }
 
