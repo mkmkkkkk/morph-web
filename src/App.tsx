@@ -1801,39 +1801,47 @@ export default function App() {
               const snapSession = selectedSession;
 
               const doSend = async () => {
+                const _log = (s: string) => console.log(`[new-session] ${s}`);
                 try {
-                  // Use live session ID (updated after resume) to avoid spawning new process on every send
                   const liveId = liveSessionIdRef.current || snapSession.id;
                   const token = snapSession.relayToken || localStorage.getItem('morph-auth') || '';
                   const base = snapSession.relayUrl || '';
+                  _log(`doSend start | isNew=${snapSession.isNew} | liveId=${liveId} | snapId=${snapSession.id} | base=${base} | text=${text.slice(0,40)}`);
 
-                  // New session: relay /send auto-spawns a new claude process, no resume needed
                   if (snapSession.isNew) {
+                    _log(`NEW PATH → sendToSession(${snapSession.id})`);
                     await sendToSession(snapSession.id, text);
+                    _log(`NEW PATH → sendToSession OK`);
                     liveSessionIdRef.current = snapSession.id;
                     sessionAliveCache.current.set(snapSession.id, { alive: true, ts: Date.now() });
-                    // Clear isNew flag after first send
                     setSelectedSession(prev => prev ? { ...prev, isNew: false } : prev);
+                    _log(`NEW PATH → isNew cleared, liveId set`);
                   } else {
-                  // Use pre-fetched alive status (5s TTL) to skip the blocking check on first send
                   const ALIVE_TTL = 5_000;
                   const cachedAlive = sessionAliveCache.current.get(liveId);
                   const aliveFast = cachedAlive && Date.now() - cachedAlive.ts < ALIVE_TTL && cachedAlive.alive;
+                  _log(`EXISTING PATH | aliveFast=${!!aliveFast} | cachedAlive=${JSON.stringify(cachedAlive)}`);
                   if (aliveFast) {
+                    _log(`ALIVE FAST → sendToSession(${liveId})`);
                     await sendToSession(liveId, text);
                   } else {
+                    _log(`CHECKING /active for liveId=${liveId}`);
                     const checkRes = await fetch(`${base}/v2/claude/active`, { headers: { 'Authorization': `Bearer ${token}` } });
                     const checkData = await checkRes.json();
                     const alive = (checkData.sessions || []).find((s: any) => s.id === liveId && s.alive);
+                    _log(`/active result: alive=${!!alive} | sessions=${JSON.stringify(checkData.sessions?.map((s:any)=>s.id))}`);
                     if (alive) {
                       sessionAliveCache.current.set(liveId, { alive: true, ts: Date.now() });
+                      _log(`ALIVE → sendToSession(${liveId})`);
                       await sendToSession(liveId, text);
                     } else {
+                      _log(`DEAD → resumeSession(${snapSession.id})`);
                       const newSid = await resumeSession(snapSession.id, text);
-                      liveSessionIdRef.current = newSid; // track resumed process ID for subsequent sends
+                      _log(`RESUMED → newSid=${newSid}`);
+                      liveSessionIdRef.current = newSid;
                       sessionAliveCache.current.set(newSid, { alive: true, ts: Date.now() });
-                      // Update subscription if session ID changed (subscribeSessionMessages auto-cleans old)
                       if (newSid !== snapSession.id) {
+                        _log(`SID CHANGED → subscribing to ${newSid}`);
                         subscribeSessionMessages(newSid, (msg) => {
                           setSessionMessages(prev => {
                             if (msg.role === 'agent' && msg.type === 'text') {
@@ -1851,9 +1859,10 @@ export default function App() {
                     }
                   }
                   } // end else (!isNew)
-                  // Confirm sent
+                  _log(`DONE → confirming sent`);
                   setSessionMessages(prev => prev.map(m => m.id === msgId ? { ...m, pending: false } : m));
                 } catch (err: any) {
+                  _log(`ERROR → ${(err as Error).message}`);
                   setSessionMessages(prev => [...prev, { id: `${Date.now()}`, role: 'system', type: 'error', content: (err as Error).message || 'Send failed', ts: Date.now() }]);
                 }
               };
