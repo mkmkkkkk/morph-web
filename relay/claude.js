@@ -21,6 +21,14 @@ import { randomUUID } from 'crypto';
 const active = new Map();
 const MAX_CONCURRENT_SESSIONS = 6;
 
+// Error ring buffer — queryable via GET /v2/claude/errors
+const _errorLog = [];
+const MAX_ERROR_LOG = 50;
+function logError(sessionId, type, detail) {
+  _errorLog.push({ ts: new Date().toISOString(), sid: sessionId?.slice(0,8), type, detail });
+  if (_errorLog.length > MAX_ERROR_LOG) _errorLog.shift();
+}
+
 // Cache for listClaudeSessions — avoids re-scanning filesystem on every request
 let _sessionsCache = null;
 let _sessionsCacheTs = 0;
@@ -193,11 +201,13 @@ function pipeOutput(proc, sessionId, io) {
     const text = chunk.toString().trim();
     if (!text) return;
     console.error(`[claude:${sessionId.slice(0,8)}] stderr: ${text}`);
+    logError(sessionId, 'stderr', text);
     io.to(`direct:${sessionId}`).emit('claude-error', { sessionId, text });
   });
 
   proc.on('exit', (code, signal) => {
     console.log(`[claude:${sessionId.slice(0,8)}] exit code=${code} signal=${signal}`);
+    logError(sessionId, 'exit', `code=${code} signal=${signal}`);
     // Flush remaining buffer
     if (buffer.trim()) {
       try {
@@ -211,6 +221,7 @@ function pipeOutput(proc, sessionId, io) {
 
   proc.on('error', (err) => {
     console.error(`[claude:${sessionId.slice(0,8)}] spawn error: ${err.message}`);
+    logError(sessionId, 'spawn_error', err.message);
     io.to(`direct:${sessionId}`).emit('claude-error', {
       sessionId,
       text: `Process error: ${err.message}`,
@@ -629,6 +640,10 @@ export function registerClaudeAPI(app, io, authMiddleware) {
         CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR || '(not set)',
       },
     };
+  });
+
+  app.get('/v2/claude/errors', { preHandler: authMiddleware }, async () => {
+    return { errors: _errorLog };
   });
 
   // ─── REST: Generate session title via Haiku ───
