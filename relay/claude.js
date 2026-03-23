@@ -628,7 +628,7 @@ export function registerClaudeAPI(app, io, authMiddleware) {
     const projectsDir = join(claudeDir, 'projects');
 
     // Tail-read: only load last TAIL_BYTES of file — avoids loading entire 20MB+ session into RAM
-    const TAIL_BYTES = 512 * 1024; // 512 KB — enough for ~100+ messages
+    const TAIL_BYTES = 1024 * 1024; // 1 MB — enough for ~100+ messages with full text
     function tailRead(filePath) {
       const stat = statSync(filePath);
       if (stat.size === 0) return null;
@@ -671,15 +671,15 @@ export function registerClaudeAPI(app, io, authMiddleware) {
             const text = typeof obj.message.content === 'string'
               ? obj.message.content
               : obj.message.content.map(c => c.text || '').join('');
-            if (text) messages.push({ role: 'user', type: 'text', content: text.slice(0, 500), ts: obj.timestamp });
+            if (text) messages.push({ role: 'user', type: 'text', content: text.slice(0, 4000), ts: obj.timestamp });
           } else if (obj.type === 'assistant' && obj.message?.content) {
             for (const block of obj.message.content) {
               if (block.type === 'text' && block.text) {
-                messages.push({ role: 'agent', type: 'text', content: block.text.slice(0, 500), ts: obj.timestamp });
+                messages.push({ role: 'agent', type: 'text', content: block.text.slice(0, 4000), ts: obj.timestamp });
               } else if (block.type === 'thinking' && block.thinking) {
-                messages.push({ role: 'agent', type: 'thinking', content: block.thinking.slice(0, 200), ts: obj.timestamp });
+                messages.push({ role: 'agent', type: 'thinking', content: block.thinking.slice(0, 500), ts: obj.timestamp });
               } else if (block.type === 'tool_use') {
-                messages.push({ role: 'agent', type: 'tool', content: JSON.stringify(block.input).slice(0, 200), name: block.name, ts: obj.timestamp });
+                messages.push({ role: 'agent', type: 'tool', content: JSON.stringify(block.input).slice(0, 500), name: block.name, ts: obj.timestamp });
               }
             }
           }
