@@ -717,7 +717,7 @@ function ConfigTab({ connState, onQuickAction, onRefresh }: { connState: string;
 
   useEffect(() => {
     loadSessions();
-    const iv = setInterval(loadSessions, 15_000); // auto-refresh every 15s
+    const iv = setInterval(loadSessions, 30_000); // auto-refresh every 30s
     return () => clearInterval(iv);
   }, []);
 
