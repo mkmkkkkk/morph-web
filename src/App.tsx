@@ -11,34 +11,24 @@ const BUILD_TS = typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : Date.n
 // Module-level constant — avoids array allocation on every render
 const IDLE_WORDS = ['thinking...', 'pondering...', 'wondering...', 'reasoning...', 'considering...', 'analyzing...', 'processing...'];
 
-// ─── Debug overlay for iOS touch/selection/keyboard diagnostics ───
-const _dbg: string[] = [];
-let _dbgListeners: (() => void)[] = [];
+// ─── Remote debug logger — sends to relay /v2/debug/log, read via /v2/debug/logs ───
+const _dbgQueue: string[] = [];
 function dbg(msg: string) {
-  const ts = new Date().toLocaleTimeString('en', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  _dbg.push(`${ts} ${msg}`);
-  if (_dbg.length > 40) _dbg.shift();
-  _dbgListeners.forEach(fn => fn());
+  const ts = new Date().toLocaleTimeString('en', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 } as any);
+  _dbgQueue.push(`${ts} ${msg}`);
 }
-function DebugOverlay() {
-  const [, setTick] = React.useState(0);
-  React.useEffect(() => {
-    const fn = () => setTick(t => t + 1);
-    _dbgListeners.push(fn);
-    return () => { _dbgListeners = _dbgListeners.filter(f => f !== fn); };
-  }, []);
-  if (_dbg.length === 0) return null;
-  return (
-    <div style={{
-      position: 'fixed', bottom: 60, left: 4, right: 4, maxHeight: 180, overflowY: 'auto',
-      backgroundColor: 'rgba(0,0,0,0.85)', color: '#0f0', fontSize: 10, fontFamily: 'Menlo, monospace',
-      padding: 6, borderRadius: 6, zIndex: 99999, pointerEvents: 'none', lineHeight: '14px',
-      whiteSpace: 'pre-wrap', wordBreak: 'break-all',
-    }}>
-      {_dbg.slice(-20).join('\n')}
-    </div>
-  );
-}
+// Flush every 2s
+setInterval(() => {
+  if (_dbgQueue.length === 0) return;
+  const batch = _dbgQueue.splice(0);
+  const relay = localStorage.getItem('morph-relay-url') || '';
+  const token = localStorage.getItem('morph-auth') || '';
+  if (!relay) return;
+  fetch(`${relay}/v2/debug/log`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+    body: JSON.stringify({ lines: batch }),
+  }).catch(() => {});
+}, 2000);
 
 // ─── Shared send flow: attachments + fire-and-forget upload ───
 function useSendFlow(sendFn: (msg: string) => void, relayConfig?: { relayUrl?: string; relayToken?: string }) {
@@ -1614,7 +1604,6 @@ export default function App() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', maxWidth: 600, margin: '0 auto', width: '100%' }}>
-      <DebugOverlay />
       {/* Reconnecting indicator */}
       {connState !== 'connected' && (
         <div style={{
