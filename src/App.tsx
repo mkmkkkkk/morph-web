@@ -629,7 +629,7 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
   const [newSessionConfirm, setNewSessionConfirm] = useState(false);
   const killedRef = useRef<Set<string>>(null);
   if (!killedRef.current) {
-    try { killedRef.current = new Set(JSON.parse(sessionStorage.getItem('morph-killed') || '[]')); } catch { killedRef.current = new Set(); }
+    try { killedRef.current = new Set(JSON.parse(localStorage.getItem('morph-killed') || '[]')); } catch { killedRef.current = new Set(); }
   }
   const limit = maxVisible ?? env.maxSessions;
 
@@ -724,7 +724,7 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
     stopSession(sid);
     // Add to killed blacklist — prevents zombie reappearance from heuristic session detection
     killedRef.current!.add(sid);
-    try { sessionStorage.setItem('morph-killed', JSON.stringify([...killedRef.current!])); } catch {}
+    try { localStorage.setItem('morph-killed', JSON.stringify([...killedRef.current!])); } catch {}
     // Optimistically remove from UI immediately
     setSessions(prev => prev.filter(s => s.id !== sid));
     const cacheKey = `${env.id}:${env.relayUrl}:${limit}`;
