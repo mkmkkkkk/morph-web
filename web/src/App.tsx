@@ -213,10 +213,17 @@ function PasswordGate({ onAuth }: { onAuth: () => void }) {
 // ─── Collapsible Block ───
 function Collapsible({ label, preview, content, color }: { label: string; preview?: string; content: string; color: string }) {
   const [open, setOpen] = useState(false);
+  const touchY = useRef<number | null>(null);
+  const toggle = () => setOpen(o => !o);
   return (
     <div style={{ marginBottom: 2, overflow: 'hidden', maxWidth: '100%' }}>
       <div style={{ color, fontSize: 13, fontFamily: 'Menlo, monospace', lineHeight: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', userSelect: 'none', WebkitUserSelect: 'none' as any, padding: '0 12px' }}>
-        <span onClick={() => setOpen(!open)} style={{ cursor: 'pointer', touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' as any, padding: '6px 12px 6px 0', margin: '-6px -12px -6px 0', display: 'inline-block' }}>{open ? '▾' : '▸'} {label}</span>{!open && preview ? `: ${preview}` : ''}
+        <span
+          onTouchStart={(e) => { touchY.current = e.touches[0].clientY; }}
+          onTouchEnd={(e) => { e.preventDefault(); if (touchY.current !== null && Math.abs((e.changedTouches[0]?.clientY ?? touchY.current) - touchY.current) < 10) toggle(); touchY.current = null; }}
+          onPointerDown={(e) => { if (e.pointerType === 'mouse') { e.preventDefault(); toggle(); } }}
+          style={{ cursor: 'pointer', touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' as any, padding: '8px 16px 8px 0', margin: '-8px -16px -8px 0', display: 'inline-block' }}
+        >{open ? '▾' : '▸'} {label}</span>{!open && preview ? `: ${preview}` : ''}
       </div>
       {open && <pre style={{ color, opacity: 0.7, fontSize: 13, fontFamily: 'Menlo, monospace', lineHeight: '16px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', overflow: 'hidden', maxWidth: '100%', margin: 0, padding: '0 12px 0 28px', userSelect: 'none', WebkitUserSelect: 'none' as any }}>{
         content.split('\n').map((line, i, arr) => (
@@ -619,6 +626,10 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
   const [expanded, setExpanded] = useState(initialExpanded);
   const [visKey, setVisKey] = useState(_visResumeCount);
   const [killTarget, setKillTarget] = useState<any>(null);
+  const killedRef = useRef<Set<string>>(null);
+  if (!killedRef.current) {
+    try { killedRef.current = new Set(JSON.parse(sessionStorage.getItem('morph-killed') || '[]')); } catch { killedRef.current = new Set(); }
+  }
   const limit = maxVisible ?? env.maxSessions;
 
   // Listen for visibility resume to trigger refetch
@@ -636,7 +647,8 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
     const applyRaw = (d: any) => {
       const all = d.sessions || [];
       const pins = getPinned(env.id);
-      const filtered = all.filter((s: any) => s.id !== FIXED_SESSION_ID);
+      const killed = killedRef.current!;
+      const filtered = all.filter((s: any) => s.id !== FIXED_SESSION_ID && !killed.has(s.id));
       const pinnedSessions = filtered.filter((s: any) => pins.has(s.id));
       const unpinned = filtered.filter((s: any) => !pins.has(s.id)).slice(0, limit - pinnedSessions.length);
       setSessions([...pinnedSessions, ...unpinned]);
@@ -705,13 +717,18 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
 
   const confirmKill = () => {
     if (!killTarget) return;
-    dbg(`[kill] confirmed ${(killTarget.display || killTarget.id).slice(0, 12)} env=${env.id}`);
-    if (env.id !== 'workspace') registerSession(killTarget.id, env.id);
-    stopSession(killTarget.id);
+    const sid = killTarget.id;
+    dbg(`[kill] confirmed ${(killTarget.display || sid).slice(0, 12)} env=${env.id}`);
+    if (env.id !== 'workspace') registerSession(sid, env.id);
+    stopSession(sid);
+    // Add to killed blacklist — prevents zombie reappearance from heuristic session detection
+    killedRef.current!.add(sid);
+    try { sessionStorage.setItem('morph-killed', JSON.stringify([...killedRef.current!])); } catch {}
+    // Optimistically remove from UI immediately
+    setSessions(prev => prev.filter(s => s.id !== sid));
     const cacheKey = `${env.id}:${env.relayUrl}:${limit}`;
     envSessionsCache.delete(cacheKey);
     setKillTarget(null);
-    setVisKey(v => v + 1);
   };
 
   const activeCount = sessions.filter(s => s.active).length;
