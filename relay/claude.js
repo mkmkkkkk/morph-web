@@ -145,9 +145,14 @@ function spawnClaude({ sessionId, resumeFrom, model }) {
 
   console.log(`[spawnClaude] sessionId=${sessionId.slice(0,8)} resume=${isResume} cwd=${WORK_DIR} args=${args.join(' ')}`);
 
+  // Strip CLAUDECODE env var — relay may run inside a Claude Code session,
+  // but spawned processes are independent and must not be blocked by nesting check
+  const env = { ...process.env };
+  delete env.CLAUDECODE;
+
   const proc = spawn('claude', args, {
     cwd: WORK_DIR,
-    env: { ...process.env },
+    env,
     stdio: ['pipe', 'pipe', 'pipe'],
   });
 
