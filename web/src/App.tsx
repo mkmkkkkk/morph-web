@@ -1377,6 +1377,10 @@ export default function App() {
   // When a session is selected, load from cache instantly, then subscribe for live updates
   useEffect(() => {
     if (!selectedSession) return;
+    // CRITICAL: hydrate relay mapping before any network calls — prevents cross-env leak
+    if (selectedSession.envId && selectedSession.envId !== 'workspace') {
+      registerSession(selectedSession.id, selectedSession.envId);
+    }
     liveSessionIdRef.current = selectedSession.id; // reset live ID on new session open
     setSessionIsProcessing(false);
     clearTimeout(sessionIdleTimer.current);
@@ -1472,6 +1476,10 @@ export default function App() {
         if (resumed) {
           liveSessionIdRef.current = resumed.id;
           sessionAliveCache.current.set(resumed.id, { alive: true, ts: Date.now() });
+          // Register resumed process to the same relay — prevents cross-env leak
+          if (resumed.id !== sid && selectedSession.envId && selectedSession.envId !== 'workspace') {
+            registerSession(resumed.id, selectedSession.envId);
+          }
           // Re-subscribe to the live process ID so we receive its output
           if (resumed.id !== sid) subscribeSessionMessages(resumed.id, onSessionMsg);
         } else {
@@ -1872,6 +1880,10 @@ export default function App() {
                       sessionAliveCache.current.set(newSid, { alive: true, ts: Date.now() });
                       if (newSid !== snapSession.id) {
                         _log(`SID CHANGED → subscribing to ${newSid}`);
+                        // Register new SID to same relay — prevents cross-env leak
+                        if (snapSession.envId && snapSession.envId !== 'workspace') {
+                          registerSession(newSid, snapSession.envId);
+                        }
                         subscribeSessionMessages(newSid, (msg) => {
                           setSessionMessages(prev => {
                             if (msg.role === 'agent' && msg.type === 'text') {

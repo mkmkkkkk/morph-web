@@ -72,8 +72,18 @@ function ensurePrimary(): RelayConn {
   return relayConns.get(PRIMARY)!;
 }
 
+/** Resolve relay ID — only FIXED_SESSION may fall back to PRIMARY silently. */
+function resolveRelayId(sessionId: string): string {
+  if (sessionId === FIXED_SESSION) return PRIMARY;
+  const relayId = sessionRelayMap.get(sessionId);
+  if (relayId) return relayId;
+  // Unknown session — warn but don't throw (caller may handle)
+  console.warn(`[conn] no relay mapping for session ${sessionId.slice(0,8)}, falling back to PRIMARY`);
+  return PRIMARY;
+}
+
 function relayFor(sessionId: string): RelayConn {
-  const id = sessionRelayMap.get(sessionId) || PRIMARY;
+  const id = resolveRelayId(sessionId);
   return relayConns.get(id) ?? ensurePrimary();
 }
 
@@ -298,13 +308,13 @@ export function registerSession(sessionId: string, relayId: string): void {
 // ─── Session operations (relay-aware) ───
 
 export async function sendToSession(sid: string, text: string): Promise<void> {
-  const relayId = sessionRelayMap.get(sid) || PRIMARY;
+  const relayId = resolveRelayId(sid);
   const data = await relayPost(relayId, '/v2/claude/send', { message: text, sessionId: sid, cwd: '/workspace' });
   if (data.error) throw new Error(data.error);
 }
 
 export async function resumeSession(sid: string, text: string): Promise<string> {
-  const relayId = sessionRelayMap.get(sid) || PRIMARY;
+  const relayId = resolveRelayId(sid);
   const data = await relayPost(relayId, '/v2/claude/resume', { resumeFrom: sid, message: text, cwd: '/workspace' });
   const newSid = data.sessionId || sid;
   const conn = relayConns.get(relayId);
@@ -315,25 +325,25 @@ export async function resumeSession(sid: string, text: string): Promise<string> 
 }
 
 export function interruptSession(sid: string) {
-  const relayId = sessionRelayMap.get(sid) || PRIMARY;
+  const relayId = resolveRelayId(sid);
   relayPost(relayId, '/v2/claude/interrupt', { sessionId: sid }).catch(() => {});
 }
 
 export function stopSession(sid: string) {
-  const relayId = sessionRelayMap.get(sid) || PRIMARY;
+  const relayId = resolveRelayId(sid);
   relayPost(relayId, '/v2/claude/stop', { sessionId: sid }).catch(() => {});
 }
 
 /** Approve tool execution — resume SIGSTOP'd process */
 export function approvePermission(sid: string) {
-  const relayId = sessionRelayMap.get(sid) || PRIMARY;
+  const relayId = resolveRelayId(sid);
   const conn = relayConns.get(relayId);
   if (conn?.socket) conn.socket.emit('direct-approve', { sessionId: sid });
 }
 
 /** Deny tool execution — resume then interrupt */
 export function denyPermission(sid: string) {
-  const relayId = sessionRelayMap.get(sid) || PRIMARY;
+  const relayId = resolveRelayId(sid);
   const conn = relayConns.get(relayId);
   if (conn?.socket) conn.socket.emit('direct-deny', { sessionId: sid });
 }
@@ -345,13 +355,13 @@ export function onPermission(cb: PermissionListener): () => void {
 }
 
 export async function isSessionAlive(sid: string): Promise<boolean> {
-  const relayId = sessionRelayMap.get(sid) || PRIMARY;
+  const relayId = resolveRelayId(sid);
   const data = await relayGet(relayId, '/v2/claude/active');
   return (data.sessions || []).some((s: any) => s.id === sid && s.alive);
 }
 
 export async function loadHistory(sid: string, limit = 50): Promise<Message[]> {
-  const relayId = sessionRelayMap.get(sid) || PRIMARY;
+  const relayId = resolveRelayId(sid);
   const data = await relayGet(relayId, `/v2/claude/history/${sid}?limit=${limit}`);
   return (data.messages || []).map((m: any) => ({
     id: uid(), role: m.role, type: m.type, content: m.content, name: m.name,
