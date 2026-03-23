@@ -676,12 +676,10 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
   }, [env.id, env.relayUrl, limit, expanded, visKey]);
 
   const dotColor = (s: any) => {
-    if (s.active) return '#30d158';
     if (hasUnread(s)) return '#ffcc00';
     return '#555';
   };
   const borderColor = (s: any) => {
-    if (s.active) return 'rgba(48,209,88,0.25)';
     if (hasUnread(s)) return 'rgba(255,204,0,0.2)';
     return 'rgba(255,255,255,0.08)';
   };
@@ -732,8 +730,7 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
     setKillTarget(null);
   };
 
-  const activeCount = sessions.filter(s => s.active).length;
-  const unviewedCount = sessions.filter(s => !s.active && !viewed.has(s.id)).length;
+  const unviewedCount = sessions.filter(s => !viewed.has(s.id)).length;
 
   return (
     <div style={{ marginBottom: 12, pointerEvents: 'none', userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none' }}>
@@ -744,7 +741,6 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
         <span style={{ color: '#777', fontSize: 11, fontWeight: 600, textTransform: 'uppercase' as const, letterSpacing: 0.5 }}>
           {env.label} ({sessions.length})
         </span>
-        {activeCount > 0 && <span style={{ fontSize: 9, color: '#30d158' }}>{activeCount} active</span>}
         {unviewedCount > 0 && <span style={{ fontSize: 9, color: '#ffcc00' }}>{unviewedCount} new</span>}
         <span style={{ color: '#888', fontSize: 10 }}>{expanded ? '▾' : '▸'}</span>
         <span
@@ -987,7 +983,7 @@ function EnvManagerSection() {
     <Section title="Environments">
       {envs.map(e => (
         <div key={e.id} style={{ display: 'flex', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-          <div style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: e.id === 'workspace' ? '#30d158' : '#636AFF', marginRight: 8, flexShrink: 0 }} />
+          <div style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#30d158', marginRight: 8, flexShrink: 0 }} />
           <span style={{ flex: 1, color: '#e0e0e0', fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{e.label}</span>
           {e.id !== 'workspace' && (
             <button onClick={() => handleRemove(e.id)} style={{ border: 'none', background: 'none', color: '#ff453a', fontSize: 18, cursor: 'pointer', padding: '0 4px', lineHeight: 1 }}>×</button>
