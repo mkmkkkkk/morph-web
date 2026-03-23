@@ -135,6 +135,8 @@ function spawnClaude({ sessionId, resumeFrom, model }) {
   // Always bypassPermissions — phone user is the machine owner
   args.push('--permission-mode', 'bypassPermissions');
 
+  console.log(`[spawnClaude] sessionId=${sessionId.slice(0,8)} resume=${isResume} cwd=${WORK_DIR} args=${args.join(' ')}`);
+
   const proc = spawn('claude', args, {
     cwd: WORK_DIR,
     env: { ...process.env },
@@ -190,10 +192,12 @@ function pipeOutput(proc, sessionId, io) {
   proc.stderr.on('data', (chunk) => {
     const text = chunk.toString().trim();
     if (!text) return;
+    console.error(`[claude:${sessionId.slice(0,8)}] stderr: ${text}`);
     io.to(`direct:${sessionId}`).emit('claude-error', { sessionId, text });
   });
 
   proc.on('exit', (code, signal) => {
+    console.log(`[claude:${sessionId.slice(0,8)}] exit code=${code} signal=${signal}`);
     // Flush remaining buffer
     if (buffer.trim()) {
       try {
@@ -206,6 +210,7 @@ function pipeOutput(proc, sessionId, io) {
   });
 
   proc.on('error', (err) => {
+    console.error(`[claude:${sessionId.slice(0,8)}] spawn error: ${err.message}`);
     io.to(`direct:${sessionId}`).emit('claude-error', {
       sessionId,
       text: `Process error: ${err.message}`,
@@ -603,6 +608,27 @@ export function registerClaudeAPI(app, io, authMiddleware) {
       });
     }
     return { sessions };
+  });
+
+  // ─── REST: Diagnostics ───
+
+  app.get('/v2/claude/diag', { preHandler: authMiddleware }, async () => {
+    const { execSync } = await import('child_process');
+    let claudeVersion = 'unknown';
+    let claudePath = 'unknown';
+    try { claudeVersion = execSync('claude --version', { timeout: 5000 }).toString().trim(); } catch (e) { claudeVersion = `error: ${e.message}`; }
+    try { claudePath = execSync('which claude', { timeout: 5000 }).toString().trim(); } catch (e) { claudePath = `error: ${e.message}`; }
+    return {
+      claudeVersion,
+      claudePath,
+      workDir: WORK_DIR,
+      nodeVersion: process.version,
+      activeCount: active.size,
+      env: {
+        RELAY_ENV_ID: process.env.RELAY_ENV_ID || '(not set)',
+        CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR || '(not set)',
+      },
+    };
   });
 
   // ─── REST: Generate session title via Haiku ───
