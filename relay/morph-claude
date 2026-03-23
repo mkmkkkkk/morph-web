@@ -12,25 +12,36 @@ RELAY_TOKEN="${MORPH_RELAY_TOKEN:-morph2026}"
 SID_FILE=$(mktemp /tmp/morph-claude-XXXXXX)
 
 # Background monitor: find claude child PID, extract session ID, register
+WRAPPER_PID=$$
 (
   sleep 3  # wait for claude to initialize and open session file
 
   # Find claude process that's a child of the wrapper
-  CLAUDE_PID=$(pgrep -P $$ claude 2>/dev/null | head -1)
+  CLAUDE_PID=$(pgrep -P $WRAPPER_PID claude 2>/dev/null | head -1)
   if [ -z "$CLAUDE_PID" ]; then
-    # Fallback: newest claude process started in last 10s
-    CLAUDE_PID=$(ps -eo pid,etimes,comm 2>/dev/null | awk '$3=="claude" && $2<10{print $1}' | tail -1)
+    # Fallback: find claude whose PPID matches wrapper or was started recently
+    CLAUDE_PID=$(ps -eo pid,ppid,etimes,comm 2>/dev/null | awk -v wp=$WRAPPER_PID '$4=="claude" && ($2==wp || $3<10){print $1}' | tail -1)
   fi
-  [ -z "$CLAUDE_PID" ] && exit 0
+  if [ -z "$CLAUDE_PID" ]; then
+    echo "[morph-claude] ❌ could not find claude child (wrapper=$WRAPPER_PID)" >> /tmp/morph-claude-debug.log
+    exit 0
+  fi
+  echo "[morph-claude] found claude PID=$CLAUDE_PID (wrapper=$WRAPPER_PID)" >> /tmp/morph-claude-debug.log
 
   # Extract session ID from open file descriptors (Linux: /proc/pid/fd)
   SID=""
-  for attempt in 1 2 3; do
+  for attempt in 1 2 3 4 5; do
     SID=$(readlink /proc/$CLAUDE_PID/fd/* 2>/dev/null | grep -oP '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?=\.jsonl)' | head -1)
     [ -n "$SID" ] && break
     sleep 2
   done
-  [ -z "$SID" ] && exit 0
+  if [ -z "$SID" ]; then
+    echo "[morph-claude] ❌ could not extract session ID from PID=$CLAUDE_PID fds" >> /tmp/morph-claude-debug.log
+    # Debug: dump fd links
+    readlink /proc/$CLAUDE_PID/fd/* 2>/dev/null >> /tmp/morph-claude-debug.log
+    exit 0
+  fi
+  echo "[morph-claude] session=$SID" >> /tmp/morph-claude-debug.log
 
   echo "$SID" > "$SID_FILE"
 
