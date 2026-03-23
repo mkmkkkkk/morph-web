@@ -348,32 +348,31 @@ function TerminalOverlay({ messages, visible }: { messages: Message[]; visible: 
     }
   }, [messages.length]);
 
-  // Pure logging — DO NOT modify selection. Just record what iOS is doing.
+  // iOS Safari: when selection handle escapes a [data-sel] span into a parent
+  // non-selectable div, clear the runaway selection immediately.
   React.useEffect(() => {
-    let n = 0;
-    function logSel() {
+    const container = scrollRef.current;
+    if (!container) return;
+    let clearing = false;
+    function guard() {
+      if (clearing) return;
       const sel = document.getSelection();
-      if (!sel || sel.rangeCount === 0) return;
-      n++;
-      if (n > 50) return; // cap at 50 events per mount
+      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
       const r = sel.getRangeAt(0);
-      const sNode = r.startContainer;
-      const eNode = r.endContainer;
-      const sEl = sNode.nodeType === Node.TEXT_NODE ? (sNode as Text).parentElement : sNode as Element;
-      const eEl = eNode.nodeType === Node.TEXT_NODE ? (eNode as Text).parentElement : eNode as Element;
-      const sSel = sEl?.closest?.('[data-sel]');
-      const eSel = eEl?.closest?.('[data-sel]');
-      const sTag = sEl?.tagName || '?';
-      const eTag = eEl?.tagName || '?';
-      const collapsed = sel.isCollapsed;
-      const text = sel.toString();
-      const len = text.length;
-      const sRect = sSel?.getBoundingClientRect();
-      const eRect = eSel?.getBoundingClientRect();
-      dbg(`SEL#${n} collapsed=${collapsed} len=${len} startTag=${sTag} endTag=${eTag} startSel=${!!sSel} endSel=${!!eSel} same=${sSel===eSel} sOff=${r.startOffset} eOff=${r.endOffset} sLeft=${Math.round(sRect?.left||0)} eLeft=${Math.round(eRect?.left||0)} text="${text.slice(0,60).replace(/\n/g,'\\n')}"`);
+      const sEl = r.startContainer.nodeType === Node.TEXT_NODE ? (r.startContainer as Text).parentElement : r.startContainer as Element;
+      const eEl = r.endContainer.nodeType === Node.TEXT_NODE ? (r.endContainer as Text).parentElement : r.endContainer as Element;
+      const sIn = sEl?.closest?.('[data-sel]');
+      const eIn = eEl?.closest?.('[data-sel]');
+      // Only act when anchor escaped span but is still inside terminal
+      if ((!sIn || !eIn) && container.contains(r.startContainer)) {
+        dbg(`SEL-GUARD: escaped span → clear (startSel=${!!sIn} endSel=${!!eIn} len=${sel.toString().length})`);
+        clearing = true;
+        sel.removeAllRanges();
+        setTimeout(() => { clearing = false; }, 50);
+      }
     }
-    document.addEventListener('selectionchange', logSel);
-    return () => document.removeEventListener('selectionchange', logSel);
+    document.addEventListener('selectionchange', guard);
+    return () => document.removeEventListener('selectionchange', guard);
   }, []);
 
   const onScroll = React.useCallback(() => {
