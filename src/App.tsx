@@ -200,7 +200,7 @@ function Collapsible({ label, preview, content, color }: { label: string; previe
       <div onClick={() => setOpen(!open)} style={{ cursor: 'pointer', color, fontSize: 13, fontFamily: 'Menlo, monospace', lineHeight: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', userSelect: 'none', WebkitUserSelect: 'none' as any }}>
         {open ? '▾' : '▸'} {label}{!open && preview ? `: ${preview}` : ''}
       </div>
-      {open && <pre style={{ color, opacity: 0.7, fontSize: 13, fontFamily: 'Menlo, monospace', lineHeight: '20px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', overflow: 'hidden', maxWidth: '100%', margin: 0, marginLeft: 16 }}>{content}</pre>}
+      {open && <pre data-sel style={{ color, opacity: 0.7, fontSize: 13, fontFamily: 'Menlo, monospace', lineHeight: '20px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', overflow: 'hidden', maxWidth: '100%', margin: 0, marginLeft: 16, userSelect: 'text', WebkitUserSelect: 'text' as any }}>{content}</pre>}
     </div>
   );
 }
@@ -214,8 +214,8 @@ const MessageRow = React.memo(function MessageRow({ msg }: { msg: Message }) {
   switch (msg.type) {
     case 'text':
       return msg.role === 'user'
-        ? <div style={{ ...monoOuter, color: '#30d158', marginBottom: 3, opacity: msg.pending ? 0.5 : 1 }}><span style={sel}>&gt; {msg.content}</span></div>
-        : <div style={{ ...monoOuter, color: '#e0e0e0', marginBottom: 3, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}><span style={sel}>{msg.content}</span></div>;
+        ? <div style={{ ...monoOuter, color: '#30d158', marginBottom: 3, opacity: msg.pending ? 0.5 : 1 }}><span style={sel} data-sel>&gt; {msg.content}</span></div>
+        : <div style={{ ...monoOuter, color: '#e0e0e0', marginBottom: 3, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}><span style={sel} data-sel>{msg.content}</span></div>;
     case 'thinking':
       return <Collapsible label="thinking" preview={msg.content.slice(0, 60)} content={msg.content} color="#636366" />;
     case 'tool':
@@ -225,14 +225,14 @@ const MessageRow = React.memo(function MessageRow({ msg }: { msg: Message }) {
     case 'status':
       return msg.content.length > 120
         ? <Collapsible label="status" preview={msg.content.slice(0, 80).replace(/\n/g, ' ')} content={msg.content} color="#555" />
-        : <div style={{ ...monoOuter, color: '#777', textAlign: 'center', marginTop: 4, marginBottom: 4 }}><span style={sel}>{msg.content}</span></div>;
+        : <div style={{ ...monoOuter, color: '#777', textAlign: 'center', marginTop: 4, marginBottom: 4 }}><span style={sel} data-sel>{msg.content}</span></div>;
     case 'error':
       return msg.content.length > 120
         ? <Collapsible label="error" preview={msg.content.slice(0, 80).replace(/\n/g, ' ')} content={msg.content} color="#ff453a" />
-        : <div style={{ ...monoOuter, color: '#ff453a', marginBottom: 3 }}><span style={sel}>{msg.content}</span></div>;
+        : <div style={{ ...monoOuter, color: '#ff453a', marginBottom: 3 }}><span style={sel} data-sel>{msg.content}</span></div>;
     case 'permission' as any:
       return <div style={{ ...monoOuter, color: '#e0a030', marginBottom: 3, fontSize: 12 }}>
-        <span style={sel}>{msg.pending !== false ? '-- awaiting approval --' : '-- approved --'}</span>
+        <span style={sel} data-sel>{msg.pending !== false ? '-- awaiting approval --' : '-- approved --'}</span>
       </div>;
     default: return null;
   }
@@ -311,6 +311,38 @@ function TerminalOverlay({ messages, visible }: { messages: Message[]; visible: 
     }
   }, [messages.length]);
 
+  // iOS Safari: clamp selection to single [data-sel] span.
+  // WebKit ignores user-select:none for selection expansion (Bug #231161).
+  React.useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+    function clamp() {
+      const sel = document.getSelection();
+      if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+      const range = sel.getRangeAt(0);
+      const startEl = range.startContainer.nodeType === Node.TEXT_NODE
+        ? range.startContainer.parentElement : range.startContainer as Element;
+      const endEl = range.endContainer.nodeType === Node.TEXT_NODE
+        ? range.endContainer.parentElement : range.endContainer as Element;
+      const startSpan = startEl?.closest?.('[data-sel]');
+      const endSpan = endEl?.closest?.('[data-sel]');
+      // Selection started outside any selectable span → kill
+      if (!startSpan && container.contains(range.startContainer)) {
+        sel.removeAllRanges(); return;
+      }
+      // Selection crosses span boundaries → clamp to start span
+      if (startSpan && endSpan && startSpan !== endSpan) {
+        const nr = document.createRange();
+        nr.selectNodeContents(startSpan);
+        nr.setStart(range.startContainer, range.startOffset);
+        sel.removeAllRanges();
+        sel.addRange(nr);
+      }
+    }
+    document.addEventListener('selectionchange', clamp);
+    return () => document.removeEventListener('selectionchange', clamp);
+  }, []);
+
   const onScroll = React.useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -326,10 +358,16 @@ function TerminalOverlay({ messages, visible }: { messages: Message[]; visible: 
       borderTop: '1px solid rgba(255,255,255,0.08)', backgroundColor: '#111',
       WebkitOverflowScrolling: 'touch' as any,
       userSelect: 'none', WebkitUserSelect: 'none' as any,
+      WebkitTouchCallout: 'none' as any,
+      WebkitTapHighlightColor: 'transparent',
     }}>
       {/* Spacer pushes content to bottom when messages don't fill the container */}
       <div style={{ flex: '1 1 0' }} />
-      <div style={{ padding: '8px 12px' }}>
+      <div style={{ padding: '8px 12px' }} onSelectStart={(e) => {
+        // Block selection starting outside selectable spans (padding area)
+        const t = e.target as HTMLElement;
+        if (!t.closest?.('[data-sel]')) e.preventDefault();
+      }}>
         {messages.length === 0
           ? <div style={{ color: '#4a4a4a', fontSize: 13, textAlign: 'center', padding: 16, fontFamily: 'Menlo, monospace' }}>waiting for session...</div>
           : messages.map(msg => <MessageRow key={msg.id} msg={msg} />)
