@@ -46,15 +46,15 @@ function _getTerminalClaudeCount() {
   const now = Date.now();
   if (now - _psCountTs < PS_CACHE_TTL) return _psCount;
   try {
-    // Get all non-zombie claude PIDs and their PPIDs, then check parent's comm
-    // Terminal session parent: init(0), bash, zsh, sh, tmux, screen, sshd, login
-    // NOT terminal: node (relay), claude (subagent)
+    // Get all non-zombie claude PIDs, check parent comm.
+    // Blacklist: parent=claude (subagent), parent=node (relay-spawned).
+    // Everything else = terminal session (covers launchd, iTerm2, Terminal, shells, etc.)
     const script = `ps -eo pid,ppid,stat,comm 2>/dev/null | awk '$4=="claude" && $3!~/Z/{print $2}' | while read pp; do
       if [ "$pp" = "0" ]; then echo terminal; else
         pcomm=$(ps -o comm= -p "$pp" 2>/dev/null)
         pcomm="${pcomm##*/}"
         pcomm="${pcomm#-}"
-        case "$pcomm" in bash|zsh|sh|dash|fish|tmux*|screen|sshd|login|sudo|su) echo terminal;; esac
+        case "$pcomm" in claude|node) ;; *) echo terminal;; esac
       fi
     done | wc -l`;
     const out = execSync(script, { encoding: 'utf-8', timeout: 2000, shell: true });
