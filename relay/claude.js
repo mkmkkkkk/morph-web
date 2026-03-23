@@ -39,13 +39,23 @@ let _psCount = 0;
 let _psCountTs = 0;
 const PS_CACHE_TTL = 5000; // 5s — process count changes slowly
 
-// Count terminal claude processes: PPID=0 (docker-started), non-zombie
-// Excludes: relay-spawned (PPID=relay), subagents (PPID=claude), orphans (PPID=1)
+// Count terminal claude processes: parent is shell/init (not claude or node)
+// Docker: PPID=0 | Bare metal: PPID=bash/zsh/tmux/screen
+// Excludes: relay-spawned (PPID=node), subagents (PPID=claude)
 function _getTerminalClaudeCount() {
   const now = Date.now();
   if (now - _psCountTs < PS_CACHE_TTL) return _psCount;
   try {
-    const out = execSync("ps -eo ppid,stat,comm 2>/dev/null | awk '$1==0 && $3==\"claude\" && $2!~/Z/' | wc -l", { encoding: 'utf-8', timeout: 1000, shell: true });
+    // Get all non-zombie claude PIDs and their PPIDs, then check parent's comm
+    // Terminal session parent: init(0), bash, zsh, sh, tmux, screen, sshd, login
+    // NOT terminal: node (relay), claude (subagent)
+    const script = `ps -eo pid,ppid,stat,comm 2>/dev/null | awk '$4=="claude" && $3!~/Z/{print $2}' | while read pp; do
+      if [ "$pp" = "0" ]; then echo terminal; else
+        pcomm=$(ps -o comm= -p "$pp" 2>/dev/null)
+        case "$pcomm" in bash|zsh|sh|dash|fish|tmux*|screen|sshd|login|sudo|su) echo terminal;; esac
+      fi
+    done | wc -l`;
+    const out = execSync(script, { encoding: 'utf-8', timeout: 2000, shell: true });
     _psCount = parseInt(out.trim()) || 0;
   } catch { _psCount = 0; }
   _psCountTs = now;
