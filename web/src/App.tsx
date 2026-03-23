@@ -207,12 +207,15 @@ function Collapsible({ label, preview, content, color }: { label: string; previe
 
 // ─── Message Row ───
 const MessageRow = React.memo(function MessageRow({ msg }: { msg: Message }) {
-  const mono = { fontFamily: 'Menlo, monospace', fontSize: 14, lineHeight: '20px', overflow: 'hidden' as const, maxWidth: '100%', userSelect: 'text' as const, WebkitUserSelect: 'text' as any } as const;
+  // Outer div is non-selectable block; only inner <span> is selectable.
+  // Prevents iOS from selecting entire block when touch lands on left padding.
+  const monoOuter = { fontFamily: 'Menlo, monospace', fontSize: 14, lineHeight: '20px', overflow: 'hidden' as const, maxWidth: '100%', userSelect: 'none' as const, WebkitUserSelect: 'none' as any } as const;
+  const sel = { userSelect: 'text' as const, WebkitUserSelect: 'text' as any } as const;
   switch (msg.type) {
     case 'text':
       return msg.role === 'user'
-        ? <div style={{ ...mono, color: '#30d158', marginBottom: 3, opacity: msg.pending ? 0.5 : 1 }}>&gt; {msg.content}</div>
-        : <div style={{ ...mono, color: '#e0e0e0', marginBottom: 3, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{msg.content}</div>;
+        ? <div style={{ ...monoOuter, color: '#30d158', marginBottom: 3, opacity: msg.pending ? 0.5 : 1 }}><span style={sel}>&gt; {msg.content}</span></div>
+        : <div style={{ ...monoOuter, color: '#e0e0e0', marginBottom: 3, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}><span style={sel}>{msg.content}</span></div>;
     case 'thinking':
       return <Collapsible label="thinking" preview={msg.content.slice(0, 60)} content={msg.content} color="#636366" />;
     case 'tool':
@@ -222,14 +225,14 @@ const MessageRow = React.memo(function MessageRow({ msg }: { msg: Message }) {
     case 'status':
       return msg.content.length > 120
         ? <Collapsible label="status" preview={msg.content.slice(0, 80).replace(/\n/g, ' ')} content={msg.content} color="#555" />
-        : <div style={{ ...mono, color: '#777', textAlign: 'center', marginTop: 4, marginBottom: 4 }}>{msg.content}</div>;
+        : <div style={{ ...monoOuter, color: '#777', textAlign: 'center', marginTop: 4, marginBottom: 4 }}><span style={sel}>{msg.content}</span></div>;
     case 'error':
       return msg.content.length > 120
         ? <Collapsible label="error" preview={msg.content.slice(0, 80).replace(/\n/g, ' ')} content={msg.content} color="#ff453a" />
-        : <div style={{ ...mono, color: '#ff453a', marginBottom: 3 }}>{msg.content}</div>;
+        : <div style={{ ...monoOuter, color: '#ff453a', marginBottom: 3 }}><span style={sel}>{msg.content}</span></div>;
     case 'permission' as any:
-      return <div style={{ ...mono, color: '#e0a030', marginBottom: 3, fontSize: 12 }}>
-        {msg.pending !== false ? '-- awaiting approval --' : '-- approved --'}
+      return <div style={{ ...monoOuter, color: '#e0a030', marginBottom: 3, fontSize: 12 }}>
+        <span style={sel}>{msg.pending !== false ? '-- awaiting approval --' : '-- approved --'}</span>
       </div>;
     default: return null;
   }
@@ -326,7 +329,7 @@ function TerminalOverlay({ messages, visible }: { messages: Message[]; visible: 
     }}>
       {/* Spacer pushes content to bottom when messages don't fill the container */}
       <div style={{ flex: '1 1 0' }} />
-      <div style={{ padding: '8px 12px', userSelect: 'text', WebkitUserSelect: 'text' as any }}>
+      <div style={{ padding: '8px 12px' }}>
         {messages.length === 0
           ? <div style={{ color: '#4a4a4a', fontSize: 13, textAlign: 'center', padding: 16, fontFamily: 'Menlo, monospace' }}>waiting for session...</div>
           : messages.map(msg => <MessageRow key={msg.id} msg={msg} />)
