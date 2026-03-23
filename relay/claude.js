@@ -34,26 +34,37 @@ function _saveKilled(set) {
 function _persistActive() {
   const entries = [];
   for (const [sid, info] of active) {
-    if (info.process && !info.process.killed) {
+    if (info.process && !info.process.killed && _isProcessAlive(info.process.pid)) {
       entries.push({ sid, pid: info.process.pid });
     }
   }
   try { writeFileSync(ACTIVE_FILE, JSON.stringify(entries)); } catch {}
 }
+// Check if a PID is truly alive (not a zombie)
+function _isProcessAlive(pid) {
+  try {
+    process.kill(pid, 0); // throws if PID doesn't exist
+    // Exists — but could be zombie. Check /proc/<pid>/stat
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf-8');
+      // Format: "pid (comm) state ..." — state Z = zombie
+      const m = stat.match(/\) (\S)/);
+      if (m && m[1] === 'Z') return false;
+    } catch {} // /proc not available (macOS) — trust kill(0)
+    return true;
+  } catch { return false; }
+}
+
 // On startup: restore orphaned relay-spawned sessions (process still alive but lost from active map)
 function _restoreActive() {
   try {
     const entries = JSON.parse(readFileSync(ACTIVE_FILE, 'utf-8'));
     for (const { sid, pid } of entries) {
       if (active.has(sid)) continue; // already managed
-      try {
-        process.kill(pid, 0); // check if alive (signal 0)
-        // Process alive but we lost stdin — mark as active (read-only)
-        active.set(sid, { process: { pid, killed: false, kill: (sig) => { try { process.kill(pid, sig); } catch {} } }, cwd: WORK_DIR, orphaned: true });
-        console.log(`[restore] session ${sid.slice(0,8)} pid=${pid} — re-attached (read-only)`);
-      } catch {
-        // Process dead — skip
-      }
+      if (!_isProcessAlive(pid)) continue; // dead or zombie — skip
+      // Process alive but we lost stdin — mark as active (read-only)
+      active.set(sid, { process: { pid, killed: false, kill: (sig) => { try { process.kill(pid, sig); } catch {} } }, cwd: WORK_DIR, orphaned: true });
+      console.log(`[restore] session ${sid.slice(0,8)} pid=${pid} — re-attached (read-only)`);
     }
   } catch {}
 }
@@ -692,10 +703,13 @@ export function registerClaudeAPI(app, io, authMiddleware) {
 
     // Terminal sessions: PPID=0 non-zombie claude processes
     // Take N most recently-updated .jsonl files (N = terminal process count)
+    // Only consider files modified within the last 12h to prevent stale sessions
     const termCount = _getTerminalClaudeCount();
+    const TERMINAL_MAX_AGE = 12 * 3600 * 1000; // 12 hours
+    const now = Date.now();
     const terminalIds = new Set(
       allSessions
-        .filter(s => !activeIds.has(s.id) && !_killedIds.has(s.id))
+        .filter(s => !activeIds.has(s.id) && !_killedIds.has(s.id) && (now - (s.updatedAt || 0)) < TERMINAL_MAX_AGE)
         .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
         .slice(0, termCount)
         .map(s => s.id)
