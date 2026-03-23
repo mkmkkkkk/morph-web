@@ -24,7 +24,24 @@ const MAX_CONCURRENT_SESSIONS = 6;
 // Cache for listClaudeSessions — avoids re-scanning filesystem on every request
 let _sessionsCache = null;
 let _sessionsCacheTs = 0;
-const SESSIONS_CACHE_TTL = 30000; // 30s — matches client-side envSessionsCache TTL
+const SESSIONS_CACHE_TTL = 120000; // 120s — 291 files × statSync is expensive
+
+// Cache for ps-based process count — avoids double execSync on every request
+let _psCount = 0;
+let _psCountTs = 0;
+const PS_CACHE_TTL = 5000; // 5s — process count changes slowly
+
+function _getClaudeProcessCount() {
+  const now = Date.now();
+  if (now - _psCountTs < PS_CACHE_TTL) return _psCount;
+  try {
+    // Single command: pgrep + filter zombies in one shot
+    const out = execSync("pgrep -x claude 2>/dev/null | xargs -r ps -o stat= -p 2>/dev/null | grep -cv '^Z'", { encoding: 'utf-8', timeout: 1000, shell: true });
+    _psCount = parseInt(out.trim()) || 0;
+  } catch { _psCount = 0; }
+  _psCountTs = now;
+  return _psCount;
+}
 
 // ─── Live session detection ───
 // Strategy: count running `claude` processes via `ps`, then pick the N most
@@ -35,16 +52,7 @@ function getLiveSessionIds(allSessions) {
   const live = new Set();
   if (!allSessions || allSessions.length === 0) return live;
 
-  let processCount = 0;
-  try {
-    // pgrep -x matches exact process name — works on both Linux and macOS.
-    // Then filter out zombies (stat starts with Z) via ps.
-    const pids = execSync("pgrep -x claude 2>/dev/null", { encoding: 'utf-8', timeout: 500, shell: true }).trim().split('\n').filter(Boolean);
-    if (pids.length > 0) {
-      const stats = execSync(`ps -o stat= -p ${pids.join(',')} 2>/dev/null`, { encoding: 'utf-8', timeout: 500, shell: true });
-      processCount = stats.trim().split('\n').filter(l => l.trim() && !l.trim().startsWith('Z')).length;
-    }
-  } catch {}
+  const processCount = _getClaudeProcessCount();
 
   if (processCount > 0) {
     // Take the N most recently-modified sessions (allSessions is already sorted by updatedAt desc)
