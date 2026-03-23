@@ -237,8 +237,8 @@ function Collapsible({ label, preview, content, color }: { label: string; previe
 const MessageRow = React.memo(function MessageRow({ msg }: { msg: Message }) {
   // Outer div is non-selectable block; only inner <span> is selectable.
   // Prevents iOS from selecting entire block when touch lands on left padding.
-  const monoOuter = { fontFamily: 'Menlo, monospace', fontSize: 14, lineHeight: '20px', overflow: 'hidden' as const, maxWidth: '100%', padding: '0 12px', userSelect: 'none' as const, WebkitUserSelect: 'none' as any } as const;
-  const sel = { userSelect: 'text' as const, WebkitUserSelect: 'text' as any, display: 'block' as const } as const;
+  const monoOuter = { fontFamily: 'Menlo, monospace', fontSize: 14, lineHeight: '20px', overflow: 'hidden' as const, maxWidth: '100%', userSelect: 'none' as const, WebkitUserSelect: 'none' as any } as const;
+  const sel = { userSelect: 'text' as const, WebkitUserSelect: 'text' as any, display: 'block' as const, padding: '0 12px' } as const;
   switch (msg.type) {
     case 'text':
       return msg.role === 'user'
@@ -347,6 +347,34 @@ function TerminalOverlay({ messages, visible }: { messages: Message[]; visible: 
       el.scrollTop = el.scrollHeight;
     }
   }, [messages.length]);
+
+  // Pure logging — DO NOT modify selection. Just record what iOS is doing.
+  React.useEffect(() => {
+    let n = 0;
+    function logSel() {
+      const sel = document.getSelection();
+      if (!sel || sel.rangeCount === 0) return;
+      n++;
+      if (n > 50) return; // cap at 50 events per mount
+      const r = sel.getRangeAt(0);
+      const sNode = r.startContainer;
+      const eNode = r.endContainer;
+      const sEl = sNode.nodeType === Node.TEXT_NODE ? (sNode as Text).parentElement : sNode as Element;
+      const eEl = eNode.nodeType === Node.TEXT_NODE ? (eNode as Text).parentElement : eNode as Element;
+      const sSel = sEl?.closest?.('[data-sel]');
+      const eSel = eEl?.closest?.('[data-sel]');
+      const sTag = sEl?.tagName || '?';
+      const eTag = eEl?.tagName || '?';
+      const collapsed = sel.isCollapsed;
+      const text = sel.toString();
+      const len = text.length;
+      const sRect = sSel?.getBoundingClientRect();
+      const eRect = eSel?.getBoundingClientRect();
+      dbg(`SEL#${n} collapsed=${collapsed} len=${len} startTag=${sTag} endTag=${eTag} startSel=${!!sSel} endSel=${!!eSel} same=${sSel===eSel} sOff=${r.startOffset} eOff=${r.endOffset} sLeft=${Math.round(sRect?.left||0)} eLeft=${Math.round(eRect?.left||0)} text="${text.slice(0,60).replace(/\n/g,'\\n')}"`);
+    }
+    document.addEventListener('selectionchange', logSel);
+    return () => document.removeEventListener('selectionchange', logSel);
+  }, []);
 
   const onScroll = React.useCallback(() => {
     const el = scrollRef.current;
@@ -675,22 +703,6 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
                 <span style={{ color: '#ddd', fontSize: 13, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
                   {s.display || s.id.slice(0, 8)}
                 </span>
-                {s.active && (
-                  <span onClick={(e) => {
-                    e.stopPropagation();
-                    if (window.confirm(`Kill session ${(s.display || s.id).slice(0, 12)}?`)) {
-                      stopSession(s.id);
-                      // Invalidate cache + refetch
-                      const cacheKey = `${env.id}:${env.relayUrl}:${limit}`;
-                      envSessionsCache.delete(cacheKey);
-                      setTimeout(() => setVisKey(k => k + 1), 500);
-                    }
-                  }} style={{
-                    padding: '3px 8px', borderRadius: 6, border: '1px solid rgba(255,59,48,0.3)', cursor: 'pointer',
-                    backgroundColor: 'rgba(255,59,48,0.12)', color: '#ff453a', fontSize: 10,
-                    fontFamily: 'Menlo, monospace', flexShrink: 0, pointerEvents: 'auto',
-                  }}>kill</span>
-                )}
                 <span style={{ color: '#777', fontSize: 11, flexShrink: 0 }}>{timeAgo(s.updatedAt)}</span>
                 <span onClick={(e) => { e.stopPropagation(); setPinned(togglePin(env.id, s.id)); }} style={{ cursor: 'pointer', padding: '8px 10px', margin: '-8px -10px -8px 0', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill={pinned.has(s.id) ? '#888' : 'none'} stroke={pinned.has(s.id) ? '#888' : '#444'} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg>
@@ -897,13 +909,13 @@ function ConfigTab({ connState, onQuickAction, onRefresh }: { connState: string;
               <span style={{ color: '#fff', fontSize: 13, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
                 {s.id.slice(0, 8)} — {s.cwd}
               </span>
+              <span style={{ color: '#30d158', fontSize: 11 }}>active</span>
+              {s._envLabel && <span style={{ color: '#636AFF', fontSize: 10, flexShrink: 0 }}>{s._envLabel}</span>}
               <button onClick={() => { if (window.confirm(`Kill session ${s.id.slice(0, 8)}?`)) { if (s._envId && s._envId !== 'workspace') registerSession(s.id, s._envId); stopSession(s.id); setTimeout(loadSessions, 500); } }} style={{
-                padding: '3px 8px', borderRadius: 6, border: '1px solid rgba(255,59,48,0.3)', cursor: 'pointer',
+                marginLeft: 'auto', padding: '3px 8px', borderRadius: 6, border: '1px solid rgba(255,59,48,0.3)', cursor: 'pointer',
                 backgroundColor: 'rgba(255,59,48,0.12)', color: '#ff453a', fontSize: 11,
                 fontFamily: 'Menlo, monospace', flexShrink: 0,
               }}>kill</button>
-              <span style={{ color: '#30d158', fontSize: 11 }}>active</span>
-              {s._envLabel && <span style={{ color: '#636AFF', fontSize: 10, flexShrink: 0 }}>{s._envLabel}</span>}
             </div>
           </div>
         ))}
@@ -924,9 +936,11 @@ function ConfigTab({ connState, onQuickAction, onRefresh }: { connState: string;
               </span>
               {s._envLabel && <span style={{ color: '#636AFF', fontSize: 10, flexShrink: 0 }}>{s._envLabel}</span>}
               <span style={{ color: '#888', fontSize: 11, flexShrink: 0 }}>{timeAgo(s.updatedAt)}</span>
-            </div>
-            <div style={{ fontSize: 11, color: '#777', fontFamily: 'Menlo, monospace', marginTop: 2, marginLeft: 12 }}>
-              {s.id.slice(0, 8)}
+              <button onClick={() => { if (window.confirm(`Kill session ${(s.display || s.id).slice(0, 12)}?`)) { if (s._envId && s._envId !== 'workspace') registerSession(s.id, s._envId); stopSession(s.id); setTimeout(loadSessions, 500); } }} style={{
+                marginLeft: 'auto', padding: '3px 8px', borderRadius: 6, border: '1px solid rgba(255,59,48,0.3)', cursor: 'pointer',
+                backgroundColor: 'rgba(255,59,48,0.12)', color: '#ff453a', fontSize: 11,
+                fontFamily: 'Menlo, monospace', flexShrink: 0,
+              }}>kill</button>
             </div>
           </div>
         ))}
