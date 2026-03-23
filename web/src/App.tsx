@@ -215,14 +215,13 @@ function Collapsible({ label, preview, content, color }: { label: string; previe
   const [open, setOpen] = useState(false);
   return (
     <div style={{ marginBottom: 2, overflow: 'hidden', maxWidth: '100%' }}>
-      <div onPointerDown={(e) => {
-        dbg(`Collapsible pointerDown: type=${e.pointerType} target=${(e.target as HTMLElement).tagName} activeEl=${document.activeElement?.tagName}.${document.activeElement?.className?.slice?.(0,20)||''}`);
-        e.preventDefault();
-        e.stopPropagation();
-        setOpen(!open);
-        dbg(`Collapsible after toggle: activeEl=${document.activeElement?.tagName}`);
-      }} style={{ cursor: 'pointer', color, fontSize: 13, fontFamily: 'Menlo, monospace', lineHeight: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', userSelect: 'none', WebkitUserSelect: 'none' as any, padding: '0 12px' }}>
-        {open ? '▾' : '▸'} {label}{!open && preview ? `: ${preview}` : ''}
+      <div style={{ color, fontSize: 13, fontFamily: 'Menlo, monospace', lineHeight: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', userSelect: 'none', WebkitUserSelect: 'none' as any, padding: '0 12px', display: 'flex', alignItems: 'center' }}>
+        <span onPointerDown={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setOpen(!open);
+        }} style={{ cursor: 'pointer', padding: '4px 8px 4px 0', flexShrink: 0, touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' as any }}>{open ? '▾' : '▸'}</span>
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}{!open && preview ? `: ${preview}` : ''}</span>
       </div>
       {open && <pre style={{ color, opacity: 0.7, fontSize: 13, fontFamily: 'Menlo, monospace', lineHeight: '20px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', overflow: 'hidden', maxWidth: '100%', margin: 0, padding: '0 12px 0 28px', userSelect: 'none', WebkitUserSelect: 'none' as any }}>{
         content.split('\n').map((line, i, arr) => (
@@ -902,7 +901,7 @@ function ConfigTab({ connState, onQuickAction, onRefresh }: { connState: string;
 
         {/* Active sessions first */}
         {activeSessions.map((s: any) => (
-          <div key={`${s._envId}-${s.id}`} style={{ padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+          <div key={`${s._envId}-${s.id}`} onClick={() => { if (window.confirm(`Kill session ${s.id.slice(0, 8)}?`)) { if (s._envId && s._envId !== 'workspace') registerSession(s.id, s._envId); stopSession(s.id); setTimeout(loadSessions, 500); } }} style={{ padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.08)', cursor: 'pointer' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <div style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#30d158', flexShrink: 0 }} />
               <span style={{ color: '#fff', fontSize: 13, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
@@ -910,11 +909,6 @@ function ConfigTab({ connState, onQuickAction, onRefresh }: { connState: string;
               </span>
               <span style={{ color: '#30d158', fontSize: 11 }}>active</span>
               {s._envLabel && <span style={{ color: '#636AFF', fontSize: 10, flexShrink: 0 }}>{s._envLabel}</span>}
-              <button onClick={() => { if (window.confirm(`Kill session ${s.id.slice(0, 8)}?`)) { if (s._envId && s._envId !== 'workspace') registerSession(s.id, s._envId); stopSession(s.id); setTimeout(loadSessions, 500); } }} style={{
-                marginLeft: 'auto', padding: '3px 8px', borderRadius: 6, border: '1px solid rgba(255,59,48,0.3)', cursor: 'pointer',
-                backgroundColor: 'rgba(255,59,48,0.12)', color: '#ff453a', fontSize: 11,
-                fontFamily: 'Menlo, monospace', flexShrink: 0,
-              }}>kill</button>
             </div>
           </div>
         ))}
@@ -927,7 +921,7 @@ function ConfigTab({ connState, onQuickAction, onRefresh }: { connState: string;
           // Keep if updated within 24h
           return s.updatedAt && (Date.now() - s.updatedAt < 86400000);
         }).map((s: any) => (
-          <div key={`${s._envId}-${s.id}`} style={{ padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+          <div key={`${s._envId}-${s.id}`} onClick={() => { if (window.confirm(`Kill session ${(s.display || s.id).slice(0, 12)}?`)) { if (s._envId && s._envId !== 'workspace') registerSession(s.id, s._envId); stopSession(s.id); setTimeout(loadSessions, 500); } }} style={{ padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.08)', cursor: 'pointer' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <div style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: s.active ? '#30d158' : '#555', flexShrink: 0 }} />
               <span style={{ color: '#e0e0e0', fontSize: 13, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
@@ -935,11 +929,6 @@ function ConfigTab({ connState, onQuickAction, onRefresh }: { connState: string;
               </span>
               {s._envLabel && <span style={{ color: '#636AFF', fontSize: 10, flexShrink: 0 }}>{s._envLabel}</span>}
               <span style={{ color: '#888', fontSize: 11, flexShrink: 0 }}>{timeAgo(s.updatedAt)}</span>
-              <button onClick={() => { if (window.confirm(`Kill session ${(s.display || s.id).slice(0, 12)}?`)) { if (s._envId && s._envId !== 'workspace') registerSession(s.id, s._envId); stopSession(s.id); setTimeout(loadSessions, 500); } }} style={{
-                marginLeft: 'auto', padding: '3px 8px', borderRadius: 6, border: '1px solid rgba(255,59,48,0.3)', cursor: 'pointer',
-                backgroundColor: 'rgba(255,59,48,0.12)', color: '#ff453a', fontSize: 11,
-                fontFamily: 'Menlo, monospace', flexShrink: 0,
-              }}>kill</button>
             </div>
           </div>
         ))}
@@ -1242,6 +1231,8 @@ export default function App() {
   const idleTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const [sessionIsProcessing, setSessionIsProcessing] = useState(false);
   const sessionIdleTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const [sessionIsCompacting, setSessionIsCompacting] = useState(false);
+  const sessionCompactTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputBarRef = useRef<HTMLDivElement>(null);
 
   // Detect iOS keyboard via visualViewport resize
@@ -1437,6 +1428,12 @@ export default function App() {
       if (msg.type === 'status' && msg.content.includes('done')) setSessionIsProcessing(false);
       if (msg.type === 'status' && msg.content.includes('exit')) setSessionIsProcessing(false);
       if (msg.type === 'error') setSessionIsProcessing(false);
+      // Detect compaction from status messages
+      if (msg.type === 'status' && /compact/i.test(msg.content)) {
+        setSessionIsCompacting(true);
+        if (sessionCompactTimer.current) clearTimeout(sessionCompactTimer.current);
+        sessionCompactTimer.current = setTimeout(() => setSessionIsCompacting(false), 8000);
+      }
       clearTimeout(sessionIdleTimer.current);
       sessionIdleTimer.current = setTimeout(() => setSessionIsProcessing(false), 30000);
       // After first agent response, generate title via Haiku if missing
@@ -1485,6 +1482,7 @@ export default function App() {
       }
       unsubscribeSessionMessages();
       clearTimeout(sessionIdleTimer.current);
+      if (sessionCompactTimer.current) clearTimeout(sessionCompactTimer.current);
     };
   }, [selectedSession?.id]);
 
@@ -1528,6 +1526,12 @@ export default function App() {
       if (msg.type === 'status' && msg.content.includes('done')) setIsProcessing(false);
       if (msg.type === 'status' && msg.content.includes('exit')) setIsProcessing(false);
       if (msg.type === 'error') setIsProcessing(false);
+      // Detect compaction from status messages (belt-and-suspenders — relay also emits claude-compact)
+      if (msg.type === 'status' && /compact/i.test(msg.content)) {
+        setIsCompacting(true);
+        if (compactTimer.current) clearTimeout(compactTimer.current);
+        compactTimer.current = setTimeout(() => setIsCompacting(false), 8000);
+      }
       // Fallback: 30s idle timeout
       clearTimeout(idleTimer.current);
       idleTimer.current = setTimeout(() => setIsProcessing(false), 30000);
@@ -1536,7 +1540,7 @@ export default function App() {
     const unsub3 = onCompact(() => {
       setIsCompacting(true);
       if (compactTimer.current) clearTimeout(compactTimer.current);
-      compactTimer.current = setTimeout(() => setIsCompacting(false), 4000);
+      compactTimer.current = setTimeout(() => setIsCompacting(false), 8000);
     });
     connect();
     return () => { unsub1(); unsub2(); unsub3(); clearTimeout(idleTimer.current); if (compactTimer.current) clearTimeout(compactTimer.current); };
@@ -1800,7 +1804,7 @@ export default function App() {
             session={selectedSession}
             messages={sessionMessages}
             isProcessing={sessionIsProcessing}
-            isCompacting={isCompacting}
+            isCompacting={sessionIsCompacting || isCompacting}
             onBack={() => setSelectedSession(null)}
             onInterrupt={() => interruptSession(liveSessionIdRef.current || selectedSession.id)}
             onSend={async (text) => {

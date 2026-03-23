@@ -183,7 +183,7 @@ function pipeOutput(proc, sessionId, io) {
           console.log(`[claude:${sessionId.slice(0,8)}] event: ${parsed.type}${parsed.subtype ? '/' + parsed.subtype : ''}`);
         }
         // Notify frontend of context compaction
-        if (parsed.type === 'system' && parsed.subtype === 'compact_boundary') {
+        if (parsed.type === 'system' && (parsed.subtype === 'compact_boundary' || /compact/i.test(parsed.subtype || '') || /compact/i.test(parsed.message || ''))) {
           io.to(`direct:${sessionId}`).emit('claude-compact', { sessionId });
         }
         io.to(`direct:${sessionId}`).emit('claude-output', {
@@ -482,12 +482,42 @@ export function registerClaudeAPI(app, io, authMiddleware) {
     const { sessionId } = request.body || {};
     if (!sessionId) return { error: 'sessionId required' };
 
+    // 1) Relay-managed — direct SIGTERM
     const session = active.get(sessionId);
-    if (!session) return { error: 'no_active_session' };
+    if (session) {
+      session.process.kill('SIGTERM');
+      active.delete(sessionId);
+      _sessionsCacheTs = 0; // bust sessions cache
+      return { ok: true, method: 'relay' };
+    }
 
-    session.process.kill('SIGTERM');
-    active.delete(sessionId);
-    return { ok: true };
+    // 2) OS-detected — find PID by scanning /proc/*/cmdline for sessionId
+    try {
+      const pids = execSync('pgrep -x claude 2>/dev/null', { encoding: 'utf-8', timeout: 2000 }).trim().split('\n').filter(Boolean);
+      for (const pid of pids) {
+        try {
+          const cmdline = readFileSync(`/proc/${pid}/cmdline`, 'utf-8');
+          if (cmdline.includes(sessionId)) {
+            process.kill(parseInt(pid), 'SIGTERM');
+            _sessionsCacheTs = 0;
+            return { ok: true, method: 'pid' };
+          }
+        } catch {}
+      }
+    } catch {}
+
+    // 3) Fallback — kill by JSONL file handle (fuser)
+    try {
+      const cwd = request.body?.cwd || process.env.DEFAULT_CWD || '/workspace';
+      const projectId = resolve(cwd).replace(/[\\\/.:]/g, '-');
+      const claudeDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
+      const jsonlPath = join(claudeDir, 'projects', projectId, `${sessionId}.jsonl`);
+      execSync(`fuser -k "${jsonlPath}" 2>/dev/null`, { timeout: 2000, shell: true });
+      _sessionsCacheTs = 0;
+      return { ok: true, method: 'fuser' };
+    } catch {}
+
+    return { error: 'no_process_found' };
   });
 
   // ─── REST: Session history (last N messages from JSONL) ───
@@ -580,6 +610,7 @@ export function registerClaudeAPI(app, io, authMiddleware) {
 
     for (const s of sessions) {
       s.active = active.has(s.id);
+      s.live = true; // all returned sessions are live (filtered by osLive)
     }
     return { sessions };
   });
