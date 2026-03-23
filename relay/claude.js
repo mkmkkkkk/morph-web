@@ -737,6 +737,55 @@ export function registerClaudeAPI(app, io, authMiddleware) {
     } catch (e) { return { error: e.message }; }
   });
 
+  // ─── REST: Register terminal session (called by morph-claude wrapper) ───
+
+  app.post('/v2/claude/register', { preHandler: authMiddleware }, async (request) => {
+    const { pid, sessionId } = request.body || {};
+    if (!pid) return { error: 'pid required' };
+    if (!sessionId) return { error: 'sessionId required' };
+
+    // Skip if already tracked as relay-spawned
+    if (active.has(sessionId)) return { ok: true, already: true };
+
+    // Verify PID is alive
+    try { process.kill(parseInt(pid), 0); } catch { return { error: 'pid_not_alive' }; }
+
+    // Un-blacklist if previously killed
+    if (_killedIds.has(sessionId)) {
+      _killedIds.delete(sessionId);
+      _saveKilled(_killedIds);
+    }
+
+    // Add to active map as registered terminal session
+    const pidInt = parseInt(pid);
+    active.set(sessionId, {
+      process: { pid: pidInt, killed: false, kill: (sig) => { try { process.kill(pidInt, sig); } catch {} } },
+      cwd: WORK_DIR,
+      registered: true, // distinguish from relay-spawned
+      startedAt: Date.now(),
+    });
+    _persistActive();
+    _sessionsCacheTs = 0;
+    _termPidsTs = 0;
+    console.log(`[register] terminal session ${sessionId.slice(0,8)} pid=${pid}`);
+    return { ok: true };
+  });
+
+  app.post('/v2/claude/deregister', { preHandler: authMiddleware }, async (request) => {
+    const { sessionId } = request.body || {};
+    if (!sessionId) return { error: 'sessionId required' };
+
+    const session = active.get(sessionId);
+    if (session?.registered) {
+      active.delete(sessionId);
+      _persistActive();
+      _sessionsCacheTs = 0;
+      _termPidsTs = 0;
+      console.log(`[deregister] terminal session ${sessionId.slice(0,8)}`);
+    }
+    return { ok: true };
+  });
+
   // ─── REST: List all projects ───
 
   app.get('/v2/claude/projects', { preHandler: authMiddleware }, async () => {
