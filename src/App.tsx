@@ -11,6 +11,35 @@ const BUILD_TS = typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : Date.n
 // Module-level constant — avoids array allocation on every render
 const IDLE_WORDS = ['thinking...', 'pondering...', 'wondering...', 'reasoning...', 'considering...', 'analyzing...', 'processing...'];
 
+// ─── Debug overlay for iOS touch/selection/keyboard diagnostics ───
+const _dbg: string[] = [];
+let _dbgListeners: (() => void)[] = [];
+function dbg(msg: string) {
+  const ts = new Date().toLocaleTimeString('en', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  _dbg.push(`${ts} ${msg}`);
+  if (_dbg.length > 40) _dbg.shift();
+  _dbgListeners.forEach(fn => fn());
+}
+function DebugOverlay() {
+  const [, setTick] = React.useState(0);
+  React.useEffect(() => {
+    const fn = () => setTick(t => t + 1);
+    _dbgListeners.push(fn);
+    return () => { _dbgListeners = _dbgListeners.filter(f => f !== fn); };
+  }, []);
+  if (_dbg.length === 0) return null;
+  return (
+    <div style={{
+      position: 'fixed', bottom: 60, left: 4, right: 4, maxHeight: 180, overflowY: 'auto',
+      backgroundColor: 'rgba(0,0,0,0.85)', color: '#0f0', fontSize: 10, fontFamily: 'Menlo, monospace',
+      padding: 6, borderRadius: 6, zIndex: 99999, pointerEvents: 'none', lineHeight: '14px',
+      whiteSpace: 'pre-wrap', wordBreak: 'break-all',
+    }}>
+      {_dbg.slice(-20).join('\n')}
+    </div>
+  );
+}
+
 // ─── Shared send flow: attachments + fire-and-forget upload ───
 function useSendFlow(sendFn: (msg: string) => void, relayConfig?: { relayUrl?: string; relayToken?: string }) {
   const [pendingSketch, setPendingSketch] = useState<{ dataUrl: string; bounds: { x: number; y: number; w: number; h: number } } | null>(null);
@@ -197,7 +226,13 @@ function Collapsible({ label, preview, content, color }: { label: string; previe
   const [open, setOpen] = useState(false);
   return (
     <div style={{ marginBottom: 2, overflow: 'hidden', maxWidth: '100%' }}>
-      <div onPointerDown={(e) => { e.preventDefault(); setOpen(!open); }} style={{ cursor: 'pointer', color, fontSize: 13, fontFamily: 'Menlo, monospace', lineHeight: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', userSelect: 'none', WebkitUserSelect: 'none' as any, padding: '0 12px' }}>
+      <div onPointerDown={(e) => {
+        dbg(`Collapsible pointerDown: type=${e.pointerType} target=${(e.target as HTMLElement).tagName} activeEl=${document.activeElement?.tagName}.${document.activeElement?.className?.slice?.(0,20)||''}`);
+        e.preventDefault();
+        e.stopPropagation();
+        setOpen(!open);
+        dbg(`Collapsible after toggle: activeEl=${document.activeElement?.tagName}`);
+      }} style={{ cursor: 'pointer', color, fontSize: 13, fontFamily: 'Menlo, monospace', lineHeight: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', userSelect: 'none', WebkitUserSelect: 'none' as any, padding: '0 12px' }}>
         {open ? '▾' : '▸'} {label}{!open && preview ? `: ${preview}` : ''}
       </div>
       {open && <pre data-sel style={{ color, opacity: 0.7, fontSize: 13, fontFamily: 'Menlo, monospace', lineHeight: '20px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', overflow: 'hidden', maxWidth: '100%', margin: 0, padding: '0 12px 0 28px', userSelect: 'text', WebkitUserSelect: 'text' as any }}>{content}</pre>}
@@ -312,16 +347,35 @@ function TerminalOverlay({ messages, visible }: { messages: Message[]; visible: 
   }, [messages.length]);
 
   // iOS Safari: block selection from starting outside [data-sel] spans.
-  // touchstart preventDefault is the only reliable way on iOS (selectstart is ignored).
   React.useEffect(() => {
     const container = scrollRef.current;
     if (!container) return;
     function blockNonSel(e: TouchEvent) {
       const t = e.target as HTMLElement;
-      if (!t.closest?.('[data-sel]')) e.preventDefault();
+      const hasSel = !!t.closest?.('[data-sel]');
+      const tag = t.tagName;
+      const x = Math.round(e.touches[0]?.clientX || 0);
+      const y = Math.round(e.touches[0]?.clientY || 0);
+      dbg(`touchstart: tag=${tag} data-sel=${hasSel} xy=${x},${y}`);
+      if (!hasSel) {
+        dbg(`  → preventDefault (no data-sel)`);
+        e.preventDefault();
+      }
     }
     container.addEventListener('touchstart', blockNonSel, { passive: false });
     return () => container.removeEventListener('touchstart', blockNonSel);
+  }, []);
+
+  // Log selectstart events
+  React.useEffect(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+    function logSelectStart(e: Event) {
+      const t = e.target as HTMLElement;
+      dbg(`selectstart: tag=${t.tagName} data-sel=${!!t.closest?.('[data-sel]')} class=${t.className?.slice?.(0,30)||''}`);
+    }
+    container.addEventListener('selectstart', logSelectStart);
+    return () => container.removeEventListener('selectstart', logSelectStart);
   }, []);
 
   // iOS Safari: clamp selection to single [data-sel] span (WebKit Bug #231161).
@@ -331,11 +385,11 @@ function TerminalOverlay({ messages, visible }: { messages: Message[]; visible: 
     function iosClear() {
       const sel = document.getSelection();
       if (sel) sel.removeAllRanges();
-      // iOS ignores removeAllRanges — force-clear via temp input focus/blur
       const tmp = document.createElement('input');
       tmp.style.position = 'fixed'; tmp.style.left = '-9999px'; tmp.style.opacity = '0';
       document.body.appendChild(tmp); tmp.focus(); tmp.blur(); tmp.remove();
     }
+    let clampCount = 0;
     function clamp() {
       const sel = document.getSelection();
       if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
@@ -346,8 +400,19 @@ function TerminalOverlay({ messages, visible }: { messages: Message[]; visible: 
         ? range.endContainer.parentElement : range.endContainer as Element;
       const startSpan = startEl?.closest?.('[data-sel]');
       const endSpan = endEl?.closest?.('[data-sel]');
-      if (!startSpan && container.contains(range.startContainer)) { iosClear(); return; }
+      const selText = sel.toString().slice(0, 40);
+      // Throttle log — only log every 5th selectionchange to avoid spam
+      clampCount++;
+      if (clampCount % 5 === 1) {
+        dbg(`selchange: startSel=${!!startSpan} endSel=${!!endSpan} same=${startSpan===endSpan} startTag=${startEl?.tagName} endTag=${endEl?.tagName} text="${selText}"`);
+      }
+      if (!startSpan && container.contains(range.startContainer)) {
+        dbg(`  → iosClear (no startSpan)`);
+        iosClear();
+        return;
+      }
       if (startSpan && endSpan && startSpan !== endSpan) {
+        dbg(`  → clamp cross-span`);
         const nr = document.createRange();
         nr.setStart(range.startContainer, range.startOffset);
         const walker = document.createTreeWalker(startSpan, NodeFilter.SHOW_TEXT);
@@ -1214,11 +1279,28 @@ export default function App() {
       clearTimeout(t);
       t = setTimeout(() => {
         const ratio = vv.height / window.screen.height;
-        setKeyboardOpen(ratio < 0.75);
+        const isOpen = ratio < 0.75;
+        dbg(`keyboard: ratio=${ratio.toFixed(2)} vvh=${Math.round(vv.height)} screenH=${window.screen.height} open=${isOpen}`);
+        setKeyboardOpen(isOpen);
       }, 80);
     };
     vv.addEventListener('resize', onResize);
     return () => { vv.removeEventListener('resize', onResize); clearTimeout(t); };
+  }, []);
+
+  // Debug: log focus/blur on any element
+  useEffect(() => {
+    function onFocus(e: FocusEvent) {
+      const t = e.target as HTMLElement;
+      dbg(`focus: ${t.tagName}${t.id ? '#'+t.id : ''} class=${(t.className||'').toString().slice(0,20)}`);
+    }
+    function onBlur(e: FocusEvent) {
+      const t = e.target as HTMLElement;
+      dbg(`blur: ${t.tagName}${t.id ? '#'+t.id : ''} → relatedTarget=${(e.relatedTarget as HTMLElement)?.tagName || 'null'}`);
+    }
+    document.addEventListener('focus', onFocus, true);
+    document.addEventListener('blur', onBlur, true);
+    return () => { document.removeEventListener('focus', onFocus, true); document.removeEventListener('blur', onBlur, true); };
   }, []);
 
   // Preload all session histories into cache — deferred so cold load is not competing
@@ -1532,6 +1614,7 @@ export default function App() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', maxWidth: 600, margin: '0 auto', width: '100%' }}>
+      <DebugOverlay />
       {/* Reconnecting indicator */}
       {connState !== 'connected' && (
         <div style={{
