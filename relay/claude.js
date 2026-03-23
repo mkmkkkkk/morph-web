@@ -671,13 +671,13 @@ export function registerClaudeAPI(app, io, authMiddleware) {
             const text = typeof obj.message.content === 'string'
               ? obj.message.content
               : obj.message.content.map(c => c.text || '').join('');
-            if (text) messages.push({ role: 'user', type: 'text', content: text.slice(0, 4000), ts: obj.timestamp });
+            if (text) messages.push({ role: 'user', type: 'text', content: text.slice(0, 16000), ts: obj.timestamp });
           } else if (obj.type === 'assistant' && obj.message?.content) {
             for (const block of obj.message.content) {
               if (block.type === 'text' && block.text) {
-                messages.push({ role: 'agent', type: 'text', content: block.text.slice(0, 4000), ts: obj.timestamp });
+                messages.push({ role: 'agent', type: 'text', content: block.text.slice(0, 16000), ts: obj.timestamp });
               } else if (block.type === 'thinking' && block.thinking) {
-                messages.push({ role: 'agent', type: 'thinking', content: block.thinking.slice(0, 500), ts: obj.timestamp });
+                messages.push({ role: 'agent', type: 'thinking', content: block.thinking.slice(0, 1000), ts: obj.timestamp });
               } else if (block.type === 'tool_use') {
                 messages.push({ role: 'agent', type: 'tool', content: JSON.stringify(block.input).slice(0, 500), name: block.name, ts: obj.timestamp });
               }
