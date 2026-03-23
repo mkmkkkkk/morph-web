@@ -1801,7 +1801,8 @@ export default function App() {
               const snapSession = selectedSession;
 
               const doSend = async () => {
-                const _log = (s: string) => console.log(`[new-session] ${s}`);
+                const _DEBUG_NEW_SESSION = false;
+                const _log = (s: string) => { if (_DEBUG_NEW_SESSION) console.log(`[new-session] ${s}`); };
                 try {
                   const liveId = liveSessionIdRef.current || snapSession.id;
                   const token = snapSession.relayToken || localStorage.getItem('morph-auth') || '';
