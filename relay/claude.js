@@ -276,6 +276,10 @@ function sendMessage(sessionId, message) {
     return { error: 'no_active_session' };
   }
 
+  if (!session.process.stdin) {
+    return { error: 'session_readonly', detail: 'restored orphan — no stdin' };
+  }
+
   const jsonl = JSON.stringify({
     type: 'user',
     message: { role: 'user', content: message },
