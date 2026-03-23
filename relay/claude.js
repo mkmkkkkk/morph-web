@@ -39,38 +39,17 @@ let _psCount = 0;
 let _psCountTs = 0;
 const PS_CACHE_TTL = 5000; // 5s — process count changes slowly
 
-function _getClaudeProcessCount() {
+// Count terminal claude processes: PPID=0 (docker-started), non-zombie
+// Excludes: relay-spawned (PPID=relay), subagents (PPID=claude), orphans (PPID=1)
+function _getTerminalClaudeCount() {
   const now = Date.now();
   if (now - _psCountTs < PS_CACHE_TTL) return _psCount;
   try {
-    // Single command: pgrep + filter zombies in one shot
-    const out = execSync("pgrep -x claude 2>/dev/null | xargs -r ps -o stat= -p 2>/dev/null | grep -cv '^Z'", { encoding: 'utf-8', timeout: 1000, shell: true });
+    const out = execSync("ps -eo ppid,stat,comm 2>/dev/null | awk '$1==0 && $3==\"claude\" && $2!~/Z/' | wc -l", { encoding: 'utf-8', timeout: 1000, shell: true });
     _psCount = parseInt(out.trim()) || 0;
   } catch { _psCount = 0; }
   _psCountTs = now;
   return _psCount;
-}
-
-// ─── Live session detection ───
-// Strategy: count running `claude` processes via `ps`, then pick the N most
-// recently-modified sessions. Claude doesn't hold .jsonl FDs open, so lsof
-// won't work. But each running process writes to exactly one .jsonl, so the
-// N most-recent sessions map 1:1 to the N running processes.
-function getLiveSessionIds(allSessions) {
-  const live = new Set();
-  if (!allSessions || allSessions.length === 0) return live;
-
-  const processCount = _getClaudeProcessCount();
-
-  if (processCount > 0) {
-    // Take the N most recently-modified sessions (allSessions is already sorted by updatedAt desc)
-    const sorted = [...allSessions].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
-    for (let i = 0; i < Math.min(processCount, sorted.length); i++) {
-      live.add(sorted[i].id);
-    }
-  }
-
-  return live;
 }
 
 /**
@@ -602,13 +581,19 @@ export function registerClaudeAPI(app, io, authMiddleware) {
     const allSessions = listClaudeSessions(cwd);
     const activeIds = new Set(active.keys());
 
-    // Recency threshold: sessions updated within last 10 min are likely still running
-    // (catches terminal sessions not in relay active map)
-    const RECENCY_MS = 10 * 60 * 1000;
-    const now = Date.now();
+    // Terminal sessions: PPID=0 non-zombie claude processes
+    // Take N most recently-updated .jsonl files (N = terminal process count)
+    const termCount = _getTerminalClaudeCount();
+    const terminalIds = new Set(
+      allSessions
+        .filter(s => !activeIds.has(s.id))
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+        .slice(0, termCount)
+        .map(s => s.id)
+    );
 
     const sessions = allSessions
-      .filter(s => activeIds.has(s.id) || (s.updatedAt && (now - s.updatedAt) < RECENCY_MS))
+      .filter(s => activeIds.has(s.id) || terminalIds.has(s.id))
       .slice(0, limit);
 
     for (const s of sessions) {
@@ -625,7 +610,7 @@ export function registerClaudeAPI(app, io, authMiddleware) {
       let lsofOut = '';
       try { lsofOut = execSync("lsof 2>/dev/null | grep -E '\\.claude.*\\.jsonl'", { encoding: 'utf-8', timeout: 10000, shell: true }); } catch {}
       const allSessions = listClaudeSessions(cwd);
-      const liveIds = [...getLiveSessionIds(allSessions)];
+      const liveIds = [...new Set(active.keys())];
       const cutoff = Date.now() - 4 * 60 * 60 * 1000;
       const recentSessions = allSessions.filter(s => s.updatedAt > cutoff).map(s => s.id);
       return {
