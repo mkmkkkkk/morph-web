@@ -1630,6 +1630,8 @@ export default function App() {
             onNewSession={(envId, relayUrl, relayToken) => {
               const sid = crypto.randomUUID();
               if (envId !== 'workspace') registerSession(sid, envId);
+              // Bust session cache so returning to canvas shows the new session immediately
+              envSessionsCache.clear();
               setSessionMessages([]);
               liveSessionIdRef.current = null;
               sessionSendQueue.current = [];
@@ -1815,7 +1817,7 @@ export default function App() {
             messages={sessionMessages}
             isProcessing={sessionIsProcessing}
             isCompacting={sessionIsCompacting || isCompacting}
-            onBack={() => setSelectedSession(null)}
+            onBack={() => { envSessionsCache.clear(); setSelectedSession(null); }}
             onInterrupt={() => interruptSession(liveSessionIdRef.current || selectedSession.id)}
             onSend={async (text) => {
               if (text === '/clear') {
