@@ -3,59 +3,61 @@
 # Usage: morph-claude [claude args...]
 #
 # Runs `claude` in the foreground (interactive TTY preserved).
-# A background monitor detects the session ID from /proc/<pid>/fd and
-# registers it with the relay so it appears as a first-class session.
+# A background monitor detects the session ID from recently modified .jsonl
+# files and registers it with the relay so it appears as a first-class session.
 # On exit, deregisters automatically.
 
 RELAY_URL="${MORPH_RELAY_URL:-http://localhost:3001}"
 RELAY_TOKEN="${MORPH_RELAY_TOKEN:-morph2026}"
 SID_FILE=$(mktemp /tmp/morph-claude-XXXXXX)
+CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+PROJECT_DIR="$CLAUDE_DIR/projects/-workspace"
 
-# Background monitor: find claude child PID, extract session ID, register
+# Snapshot existing jsonl files before claude starts
+BEFORE_TS=$(date +%s)
+
+# Strip env vars that interfere with OAuth/Max plan auth
+unset CLAUDECODE
+unset ANTHROPIC_API_KEY
+
+# Background monitor: detect new session by watching for new/modified .jsonl files
 WRAPPER_PID=$$
 (
-  sleep 3  # wait for claude to initialize and open session file
+  sleep 5  # wait for claude to create session file
 
-  # Find claude process that's a child of the wrapper
+  # Find claude PID (child of wrapper)
   CLAUDE_PID=$(pgrep -P $WRAPPER_PID claude 2>/dev/null | head -1)
   if [ -z "$CLAUDE_PID" ]; then
-    # Fallback: find claude whose PPID matches wrapper or was started recently
-    CLAUDE_PID=$(ps -eo pid,ppid,etimes,comm 2>/dev/null | awk -v wp=$WRAPPER_PID '$4=="claude" && ($2==wp || $3<10){print $1}' | tail -1)
+    CLAUDE_PID=$(ps -eo pid,ppid,comm 2>/dev/null | awk -v wp=$WRAPPER_PID '$3=="claude" && $2==wp{print $1}' | head -1)
   fi
-  if [ -z "$CLAUDE_PID" ]; then
-    echo "[morph-claude] ❌ could not find claude child (wrapper=$WRAPPER_PID)" >> /tmp/morph-claude-debug.log
-    exit 0
-  fi
-  echo "[morph-claude] found claude PID=$CLAUDE_PID (wrapper=$WRAPPER_PID)" >> /tmp/morph-claude-debug.log
+  [ -z "$CLAUDE_PID" ] && echo "[morph-claude] ❌ no claude child" >> /tmp/morph-claude-debug.log && exit 0
 
-  # Extract session ID from open file descriptors (Linux: /proc/pid/fd)
+  # Find session ID: look for .jsonl modified after wrapper started
   SID=""
   for attempt in 1 2 3 4 5; do
-    SID=$(readlink /proc/$CLAUDE_PID/fd/* 2>/dev/null | grep -oP '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?=\.jsonl)' | head -1)
+    # Find jsonl files modified after $BEFORE_TS
+    SID=$(find "$PROJECT_DIR" -maxdepth 1 -name '*.jsonl' -newer "$SID_FILE" 2>/dev/null \
+      | grep -oP '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' \
+      | head -1)
     [ -n "$SID" ] && break
-    sleep 2
+    sleep 3
   done
+
   if [ -z "$SID" ]; then
-    echo "[morph-claude] ❌ could not extract session ID from PID=$CLAUDE_PID fds" >> /tmp/morph-claude-debug.log
-    # Debug: dump fd links
-    readlink /proc/$CLAUDE_PID/fd/* 2>/dev/null >> /tmp/morph-claude-debug.log
+    echo "[morph-claude] ❌ no new jsonl found after ts=$BEFORE_TS" >> /tmp/morph-claude-debug.log
     exit 0
   fi
-  echo "[morph-claude] session=$SID" >> /tmp/morph-claude-debug.log
 
   echo "$SID" > "$SID_FILE"
+  echo "[morph-claude] ✅ session=$SID pid=$CLAUDE_PID" >> /tmp/morph-claude-debug.log
 
   # Register with relay
   curl -s -X POST "$RELAY_URL/v2/claude/register" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $RELAY_TOKEN" \
-    -d "{\"pid\": $CLAUDE_PID, \"sessionId\": \"$SID\"}" >/dev/null 2>&1
+    -d "{\"pid\": $CLAUDE_PID, \"sessionId\": \"$SID\"}" >> /tmp/morph-claude-debug.log 2>&1
 ) &
 MONITOR_PID=$!
-
-# Strip env vars that interfere with OAuth/Max plan auth
-unset CLAUDECODE
-unset ANTHROPIC_API_KEY
 
 # Run claude foreground — full TTY passthrough
 claude "$@"
@@ -74,7 +76,7 @@ if [ -n "$SID" ]; then
     -d "{\"sessionId\": \"$SID\"}" >/dev/null 2>&1
 fi
 
-# Cleanup temp file (use mv to trash per safety rules)
+# Cleanup temp file
 [ -f "$SID_FILE" ] && mv "$SID_FILE" /tmp/.morph-claude-trash/ 2>/dev/null || true
 
 exit $EXIT_CODE
