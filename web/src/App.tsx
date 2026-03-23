@@ -215,13 +215,12 @@ function Collapsible({ label, preview, content, color }: { label: string; previe
   const [open, setOpen] = useState(false);
   return (
     <div style={{ marginBottom: 2, overflow: 'hidden', maxWidth: '100%' }}>
-      <div style={{ color, fontSize: 13, fontFamily: 'Menlo, monospace', lineHeight: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', userSelect: 'none', WebkitUserSelect: 'none' as any, padding: '0 12px', display: 'flex', alignItems: 'center' }}>
+      <div style={{ color, fontSize: 13, fontFamily: 'Menlo, monospace', lineHeight: '20px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', userSelect: 'none', WebkitUserSelect: 'none' as any, padding: '0 12px' }}>
         <span onPointerDown={(e) => {
           e.preventDefault();
           e.stopPropagation();
           setOpen(!open);
-        }} style={{ cursor: 'pointer', padding: '8px 12px 8px 0', flexShrink: 0, touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' as any }}>{open ? '▾' : '▸'}</span>
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}{!open && preview ? `: ${preview}` : ''}</span>
+        }} style={{ cursor: 'pointer', touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' as any }}>{open ? '▾' : '▸'} {label}</span>{!open && preview ? `: ${preview}` : ''}
       </div>
       {open && <pre style={{ color, opacity: 0.7, fontSize: 13, fontFamily: 'Menlo, monospace', lineHeight: '16px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', overflow: 'hidden', maxWidth: '100%', margin: 0, padding: '0 12px 0 28px', userSelect: 'none', WebkitUserSelect: 'none' as any }}>{
         content.split('\n').map((line, i, arr) => (
@@ -582,6 +581,40 @@ if (typeof document !== 'undefined') {
   });
 }
 
+// Kill confirmation modal — red warning style
+function KillConfirmModal({ sessionLabel, onConfirm, onCancel }: { sessionLabel: string; onConfirm: () => void; onCancel: () => void }) {
+  return createPortal(
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        transition={{ duration: 0.15 }}
+        onClick={onCancel}
+        style={{ position: 'fixed', inset: 0, zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.6)', WebkitBackdropFilter: 'blur(4px)', backdropFilter: 'blur(4px)' }}
+      >
+        <motion.div
+          initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+          transition={{ duration: 0.15 }}
+          onClick={(e) => e.stopPropagation()}
+          style={{ width: 280, backgroundColor: '#1c1c1e', borderRadius: 14, border: '1px solid rgba(255,59,48,0.3)', overflow: 'hidden' }}
+        >
+          <div style={{ padding: '20px 16px 12px', textAlign: 'center' }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: '#ff453a', marginBottom: 6 }}>Kill Session</div>
+            <div style={{ fontSize: 13, color: '#aaa', lineHeight: 1.4 }}>
+              Terminate <span style={{ color: '#fff', fontFamily: 'Menlo, monospace', fontSize: 12 }}>{sessionLabel}</span> ?
+            </div>
+            <div style={{ fontSize: 11, color: '#666', marginTop: 6 }}>This cannot be undone.</div>
+          </div>
+          <div style={{ display: 'flex', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+            <button onClick={onCancel} style={{ flex: 1, padding: '14px 0', border: 'none', borderRight: '1px solid rgba(255,255,255,0.08)', cursor: 'pointer', fontSize: 14, fontWeight: 500, color: '#007aff', backgroundColor: 'transparent', fontFamily: 'inherit' }}>Cancel</button>
+            <button onClick={onConfirm} style={{ flex: 1, padding: '14px 0', border: 'none', cursor: 'pointer', fontSize: 14, fontWeight: 600, color: '#ff453a', backgroundColor: 'rgba(255,59,48,0.1)', fontFamily: 'inherit' }}>Kill</button>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>,
+    document.body
+  );
+}
+
 // Reusable environment group — renders session cards for one environment
 function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpanded = true }: { env: EnvConfig; onSelect: (sessionId: string, display?: string, relayUrl?: string, relayToken?: string, project?: string, envId?: string) => void; onNewSession?: (envId: string, relayUrl?: string, relayToken?: string) => void; maxVisible?: number; initialExpanded?: boolean }) {
   const [sessions, setSessions] = useState<any[]>([]);
@@ -589,6 +622,7 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
   const [pinned, setPinned] = useState<Set<string>>(() => getPinned(env.id));
   const [expanded, setExpanded] = useState(initialExpanded);
   const [visKey, setVisKey] = useState(_visResumeCount);
+  const [killTarget, setKillTarget] = useState<any>(null);
   const limit = maxVisible ?? env.maxSessions;
 
   // Listen for visibility resume to trigger refetch
@@ -652,6 +686,38 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
     onSelect(id, s?.display, env.relayUrl, env.token, s?.project, env.id);
   };
 
+  // Long-press to kill: 800ms hold → show kill modal. Suppresses tap-to-open after firing.
+  const sessionLongPress = (s: any) => {
+    let timer: any = null;
+    let fired = false;
+    const showKill = () => {
+      fired = true;
+      dbg(`[longpress] fired for ${(s.display || s.id).slice(0, 12)} env=${env.id}`);
+      setKillTarget(s);
+    };
+    return {
+      onTouchStart: () => { fired = false; timer = setTimeout(showKill, 800); },
+      onTouchEnd: () => { clearTimeout(timer); },
+      onTouchMove: () => { clearTimeout(timer); },
+      onMouseDown: () => { fired = false; timer = setTimeout(showKill, 800); },
+      onMouseUp: () => { clearTimeout(timer); },
+      onMouseLeave: () => { clearTimeout(timer); },
+      onContextMenu: (e: any) => e.preventDefault(),
+      onClick: (e: any) => { if (fired) { e.stopPropagation(); fired = false; } else { handleSelect(s.id); } },
+    };
+  };
+
+  const confirmKill = () => {
+    if (!killTarget) return;
+    dbg(`[kill] confirmed ${(killTarget.display || killTarget.id).slice(0, 12)} env=${env.id}`);
+    if (env.id !== 'workspace') registerSession(killTarget.id, env.id);
+    stopSession(killTarget.id);
+    const cacheKey = `${env.id}:${env.relayUrl}:${limit}`;
+    envSessionsCache.delete(cacheKey);
+    setKillTarget(null);
+    setVisKey(v => v + 1);
+  };
+
   const activeCount = sessions.filter(s => s.active).length;
   const unviewedCount = sessions.filter(s => !s.active && !viewed.has(s.id)).length;
 
@@ -686,7 +752,7 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
               <motion.div
                 key={s.id}
                 whileTap={{ scale: 0.98 }}
-                onClick={() => handleSelect(s.id)}
+                {...sessionLongPress(s)}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 8,
                   padding: '12px 10px', marginBottom: 4,
@@ -709,6 +775,7 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
           </motion.div>
         )}
       </AnimatePresence>
+      {killTarget && <KillConfirmModal sessionLabel={(killTarget.display || killTarget.id).slice(0, 16)} onConfirm={confirmKill} onCancel={() => setKillTarget(null)} />}
     </div>
   );
 }
@@ -805,80 +872,8 @@ function SessionCards({ onSelect, onNewSession }: { onSelect: (sessionId: string
 
 // ─── Config Tab ───
 function ConfigTab({ connState, onQuickAction, onRefresh }: { connState: string; onQuickAction: (prompt: string) => void; onRefresh?: () => void }) {
-  const [sessions, setSessions] = useState<any[]>([]);
-  const [activeSessions, setActiveSessions] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
   const token = () => localStorage.getItem('morph-auth') || '';
   const headers = () => ({ 'Authorization': `Bearer ${token()}` });
-
-  // Long-press helper: returns event handlers for touch + mouse, triggers callback after ms
-  const longPress = (cb: () => void, ms = 500) => {
-    let timer: any = null;
-    const start = () => { timer = setTimeout(cb, ms); };
-    const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } };
-    return {
-      onTouchStart: start, onTouchEnd: cancel, onTouchMove: cancel,
-      onMouseDown: start, onMouseUp: cancel, onMouseLeave: cancel,
-      onContextMenu: (e: any) => e.preventDefault(),
-    };
-  };
-
-  const loadSessions = async () => {
-    setLoading(true);
-    try {
-      const envs = getEnvironments();
-      const mainToken = token();
-      // Fetch sessions + active from all environments in parallel
-      const results = await Promise.all(envs.map(async (env) => {
-        const base = env.relayUrl || '';
-        const t = env.token || mainToken;
-        const hdrs = { 'Authorization': `Bearer ${t}` };
-        try {
-          const [sessRes, actRes] = await Promise.all([
-            fetch(`${base}/v2/claude/sessions?limit=30`, { headers: hdrs }),
-            fetch(`${base}/v2/claude/active`, { headers: hdrs }).catch(() => null),
-          ]);
-          const sessData = await sessRes.json();
-          const actData = actRes ? await actRes.json() : { sessions: [] };
-          return {
-            env,
-            sessions: (sessData.sessions || []).filter((s: any) => s.id !== FIXED_SESSION_ID),
-            active: actData.sessions || [],
-          };
-        } catch { return { env, sessions: [], active: [] }; }
-      }));
-      // Merge all, tagging with env label
-      const allSessions: any[] = [];
-      const allActive: any[] = [];
-      for (const r of results) {
-        for (const s of r.sessions) allSessions.push({ ...s, _envLabel: r.env.label, _envId: r.env.id, _relayUrl: r.env.relayUrl });
-        for (const s of r.active) allActive.push({ ...s, _envLabel: r.env.label, _envId: r.env.id, _relayUrl: r.env.relayUrl });
-      }
-      setSessions(allSessions);
-      setActiveSessions(allActive);
-    } catch {}
-    setLoading(false);
-  };
-
-  useEffect(() => {
-    loadSessions();
-    let iv = setInterval(loadSessions, 30_000);
-    // Pause polling while hidden, resume immediately on visible
-    const onVis = () => {
-      if (document.visibilityState === 'hidden') { clearInterval(iv); }
-      else { loadSessions(); iv = setInterval(loadSessions, 30_000); }
-    };
-    document.addEventListener('visibilitychange', onVis);
-    return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
-  }, []);
-
-  const timeAgo = (ms: number) => {
-    const diff = Date.now() - ms;
-    if (diff < 60000) return 'just now';
-    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
-    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-    return `${Math.floor(diff / 86400000)}d ago`;
-  };
 
   return (
     <div style={{ flex: 1, overflowY: 'scroll', padding: 16, paddingTop: 56, minHeight: 0, WebkitOverflowScrolling: 'touch' as any }}>
@@ -886,10 +881,10 @@ function ConfigTab({ connState, onQuickAction, onRefresh }: { connState: string;
       <Section title="Connection">
         <Row label="Status" value={connState} valueColor={connState === 'connected' ? '#30d158' : '#ff453a'} />
         <Row label="Server" value={window.location.origin} />
-        <button onClick={() => { loadSessions(); if (onRefresh) onRefresh(); }} style={{
+        <button onClick={() => { if (onRefresh) onRefresh(); }} style={{
           marginTop: 8, padding: '8px 0', border: 'none', borderRadius: 8, cursor: 'pointer',
           fontSize: 13, width: '100%', backgroundColor: 'rgba(99,106,255,0.15)', color: '#636AFF',
-        }}>{loading ? '...' : '↻ Refresh'}</button>
+        }}>↻ Refresh</button>
       </Section>
 
       <Section title="Quick Actions">
@@ -903,48 +898,6 @@ function ConfigTab({ connState, onQuickAction, onRefresh }: { connState: string;
             backgroundColor: 'rgba(255,255,255,0.10)', color: '#fff', marginBottom: 4,
           }}>{a.label}</button>
         ))}
-      </Section>
-
-      <Section title={<span>Sessions <span style={{ color: '#888', fontWeight: 400, fontSize: 11 }}>{loading ? '...' : `${sessions.length}`}</span></span>}>
-        <button onClick={loadSessions} style={{ padding: '6px', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 12, width: '100%', backgroundColor: 'rgba(255,255,255,0.08)', color: '#888', marginBottom: 8 }}>
-          {loading ? 'Loading...' : 'Refresh'}
-        </button>
-        <div style={{ maxHeight: 320, overflowY: 'auto', WebkitOverflowScrolling: 'touch' as any }}>
-
-        {/* Active sessions first */}
-        {activeSessions.map((s: any) => (
-          <div key={`${s._envId}-${s.id}`} {...longPress(() => { if (window.confirm(`Kill session ${s.id.slice(0, 8)}?`)) { if (s._envId && s._envId !== 'workspace') registerSession(s.id, s._envId); stopSession(s.id); setTimeout(loadSessions, 500); } })} style={{ padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.08)', cursor: 'pointer', userSelect: 'none', WebkitUserSelect: 'none' as any }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <div style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: '#30d158', flexShrink: 0 }} />
-              <span style={{ color: '#fff', fontSize: 13, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
-                {s.id.slice(0, 8)} — {s.cwd}
-              </span>
-              <span style={{ color: '#30d158', fontSize: 11 }}>active</span>
-              {s._envLabel && <span style={{ color: '#636AFF', fontSize: 10, flexShrink: 0 }}>{s._envLabel}</span>}
-            </div>
-          </div>
-        ))}
-
-        {/* Recent sessions — hide dead sessions (not active + no update in 24h) */}
-        {sessions.filter((s: any) => {
-          const activeIds = new Set(activeSessions.map((a: any) => a.id));
-          if (activeIds.has(s.id)) return true; // still running
-          if (s.active) return true;
-          // Keep if updated within 24h
-          return s.updatedAt && (Date.now() - s.updatedAt < 86400000);
-        }).map((s: any) => (
-          <div key={`${s._envId}-${s.id}`} {...longPress(() => { if (window.confirm(`Kill session ${(s.display || s.id).slice(0, 12)}?`)) { if (s._envId && s._envId !== 'workspace') registerSession(s.id, s._envId); stopSession(s.id); setTimeout(loadSessions, 500); } })} style={{ padding: '10px 0', borderBottom: '1px solid rgba(255,255,255,0.08)', cursor: 'pointer', userSelect: 'none', WebkitUserSelect: 'none' as any }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <div style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: s.active ? '#30d158' : '#555', flexShrink: 0 }} />
-              <span style={{ color: '#e0e0e0', fontSize: 13, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
-                {s.display || s.id.slice(0, 8)}
-              </span>
-              {s._envLabel && <span style={{ color: '#636AFF', fontSize: 10, flexShrink: 0 }}>{s._envLabel}</span>}
-              <span style={{ color: '#888', fontSize: 11, flexShrink: 0 }}>{timeAgo(s.updatedAt)}</span>
-            </div>
-          </div>
-        ))}
-        </div>
       </Section>
 
       <EnvManagerSection />
