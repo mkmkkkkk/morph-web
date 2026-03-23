@@ -51,7 +51,9 @@ function _getTerminalClaudeCount() {
     // NOT terminal: node (relay), claude (subagent)
     const script = `ps -eo pid,ppid,stat,comm 2>/dev/null | awk '$4=="claude" && $3!~/Z/{print $2}' | while read pp; do
       if [ "$pp" = "0" ]; then echo terminal; else
-        pcomm=$(basename "$(ps -o comm= -p "$pp" 2>/dev/null)" 2>/dev/null)
+        pcomm=$(ps -o comm= -p "$pp" 2>/dev/null)
+        pcomm=$(basename -- "$pcomm" 2>/dev/null)
+        pcomm=${pcomm#-}
         case "$pcomm" in bash|zsh|sh|dash|fish|tmux*|screen|sshd|login|sudo|su) echo terminal;; esac
       fi
     done | wc -l`;
