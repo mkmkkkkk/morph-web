@@ -748,7 +748,7 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
         <span style={{ color: '#888', fontSize: 10 }}>{expanded ? '▾' : '▸'}</span>
         <span
           onClick={(e) => { e.stopPropagation(); if (window.confirm('Create a new session?')) onNewSession?.(env.id, env.relayUrl, env.token); }}
-          style={{ marginLeft: 'auto', color: '#636AFF', fontSize: 20, lineHeight: 1, padding: '6px 10px', margin: '-6px -10px', cursor: 'pointer', userSelect: 'none', pointerEvents: 'auto', WebkitTapHighlightColor: 'transparent' }}
+          style={{ marginLeft: 'auto', color: '#fff', fontSize: 20, lineHeight: 1, padding: '6px 10px', margin: '-6px -10px', cursor: 'pointer', userSelect: 'none', pointerEvents: 'auto', WebkitTapHighlightColor: 'transparent' }}
         >+</span>
       </div>
       <AnimatePresence>
