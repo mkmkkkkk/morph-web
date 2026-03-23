@@ -42,8 +42,9 @@ SID_FILE=$(mktemp /tmp/morph-claude-XXXXXX)
 ) &
 MONITOR_PID=$!
 
-# Strip CLAUDECODE env — prevent nesting detection when run inside a Claude Code session
+# Strip env vars that interfere with OAuth/Max plan auth
 unset CLAUDECODE
+unset ANTHROPIC_API_KEY
 
 # Run claude foreground — full TTY passthrough
 claude "$@"
