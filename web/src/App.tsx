@@ -590,27 +590,27 @@ function KillConfirmModal({ sessionLabel, onConfirm, onCancel }: { sessionLabel:
     <AnimatePresence>
       <motion.div
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-        transition={{ duration: 0.15 }}
+        transition={{ duration: 0.18 }}
         onClick={onCancel}
-        style={{ position: 'fixed', inset: 0, zIndex: 99999, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.6)', WebkitBackdropFilter: 'blur(4px)', backdropFilter: 'blur(4px)' }}
+        style={{ position: 'fixed', inset: 0, zIndex: 99999, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', paddingBottom: 40, backgroundColor: 'rgba(0,0,0,0.5)', WebkitBackdropFilter: 'blur(8px)', backdropFilter: 'blur(8px)' }}
       >
         <motion.div
-          initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
-          transition={{ duration: 0.15 }}
+          initial={{ y: 30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 30, opacity: 0 }}
+          transition={{ type: 'spring', damping: 28, stiffness: 350 }}
           onClick={(e) => e.stopPropagation()}
-          style={{ width: 280, backgroundColor: '#1c1c1e', borderRadius: 14, border: '1px solid rgba(255,59,48,0.3)', overflow: 'hidden' }}
+          style={{ width: 'calc(100% - 32px)', maxWidth: 320, display: 'flex', flexDirection: 'column', gap: 8 }}
         >
-          <div style={{ padding: '20px 16px 12px', textAlign: 'center' }}>
-            <div style={{ fontSize: 15, fontWeight: 600, color: '#ff453a', marginBottom: 6 }}>Kill Session</div>
-            <div style={{ fontSize: 13, color: '#aaa', lineHeight: 1.4 }}>
-              Terminate <span style={{ color: '#fff', fontFamily: 'Menlo, monospace', fontSize: 12 }}>{sessionLabel}</span> ?
+          <div style={{ backgroundColor: 'rgba(44,44,46,0.95)', borderRadius: 14, overflow: 'hidden' }}>
+            <div style={{ padding: '18px 16px 14px', textAlign: 'center' }}>
+              <div style={{ fontSize: 13, color: '#999', lineHeight: 1.5 }}>
+                Kill <span style={{ color: '#fff', fontFamily: 'Menlo, monospace', fontSize: 12 }}>{sessionLabel}</span> ?
+              </div>
             </div>
-            <div style={{ fontSize: 11, color: '#666', marginTop: 6 }}>This cannot be undone.</div>
+            <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+              <button onClick={onConfirm} style={{ width: '100%', padding: '16px 0', border: 'none', cursor: 'pointer', fontSize: 17, fontWeight: 600, color: '#ff453a', backgroundColor: 'transparent', fontFamily: 'inherit' }}>Kill Session</button>
+            </div>
           </div>
-          <div style={{ display: 'flex', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
-            <button onClick={onCancel} style={{ flex: 1, padding: '14px 0', border: 'none', borderRight: '1px solid rgba(255,255,255,0.08)', cursor: 'pointer', fontSize: 14, fontWeight: 500, color: '#007aff', backgroundColor: 'transparent', fontFamily: 'inherit' }}>Cancel</button>
-            <button onClick={onConfirm} style={{ flex: 1, padding: '14px 0', border: 'none', cursor: 'pointer', fontSize: 14, fontWeight: 600, color: '#ff453a', backgroundColor: 'rgba(255,59,48,0.1)', fontFamily: 'inherit' }}>Kill</button>
-          </div>
+          <button onClick={onCancel} style={{ width: '100%', padding: '16px 0', border: 'none', cursor: 'pointer', fontSize: 17, fontWeight: 600, color: '#007aff', backgroundColor: 'rgba(44,44,46,0.95)', borderRadius: 14, fontFamily: 'inherit' }}>Cancel</button>
         </motion.div>
       </motion.div>
     </AnimatePresence>,
