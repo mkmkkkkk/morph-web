@@ -1241,13 +1241,31 @@ export default function App() {
   const sessionCompactTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputBarRef = useRef<HTMLDivElement>(null);
 
-  // Detect iOS keyboard via visualViewport resize
+  // Detect iOS keyboard — instant on focus, visualViewport confirms
   useEffect(() => {
     const vv = window.visualViewport;
-    if (!vv) return;
+    // Instant: set keyboardOpen=true on textarea/input focus (before viewport resizes)
+    const onFocusIn = (e: FocusEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'TEXTAREA' || tag === 'INPUT') setKeyboardOpen(true);
+    };
+    const onFocusOut = (e: FocusEvent) => {
+      const related = e.relatedTarget as HTMLElement;
+      if (!related || (related.tagName !== 'TEXTAREA' && related.tagName !== 'INPUT')) {
+        // Delay blur slightly — iOS may refocus during keyboard dismiss animation
+        setTimeout(() => {
+          if (document.activeElement?.tagName !== 'TEXTAREA' && document.activeElement?.tagName !== 'INPUT') {
+            setKeyboardOpen(false);
+          }
+        }, 50);
+      }
+    };
+    document.addEventListener('focusin', onFocusIn, true);
+    document.addEventListener('focusout', onFocusOut, true);
+    // Backup: visualViewport resize (catches edge cases like external keyboard)
     let t: ReturnType<typeof setTimeout>;
     const onResize = () => {
-      if (document.visibilityState === 'hidden') return;
+      if (!vv || document.visibilityState === 'hidden') return;
       clearTimeout(t);
       t = setTimeout(() => {
         const ratio = vv.height / window.screen.height;
@@ -1256,8 +1274,13 @@ export default function App() {
         setKeyboardOpen(isOpen);
       }, 80);
     };
-    vv.addEventListener('resize', onResize);
-    return () => { vv.removeEventListener('resize', onResize); clearTimeout(t); };
+    vv?.addEventListener('resize', onResize);
+    return () => {
+      document.removeEventListener('focusin', onFocusIn, true);
+      document.removeEventListener('focusout', onFocusOut, true);
+      vv?.removeEventListener('resize', onResize);
+      clearTimeout(t);
+    };
   }, []);
 
   // Debug: log focus/blur on any element
