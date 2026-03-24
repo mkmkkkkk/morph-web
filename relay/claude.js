@@ -24,6 +24,16 @@ const MAX_CONCURRENT_SESSIONS = 6;
 // Last error per session — shown on session cards
 const sessionErrors = new Map(); // sessionId → { text, ts }
 
+// Graceful shutdown: kill all children so they don't orphan on PM2 restart
+process.on('SIGTERM', () => {
+  console.log(`[relay] SIGTERM — killing ${active.size} active sessions`);
+  for (const [, info] of active) {
+    try { process.kill(info.process.pid, 'SIGTERM'); } catch {}
+  }
+  _persistActive();
+  setTimeout(() => process.exit(0), 1500);
+});
+
 // ─── Persistence: active map + killed blacklist ───
 const ACTIVE_FILE = '/tmp/morph-active.json';
 const KILLED_FILE = '/tmp/morph-killed.json';
@@ -58,18 +68,41 @@ function _isProcessAlive(pid) {
   } catch { return false; }
 }
 
-// On startup: restore orphaned relay-spawned sessions (process still alive but lost from active map)
-function _restoreActive() {
+// On startup: collect orphaned relay-spawned sessions for kill+resume once io is available
+let _pendingOrphans = [];
+function _collectOrphans() {
   try {
     const entries = JSON.parse(readFileSync(ACTIVE_FILE, 'utf-8'));
     for (const { sid, pid } of entries) {
-      if (active.has(sid)) continue; // already managed
-      if (!_isProcessAlive(pid)) continue; // dead or zombie — skip
-      // Process alive but we lost stdin — mark as active (read-only)
-      active.set(sid, { process: { pid, killed: false, kill: (sig) => { try { process.kill(pid, sig); } catch {} } }, cwd: WORK_DIR, orphaned: true });
-      console.log(`[restore] session ${sid.slice(0,8)} pid=${pid} — re-attached (read-only)`);
+      if (active.has(sid)) continue;
+      if (!_isProcessAlive(pid)) continue;
+      _pendingOrphans.push({ sid, pid });
+      console.log(`[restore] session ${sid.slice(0,8)} pid=${pid} — queued for kill+resume`);
     }
   } catch {}
+}
+
+// Kill orphans and re-spawn with --resume so we regain stdout pipes
+function _restoreWithResume(io) {
+  for (const { sid, pid } of _pendingOrphans) {
+    console.log(`[restore] killing orphan pid=${pid} for session ${sid.slice(0,8)}`);
+    try { process.kill(pid, 'SIGTERM'); } catch {}
+  }
+  // Give processes time to exit, then re-spawn
+  setTimeout(() => {
+    for (const { sid } of _pendingOrphans) {
+      try {
+        const proc = spawnClaude({ sessionId: sid, resumeFrom: sid });
+        active.set(sid, { process: proc, cwd: WORK_DIR, resumedFrom: sid, startedAt: Date.now() });
+        pipeOutput(proc, sid, io);
+        console.log(`[restore] session ${sid.slice(0,8)} — re-spawned with pipes`);
+      } catch (err) {
+        console.error(`[restore] failed to resume ${sid.slice(0,8)}: ${err.message}`);
+      }
+    }
+    _persistActive();
+    _pendingOrphans = [];
+  }, 2000);
 }
 
 // Error ring buffer — queryable via GET /v2/claude/errors
@@ -419,10 +452,13 @@ function listAllProjects() {
 // Server-side killed set — prevents dead sessions from reappearing via terminal detection
 const _killedIds = _loadKilled();
 
-// Restore orphaned relay-spawned sessions on startup
-_restoreActive();
+// Collect orphaned sessions on startup — actual resume happens in registerClaudeAPI when io is available
+_collectOrphans();
 
 export function registerClaudeAPI(app, io, authMiddleware) {
+
+  // Kill orphaned sessions and re-spawn with pipes now that io is available
+  if (_pendingOrphans.length > 0) _restoreWithResume(io);
 
   // ─── REST: List configured relay environments (server-defined, no per-device config needed) ───
   // Set RELAY_ENVS env var as JSON: [{"id":"tr","label":"TR Machine","relayUrl":"https://...","token":"...","maxSessions":6}]
