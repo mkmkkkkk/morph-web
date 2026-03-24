@@ -24,14 +24,8 @@ STATIC_TOKEN=morph-tensor-2026
 DB_PATH=./data/relay.db
 ALLOWED_ACCOUNTS=cmlfo4dakkaj31w14k0cew5ru,static-user
 DEFAULT_CWD=/Users/michaelyang/Documents/Tensor_revive
-ANTHROPIC_API_KEY=YOUR_KEY_HERE
 EOF
-  echo "  Created .env — fill in ANTHROPIC_API_KEY then re-run."
-  exit 1
-fi
-
-if grep -q "YOUR_KEY_HERE" "$RELAY_DIR/.env" 2>/dev/null; then
-  echo "  Set ANTHROPIC_API_KEY in .env first."
+  echo "  Created .env — review and re-run."
   exit 1
 fi
 
