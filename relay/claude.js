@@ -190,6 +190,7 @@ function spawnClaude({ sessionId, resumeFrom, model }) {
   // but spawned processes are independent and must not be blocked by nesting check
   const env = { ...process.env };
   delete env.CLAUDECODE;
+  delete env.ANTHROPIC_API_KEY;  // Force Max plan OAuth — don't leak API key to spawned CLI
 
   const proc = spawn('claude', args, {
     cwd: WORK_DIR,
