@@ -774,9 +774,12 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
               >
                 <div style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: dotColor(s), flexShrink: 0 }} />
                 {pinned.has(s.id) && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><path d="M12 17v5M9 2h6l1 7h2l-1 4H7L6 9h2z"/></svg>}
-                <span style={{ color: '#ddd', fontSize: 13, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
-                  {s.display || s.id.slice(0, 8)}
-                </span>
+                <div style={{ flex: 1, overflow: 'hidden', minWidth: 0 }}>
+                  <div style={{ color: '#ddd', fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+                    {s.display || s.id.slice(0, 8)}
+                  </div>
+                  {s.lastError && <div style={{ color: '#ff453a', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, marginTop: 2 }}>{s.lastError}</div>}
+                </div>
                 <span style={{ color: '#777', fontSize: 11, flexShrink: 0 }}>{timeAgo(s.updatedAt)}</span>
                 <span onClick={(e) => { e.stopPropagation(); setPinned(togglePin(env.id, s.id)); }} style={{ cursor: 'pointer', padding: '8px 10px', margin: '-8px -10px -8px 0', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill={pinned.has(s.id) ? '#888' : 'none'} stroke={pinned.has(s.id) ? '#888' : '#444'} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg>
@@ -1342,6 +1345,17 @@ export default function App() {
     });
   }, [authed]);
 
+  // SAFETY: register all locally-stored envs as relays immediately on auth
+  // Prevents cross-env leak when env was added via URL param or Config and page reloads
+  useEffect(() => {
+    if (!authed) return;
+    const token = localStorage.getItem(PASS_KEY) || '';
+    const envs = getEnvironments().filter(e => e.relayUrl && e.id !== 'workspace');
+    envs.forEach(env => {
+      addRelay({ id: env.id, url: env.relayUrl, token: env.token || token, label: env.label });
+    });
+  }, [authed]);
+
   // Pull server-defined environments from relay (runs once after auth)
   // Relay can push any env via RELAY_ENVS env var — no per-device config needed
   useEffect(() => {
@@ -1381,9 +1395,13 @@ export default function App() {
       const cfg = JSON.parse(atob(raw));
       if (cfg.relayUrl) {
         const current = getEnvironments();
+        const envId = cfg.id || `env_${Date.now()}`;
         if (!current.find(e => e.relayUrl === cfg.relayUrl)) {
-          saveEnvironments([...current, { id: `env_${Date.now()}`, label: cfg.label || cfg.relayUrl, relayUrl: cfg.relayUrl, token: cfg.token || undefined, maxSessions: 6 }]);
+          saveEnvironments([...current, { id: envId, label: cfg.label || cfg.relayUrl, relayUrl: cfg.relayUrl, token: cfg.token || undefined, maxSessions: 6 }]);
         }
+        // Also register as relay so relayConns has it — prevents cross-env fallback to PRIMARY
+        const token = localStorage.getItem(PASS_KEY) || '';
+        addRelay({ id: envId, url: cfg.relayUrl, token: cfg.token || token, label: cfg.label });
       }
     } catch {}
     const url = new URL(window.location.href);
@@ -1472,10 +1490,11 @@ export default function App() {
       // After first agent response, generate title via Haiku if missing
       if (!displayRefreshed && msg.role === 'agent' && msg.type === 'text') {
         displayRefreshed = true;
-        const token = localStorage.getItem('morph-auth') || '';
-        fetch('/v2/claude/title', {
+        const titleToken = selectedSession.relayToken || localStorage.getItem('morph-auth') || '';
+        const titleBase = selectedSession.relayUrl || '';
+        fetch(`${titleBase}/v2/claude/title`, {
           method: 'POST',
-          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          headers: { 'Authorization': `Bearer ${titleToken}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ sessionId: selectedSession.id }),
         })
           .then(r => r.json())
@@ -1867,6 +1886,13 @@ export default function App() {
                   const liveId = liveSessionIdRef.current || snapSession.id;
                   const token = snapSession.relayToken || localStorage.getItem('morph-auth') || '';
                   const base = snapSession.relayUrl || '';
+
+                  // SAFETY: ensure relay mapping exists before sending — prevents cross-env leak
+                  if (snapSession.envId && snapSession.envId !== 'workspace') {
+                    registerSession(liveId, snapSession.envId);
+                    registerSession(snapSession.id, snapSession.envId);
+                  }
+
                   _log(`doSend start | isNew=${snapSession.isNew} | liveId=${liveId} | snapId=${snapSession.id} | base=${base} | text=${text.slice(0,40)}`);
 
                   if (snapSession.isNew) {

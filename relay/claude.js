@@ -21,6 +21,9 @@ import { randomUUID } from 'crypto';
 const active = new Map();
 const MAX_CONCURRENT_SESSIONS = 6;
 
+// Last error per session — shown on session cards
+const sessionErrors = new Map(); // sessionId → { text, ts }
+
 // ─── Persistence: active map + killed blacklist ───
 const ACTIVE_FILE = '/tmp/morph-active.json';
 const KILLED_FILE = '/tmp/morph-killed.json';
@@ -249,6 +252,7 @@ function pipeOutput(proc, sessionId, io) {
     if (!text) return;
     console.error(`[claude:${sessionId.slice(0,8)}] stderr: ${text}`);
     logError(sessionId, 'stderr', text);
+    sessionErrors.set(sessionId, { text: text.slice(0, 200), ts: Date.now() });
     io.to(`direct:${sessionId}`).emit('claude-error', { sessionId, text });
   });
 
@@ -270,6 +274,7 @@ function pipeOutput(proc, sessionId, io) {
   proc.on('error', (err) => {
     console.error(`[claude:${sessionId.slice(0,8)}] spawn error: ${err.message}`);
     logError(sessionId, 'spawn_error', err.message);
+    sessionErrors.set(sessionId, { text: err.message.slice(0, 200), ts: Date.now() });
     io.to(`direct:${sessionId}`).emit('claude-error', {
       sessionId,
       text: `Process error: ${err.message}`,
@@ -736,6 +741,8 @@ export function registerClaudeAPI(app, io, authMiddleware) {
     for (const s of sessions) {
       s.active = active.has(s.id) || terminalIds.has(s.id);
       s.live = true;
+      const err = sessionErrors.get(s.id);
+      if (err) s.lastError = err.text;
     }
     return { sessions };
   });
