@@ -305,6 +305,9 @@ function pipeOutput(proc, sessionId, io) {
         }
         const now = Date.now();
         const outputData = { sessionId, data: parsed, ts: now };
+        const room = io.sockets.adapter.rooms.get(`direct:${sessionId}`);
+        const roomSize = room ? room.size : 0;
+        console.log(`[debug:${sessionId.slice(0,8)}] emit claude-output type=${parsed.type} room_size=${roomSize} buf=${outputBuffers.get(sessionId)?.events?.length || 0}`);
         io.to(`direct:${sessionId}`).emit('claude-output', outputData);
         bufferEvent(sessionId, 'claude-output', outputData);
       } catch {
@@ -811,13 +814,23 @@ export function registerClaudeAPI(app, io, authMiddleware) {
         .map(s => s.id)
     );
 
+    // Also include recent sessions (48h) as resumable — even if no live process
+    const RECENT_MAX_AGE = 48 * 3600 * 1000;
+    const recentIds = new Set(
+      allSessions
+        .filter(s => !activeIds.has(s.id) && !terminalIds.has(s.id) && !_killedIds.has(s.id) && (now - (s.updatedAt || 0)) < RECENT_MAX_AGE)
+        .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+        .slice(0, 10)
+        .map(s => s.id)
+    );
+
     const sessions = allSessions
-      .filter(s => !_killedIds.has(s.id) && (activeIds.has(s.id) || terminalIds.has(s.id)))
+      .filter(s => !_killedIds.has(s.id) && (activeIds.has(s.id) || terminalIds.has(s.id) || recentIds.has(s.id)))
       .slice(0, limit);
 
     for (const s of sessions) {
       s.active = active.has(s.id) || terminalIds.has(s.id);
-      s.live = true;
+      s.live = s.active;
       const err = sessionErrors.get(s.id);
       if (err) s.lastError = err.text;
     }
@@ -1048,6 +1061,8 @@ export function registerClaudeAPI(app, io, authMiddleware) {
       if (data.sessionId) {
         socket.join(`direct:${data.sessionId}`);
         subscribedSessions.add(data.sessionId);
+        const totalBuf = outputBuffers.get(data.sessionId)?.events?.length || 0;
+        console.log(`[subscribe] ${data.sessionId.slice(0,8)} sinceTs=${data.sinceTs || 0} totalBuf=${totalBuf}`);
 
         // Replay buffered events (client sends sinceTs to avoid duplicates)
         const sinceTs = data.sinceTs || 0;
