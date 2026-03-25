@@ -24,6 +24,43 @@ const MAX_CONCURRENT_SESSIONS = 6;
 // Last error per session — shown on session cards
 const sessionErrors = new Map(); // sessionId → { text, ts }
 
+// ─── Output buffer: replay missed events on Socket.IO reconnect ───
+// sessionId → { events: Array<{event, data, ts}>, lastActivity: number }
+const outputBuffers = new Map();
+const OUTPUT_BUFFER_TTL = 60_000; // keep buffers for 60s after last activity
+const OUTPUT_BUFFER_MAX = 500;    // max events per session
+
+function bufferEvent(sessionId, event, data) {
+  if (!outputBuffers.has(sessionId)) {
+    outputBuffers.set(sessionId, { events: [], lastActivity: Date.now() });
+  }
+  const buf = outputBuffers.get(sessionId);
+  buf.events.push({ event, data, ts: data.ts || Date.now() });
+  buf.lastActivity = Date.now();
+  // Cap buffer size
+  if (buf.events.length > OUTPUT_BUFFER_MAX) {
+    buf.events = buf.events.slice(-OUTPUT_BUFFER_MAX);
+  }
+}
+
+function getBufferedEvents(sessionId, sinceTs = 0) {
+  const buf = outputBuffers.get(sessionId);
+  if (!buf) return [];
+  return buf.events.filter(e => e.ts > sinceTs);
+}
+
+function clearBuffer(sessionId) {
+  outputBuffers.delete(sessionId);
+}
+
+// Periodic cleanup of stale buffers
+setInterval(() => {
+  const now = Date.now();
+  for (const [sid, buf] of outputBuffers) {
+    if (now - buf.lastActivity > OUTPUT_BUFFER_TTL) outputBuffers.delete(sid);
+  }
+}, 30_000);
+
 // Graceful shutdown: kill all children so they don't orphan on PM2 restart
 process.on('SIGTERM', () => {
   console.log(`[relay] SIGTERM — killing ${active.size} active sessions`);
@@ -262,20 +299,19 @@ function pipeOutput(proc, sessionId, io) {
         }
         // Notify frontend of context compaction
         if (parsed.type === 'system' && (parsed.subtype === 'compact_boundary' || /compact/i.test(parsed.subtype || '') || /compact/i.test(parsed.message || ''))) {
-          io.to(`direct:${sessionId}`).emit('claude-compact', { sessionId });
+          const compactData = { sessionId, ts: Date.now() };
+          io.to(`direct:${sessionId}`).emit('claude-compact', compactData);
+          bufferEvent(sessionId, 'claude-compact', compactData);
         }
-        io.to(`direct:${sessionId}`).emit('claude-output', {
-          sessionId,
-          data: parsed,
-        });
-        // bypassPermissions mode — no SIGSTOP gate needed. If Claude ever
-        // outputs a real permission request, PermissionBanner on the client
-        // will handle it (type === 'permission' in message stream).
+        const now = Date.now();
+        const outputData = { sessionId, data: parsed, ts: now };
+        io.to(`direct:${sessionId}`).emit('claude-output', outputData);
+        bufferEvent(sessionId, 'claude-output', outputData);
       } catch {
-        io.to(`direct:${sessionId}`).emit('claude-output', {
-          sessionId,
-          data: { type: 'raw', text: line },
-        });
+        const now = Date.now();
+        const rawData = { sessionId, data: { type: 'raw', text: line }, ts: now };
+        io.to(`direct:${sessionId}`).emit('claude-output', rawData);
+        bufferEvent(sessionId, 'claude-output', rawData);
       }
     }
   });
@@ -286,7 +322,9 @@ function pipeOutput(proc, sessionId, io) {
     console.error(`[claude:${sessionId.slice(0,8)}] stderr: ${text}`);
     logError(sessionId, 'stderr', text);
     sessionErrors.set(sessionId, { text: text.slice(0, 200), ts: Date.now() });
-    io.to(`direct:${sessionId}`).emit('claude-error', { sessionId, text });
+    const errData = { sessionId, text };
+    io.to(`direct:${sessionId}`).emit('claude-error', errData);
+    bufferEvent(sessionId, 'claude-error', errData);
   });
 
   proc.on('exit', (code, signal) => {
@@ -296,10 +334,14 @@ function pipeOutput(proc, sessionId, io) {
     if (buffer.trim()) {
       try {
         const parsed = JSON.parse(buffer);
-        io.to(`direct:${sessionId}`).emit('claude-output', { sessionId, data: parsed });
+        const outputData = { sessionId, data: parsed, ts: Date.now() };
+        io.to(`direct:${sessionId}`).emit('claude-output', outputData);
+        bufferEvent(sessionId, 'claude-output', outputData);
       } catch { /* ignore */ }
     }
-    io.to(`direct:${sessionId}`).emit('claude-exit', { sessionId, code, signal });
+    const exitData = { sessionId, code, signal };
+    io.to(`direct:${sessionId}`).emit('claude-exit', exitData);
+    bufferEvent(sessionId, 'claude-exit', exitData);
     active.delete(sessionId);
     _persistActive();
   });
@@ -308,10 +350,9 @@ function pipeOutput(proc, sessionId, io) {
     console.error(`[claude:${sessionId.slice(0,8)}] spawn error: ${err.message}`);
     logError(sessionId, 'spawn_error', err.message);
     sessionErrors.set(sessionId, { text: err.message.slice(0, 200), ts: Date.now() });
-    io.to(`direct:${sessionId}`).emit('claude-error', {
-      sessionId,
-      text: `Process error: ${err.message}`,
-    });
+    const errData = { sessionId, text: `Process error: ${err.message}` };
+    io.to(`direct:${sessionId}`).emit('claude-error', errData);
+    bufferEvent(sessionId, 'claude-error', errData);
     active.delete(sessionId);
     _persistActive();
   });
@@ -1002,10 +1043,21 @@ export function registerClaudeAPI(app, io, authMiddleware) {
     const subscribedSessions = new Set();
 
     // Join direct session room — allow pre-subscription for cold start
+    // On reconnect, replay any buffered events the client missed
     socket.on('direct-subscribe', (data) => {
       if (data.sessionId) {
         socket.join(`direct:${data.sessionId}`);
         subscribedSessions.add(data.sessionId);
+
+        // Replay buffered events (client sends sinceTs to avoid duplicates)
+        const sinceTs = data.sinceTs || 0;
+        const missed = getBufferedEvents(data.sessionId, sinceTs);
+        if (missed.length > 0) {
+          console.log(`[replay] ${data.sessionId.slice(0,8)}: ${missed.length} buffered events (since ${sinceTs})`);
+          for (const { event, data: eventData } of missed) {
+            socket.emit(event, eventData);
+          }
+        }
       }
     });
 

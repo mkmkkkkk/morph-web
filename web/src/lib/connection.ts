@@ -51,6 +51,8 @@ interface RelayConn {
 const relayConns = new Map<string, RelayConn>();
 const sessionRelayMap = new Map<string, string>(); // sessionId → relayId
 const sessionListeners = new Map<string, Set<Listener>>();
+// Track last seen event timestamp per session for replay dedup
+const lastSeenTs = new Map<string, number>();
 const stateListeners = new Set<StateListener>(); // global (tracks primary relay)
 const compactListeners = new Set<() => void>();
 type PermissionListener = (sessionId: string, tools: any[]) => void;
@@ -96,7 +98,7 @@ export function subscribe(sessionId: string, fn: Listener): () => void {
   if (!sessionListeners.has(sessionId)) sessionListeners.set(sessionId, new Set());
   sessionListeners.get(sessionId)!.add(fn);
   const relay = relayFor(sessionId);
-  if (relay.socket?.connected) relay.socket.emit('direct-subscribe', { sessionId });
+  if (relay.socket?.connected) relay.socket.emit('direct-subscribe', { sessionId, sinceTs: lastSeenTs.get(sessionId) || 0 });
   return () => {
     sessionListeners.get(sessionId)?.delete(fn);
     if (sessionListeners.get(sessionId)?.size === 0) sessionListeners.delete(sessionId);
@@ -167,12 +169,12 @@ function connectRelaySocket(relayId: string): void {
     clog('connected', `relay=${relayId} id=${conn.socket!.id}`);
     // Re-subscribe all sessions belonging to this relay
     for (const [sid, rid] of sessionRelayMap.entries()) {
-      if (rid === relayId) conn.socket!.emit('direct-subscribe', { sessionId: sid });
+      if (rid === relayId) conn.socket!.emit('direct-subscribe', { sessionId: sid, sinceTs: lastSeenTs.get(sid) || 0 });
     }
     // Primary also re-subscribes unmapped sessions (legacy compat)
     if (relayId === PRIMARY) {
       for (const sid of sessionListeners.keys()) {
-        if (!sessionRelayMap.has(sid)) conn.socket!.emit('direct-subscribe', { sessionId: sid });
+        if (!sessionRelayMap.has(sid)) conn.socket!.emit('direct-subscribe', { sessionId: sid, sinceTs: lastSeenTs.get(sid) || 0 });
       }
     }
     setConnState('connected');
@@ -181,10 +183,17 @@ function connectRelaySocket(relayId: string): void {
   conn.socket.on('connect_error', (err) => { clog('connect_error', `relay=${relayId} err=${err.message}`); setConnState('error'); });
   conn.socket.io.on('reconnect_attempt', (n: number) => clog('reconnect_attempt', `relay=${relayId} attempt=${n}`));
   conn.socket.io.on('reconnect', () => clog('reconnect_ok', `relay=${relayId}`));
-  conn.socket.on('claude-compact', () => compactListeners.forEach(fn => fn()));
+  conn.socket.on('claude-compact', (data: any) => {
+    const sid = data?.sessionId;
+    const ts = data?.ts;
+    if (sid && ts) lastSeenTs.set(sid, ts);
+    compactListeners.forEach(fn => fn());
+  });
 
   conn.socket.on('claude-output', (data: any) => {
     const sid = data?.sessionId;
+    const ts = data?.ts || data?.data?.ts;
+    if (sid && ts) lastSeenTs.set(sid, ts);
     const msgs = parseOutput(data);
     if (sid) msgs.forEach(m => routeMessage(sid, m));
   });
@@ -207,11 +216,15 @@ function connectRelaySocket(relayId: string): void {
   });
   conn.socket.on('claude-error', (data: any) => {
     const sid = data?.sessionId;
+    const ts = data?.ts;
+    if (sid && ts) lastSeenTs.set(sid, ts);
     const msg: Message = { id: uid(), role: 'system', type: 'error', content: data.text || 'Error', ts: Date.now() };
     if (sid) routeMessage(sid, msg);
   });
   conn.socket.on('claude-exit', (data: any) => {
     const sid = data?.sessionId;
+    const ts = data?.ts;
+    if (sid && ts) lastSeenTs.set(sid, ts);
     const msg: Message = { id: uid(), role: 'system', type: 'status', content: `--- exit ${data.code} ---`, ts: Date.now() };
     if (sid) routeMessage(sid, msg);
   });
@@ -302,7 +315,7 @@ export function getRelayState(id: string): ConnectionState {
 export function registerSession(sessionId: string, relayId: string): void {
   sessionRelayMap.set(sessionId, relayId);
   const conn = relayConns.get(relayId);
-  if (conn?.socket?.connected) conn.socket.emit('direct-subscribe', { sessionId });
+  if (conn?.socket?.connected) conn.socket.emit('direct-subscribe', { sessionId, sinceTs: lastSeenTs.get(sessionId) || 0 });
 }
 
 // ─── Session operations (relay-aware) ───
@@ -318,7 +331,7 @@ export async function resumeSession(sid: string, text: string): Promise<string> 
   const data = await relayPost(relayId, '/v2/claude/resume', { resumeFrom: sid, message: text, cwd: '/workspace' });
   const newSid = data.sessionId || sid;
   const conn = relayConns.get(relayId);
-  if (conn?.socket?.connected) conn.socket.emit('direct-subscribe', { sessionId: newSid });
+  if (conn?.socket?.connected) conn.socket.emit('direct-subscribe', { sessionId: newSid, sinceTs: lastSeenTs.get(newSid) || 0 });
   // Track new session → same relay (no listener migration — caller re-subscribes)
   if (newSid !== sid) sessionRelayMap.set(newSid, relayId);
   return newSid;
@@ -426,7 +439,7 @@ export async function connect(): Promise<void> {
         sessionId: FIXED_SESSION,
         cwd: '/workspace',
       });
-      if (primary.socket?.connected) primary.socket.emit('direct-subscribe', { sessionId: FIXED_SESSION });
+      if (primary.socket?.connected) primary.socket.emit('direct-subscribe', { sessionId: FIXED_SESSION, sinceTs: lastSeenTs.get(FIXED_SESSION) || 0 });
     }
 
     // Connect secondary relays saved from previous session
