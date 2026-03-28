@@ -171,10 +171,11 @@ function connectRelaySocket(relayId: string): void {
     for (const [sid, rid] of sessionRelayMap.entries()) {
       if (rid === relayId) conn.socket!.emit('direct-subscribe', { sessionId: sid, sinceTs: lastSeenTs.get(sid) || 0 });
     }
-    // Primary also re-subscribes unmapped sessions (legacy compat)
-    if (relayId === PRIMARY) {
-      for (const sid of sessionListeners.keys()) {
-        if (!sessionRelayMap.has(sid)) conn.socket!.emit('direct-subscribe', { sessionId: sid, sinceTs: lastSeenTs.get(sid) || 0 });
+    // Re-subscribe active listener sessions mapped to this relay (or unmapped → PRIMARY)
+    for (const sid of sessionListeners.keys()) {
+      const mapped = sessionRelayMap.get(sid);
+      if (mapped === relayId || (!mapped && relayId === PRIMARY)) {
+        conn.socket!.emit('direct-subscribe', { sessionId: sid, sinceTs: lastSeenTs.get(sid) || 0 });
       }
     }
     setConnState('connected');
@@ -400,6 +401,10 @@ export async function fetchAllSessions(): Promise<any[]> {
         s.relayId = relayId;
         s.relayLabel = relayId === PRIMARY ? null : (conn.config.label || relayId);
         sessionRelayMap.set(s.id, relayId);
+        // Auto-subscribe if we have active listeners for this session
+        if (sessionListeners.has(s.id) && conn.socket?.connected) {
+          conn.socket.emit('direct-subscribe', { sessionId: s.id, sinceTs: lastSeenTs.get(s.id) || 0 });
+        }
       });
       return sessions;
     })
@@ -439,8 +444,10 @@ export async function connect(): Promise<void> {
         sessionId: FIXED_SESSION,
         cwd: '/workspace',
       });
-      if (primary.socket?.connected) primary.socket.emit('direct-subscribe', { sessionId: FIXED_SESSION, sinceTs: lastSeenTs.get(FIXED_SESSION) || 0 });
     }
+
+    // Always ensure FIXED_SESSION is subscribed (covers alive=true case too)
+    if (primary.socket?.connected) primary.socket.emit('direct-subscribe', { sessionId: FIXED_SESSION, sinceTs: lastSeenTs.get(FIXED_SESSION) || 0 });
 
     // Connect secondary relays saved from previous session
     loadSavedRelays();

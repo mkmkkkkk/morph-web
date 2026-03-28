@@ -738,7 +738,8 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
         onClick={() => setExpanded(v => !v)}
         style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: expanded ? 6 : 0, cursor: 'pointer', pointerEvents: 'auto' }}
       >
-        <span style={{ color: '#777', fontSize: 11, fontWeight: 600, textTransform: 'uppercase' as const, letterSpacing: 0.5 }}>
+        <span style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: env.id === 'workspace' ? '#636AFF' : env.id === 'tensor-revive' ? '#30d158' : '#ff9f0a', flexShrink: 0 }} />
+        <span style={{ color: '#999', fontSize: 11, fontWeight: 600, textTransform: 'uppercase' as const, letterSpacing: 0.5 }}>
           {env.label} ({sessions.length})
         </span>
         {unviewedCount > 0 && <span style={{ fontSize: 9, color: '#ffcc00' }}>{unviewedCount} new</span>}
