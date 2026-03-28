@@ -949,41 +949,23 @@ export function registerClaudeAPI(app, io, authMiddleware) {
     const allSessions = listClaudeSessions(cwd);
     const activeIds = new Set(active.keys());
 
-    // Build projectDir path for exit-content checking
-    const projectId = resolve(cwd).replace(/[\\\/.:]/g, '-');
-    const claudeDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
-    const projectDir = join(claudeDir, 'projects', projectId);
-
-    // Only show sessions with a real process running:
-    // 1. Relay-spawned active sessions (tracked in `active` map)
-    // 2. Terminal sessions: count claude PIDs whose CWD matches this project,
-    //    filter out exited sessions and stale sessions (not written in 4h),
-    //    then take the N most recently modified JSONL files.
-    const termPids = _getTerminalClaudePidsForCwd(cwd);
-    const termCount = termPids.length;
-    const STALE_CUTOFF = Date.now() - 48 * 60 * 60 * 1000; // 48 hours
-    const terminalIds = new Set(
-      allSessions
-        .filter(s => !_killedIds.has(s.id) && !activeIds.has(s.id))
-        .filter(s => !_isSessionExitedByContent(projectDir, s.id))
-        .filter(s => s.updatedAt > STALE_CUTOFF) // only recent sessions can be terminal
-        .slice(0, termCount)  // already sorted by updatedAt desc
-        .map(s => s.id)
-    );
+    // Show relay-managed active sessions + recent resumable sessions.
+    // Terminal PID detection is used only for the count indicator,
+    // NOT for session assignment — we can't reliably map PIDs to session files.
+    const termCount = _getTerminalClaudeCount();
+    const RECENT_CUTOFF = Date.now() - 48 * 60 * 60 * 1000; // 48h
     const sessions = allSessions
-      .filter(s => {
-        if (_killedIds.has(s.id)) return false;
-        return activeIds.has(s.id) || terminalIds.has(s.id);
-      })
+      .filter(s => !_killedIds.has(s.id))
       .slice(0, limit);
 
     for (const s of sessions) {
       s.active = active.has(s.id);
-      s.live = s.active || terminalIds.has(s.id); // terminal sessions are also live
+      s.live = s.active; // only relay-managed sessions are live
       const err = sessionErrors.get(s.id);
       if (err) s.lastError = err.text;
     }
-    return { sessions };
+    console.log(`[sessions] active=${[...activeIds].map(id=>id.slice(0,8))} terminal=${termCount} shown=${sessions.length}`);
+    return { sessions, terminalCount: termCount };
   });
 
   // ─── DEBUG: Show raw ps output for claude processes ───
