@@ -2,3 +2,7 @@ relay/.env
 relay/data/
 relay/node_modules/
 web/node_modules/
+web/test-results/
+.DS_Store
+*.DS_Store
+nohup.out

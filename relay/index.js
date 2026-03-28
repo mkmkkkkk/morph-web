@@ -1,11 +1,15 @@
 import 'dotenv/config';
 import { createServer } from 'http';
+import { resolve, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { initStore } from './store.js';
 import { buildServer } from './server.js';
 import { setupSocketIO } from './socket.js';
 import { registerClaudeAPI } from './claude.js';
 import { buildProxyEnvs, createProxy } from './proxy.js';
 import { verifyToken } from './auth.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const PORT = parseInt(process.env.PORT) || 3000;
 const DB_PATH = process.env.DB_PATH || './data/relay.db';
@@ -26,6 +30,24 @@ const app = buildServer(io);
 // 4b. Register v2 Claude direct API
 const { authMiddleware } = await import('./auth.js');
 registerClaudeAPI(app, io, authMiddleware);
+
+// 4c. Serve web frontend static files (SPA fallback)
+const webDistPath = resolve(__dirname, '../web/dist');
+const fastifyStatic = await import('@fastify/static');
+app.register(fastifyStatic.default, {
+  root: webDistPath,
+  prefix: '/',
+  wildcard: false,
+  decorateReply: false,
+});
+// SPA fallback: non-API routes → index.html
+app.setNotFoundHandler((req, reply) => {
+  if (req.url.startsWith('/v1/') || req.url.startsWith('/v2/')) {
+    reply.code(404).send({ error: 'Not Found' });
+  } else {
+    reply.sendFile('index.html');
+  }
+});
 
 await app.ready();
 
