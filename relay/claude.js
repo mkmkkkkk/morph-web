@@ -549,13 +549,12 @@ function sendInterrupt(sessionId) {
  * Reads ~/.claude/projects/<project_id>/*.jsonl
  * Results cached for SESSIONS_CACHE_TTL ms to avoid repeated filesystem scans.
  */
-function listClaudeSessions(cwd) {
+function listClaudeSessions() {
   const now = Date.now();
   if (_sessionsCache && (now - _sessionsCacheTs) < SESSIONS_CACHE_TTL) return _sessionsCache;
 
-  const projectId = resolve(cwd || '/workspace').replace(/[\\\/.:]/g, '-');
   const claudeDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
-  const projectDir = join(claudeDir, 'projects', projectId);
+  const projectsDir = join(claudeDir, 'projects');
 
   // Build display name index — tail-read last 64KB of history.jsonl (avoids reading multi-MB file)
   const displayMap = new Map();
@@ -583,30 +582,44 @@ function listClaudeSessions(cwd) {
     }
   } catch {}
 
+  // Scan ALL project directories — sessions can be in any project
+  const allFiles = [];
   try {
-    const files = readdirSync(projectDir)
-      .filter(f => f.endsWith('.jsonl'))
-      .map(f => {
-        const id = f.replace('.jsonl', '');
-        const stat = statSync(join(projectDir, f));
-        const meta = displayMap.get(id) || {};
-        return {
-          id,
-          size: stat.size,
-          updatedAt: stat.mtimeMs,
-          display: meta.display || null,
-          project: meta.project || cwd,
-        };
-      })
-      .filter(s => s.size > 0)
-      .sort((a, b) => b.updatedAt - a.updatedAt);
+    const dirs = readdirSync(projectsDir).filter(d => {
+      try { return statSync(join(projectsDir, d)).isDirectory(); } catch { return false; }
+    });
+    for (const dir of dirs) {
+      const dirPath = join(projectsDir, dir);
+      try {
+        const files = readdirSync(dirPath).filter(f => f.endsWith('.jsonl'));
+        for (const f of files) {
+          const id = f.replace('.jsonl', '');
+          const st = statSync(join(dirPath, f));
+          if (st.size === 0) continue;
+          const meta = displayMap.get(id) || {};
+          allFiles.push({
+            id,
+            size: st.size,
+            updatedAt: st.mtimeMs,
+            display: meta.display || null,
+            project: meta.project || dir.replace(/^-/, '/').replace(/-/g, '/'),
+          });
+        }
+      } catch {}
+    }
+  } catch {}
 
-    _sessionsCache = files;
-    _sessionsCacheTs = Date.now();
-    return files;
-  } catch {
-    return [];
+  // Deduplicate by session ID (same session can appear in multiple project dirs) — keep newest
+  const byId = new Map();
+  for (const f of allFiles) {
+    const existing = byId.get(f.id);
+    if (!existing || f.updatedAt > existing.updatedAt) byId.set(f.id, f);
   }
+  const sessions = [...byId.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+
+  _sessionsCache = sessions;
+  _sessionsCacheTs = Date.now();
+  return sessions;
 }
 
 /**
@@ -944,9 +957,8 @@ export function registerClaudeAPI(app, io, authMiddleware) {
   // ─── REST: List sessions (from filesystem) ───
 
   app.get('/v2/claude/sessions', { preHandler: authMiddleware }, async (request) => {
-    const cwd = request.query.cwd || process.env.DEFAULT_CWD || '/workspace';
     const limit = parseInt(request.query.limit) || 20;
-    const allSessions = listClaudeSessions(cwd);
+    const allSessions = listClaudeSessions();
     const activeIds = new Set(active.keys());
 
     // Show relay-managed active sessions + recent resumable sessions.
@@ -971,10 +983,9 @@ export function registerClaudeAPI(app, io, authMiddleware) {
   // ─── DEBUG: Show raw ps output for claude processes ───
   app.get('/v2/claude/debug-ps', { preHandler: authMiddleware }, async (request) => {
     try {
-      const cwd = request.query.cwd || process.env.DEFAULT_CWD || '/workspace';
       let lsofOut = '';
       try { lsofOut = execSync("lsof 2>/dev/null | grep -E '\\.claude.*\\.jsonl'", { encoding: 'utf-8', timeout: 10000, shell: true }); } catch {}
-      const allSessions = listClaudeSessions(cwd);
+      const allSessions = listClaudeSessions();
       const liveIds = [...new Set(active.keys())];
       const cutoff = Date.now() - 4 * 60 * 60 * 1000;
       const recentSessions = allSessions.filter(s => s.updatedAt > cutoff).map(s => s.id);
@@ -989,7 +1000,6 @@ export function registerClaudeAPI(app, io, authMiddleware) {
         liveIds,
         totalSessions: allSessions.length,
         recentSessions,
-        cwd,
         psTree: psTree.trim().split('\n').filter(Boolean),
         parentComms: typeof parentComms === 'string' ? parentComms.trim().split('\n').filter(Boolean) : parentComms,
         terminalCount: _getTerminalClaudeCount(),
