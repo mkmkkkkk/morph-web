@@ -163,10 +163,10 @@ function logError(sessionId, type, detail) {
   if (_errorLog.length > MAX_ERROR_LOG) _errorLog.shift();
 }
 
-// Cache for listClaudeSessions — avoids re-scanning filesystem on every request
+// Cache for listActiveSessions — avoids re-scanning on every request
 let _sessionsCache = null;
 let _sessionsCacheTs = 0;
-const SESSIONS_CACHE_TTL = 120000; // 120s — 291 files × statSync is expensive
+const SESSIONS_CACHE_TTL = 15000; // 15s — only scanning active sessions now, not all 900+ files
 
 // Cache for terminal claude PIDs — avoids double execSync on every request
 let _terminalPids = [];
@@ -545,18 +545,19 @@ function sendInterrupt(sessionId) {
 }
 
 /**
- * List Claude sessions from filesystem.
- * Reads ~/.claude/projects/<project_id>/*.jsonl
- * Results cached for SESSIONS_CACHE_TTL ms to avoid repeated filesystem scans.
+ * Detect truly active sessions: terminal Claude PIDs grouped by CWD,
+ * then pick top-N most recent .jsonl files per project (N = PID count for that CWD).
+ * Also includes relay-managed sessions from the active map.
+ * Cached for SESSIONS_CACHE_TTL ms.
  */
-function listClaudeSessions() {
+function listActiveSessions() {
   const now = Date.now();
   if (_sessionsCache && (now - _sessionsCacheTs) < SESSIONS_CACHE_TTL) return _sessionsCache;
 
   const claudeDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
   const projectsDir = join(claudeDir, 'projects');
 
-  // Build display name index — tail-read last 64KB of history.jsonl (avoids reading multi-MB file)
+  // Build display name index from history.jsonl
   const displayMap = new Map();
   try {
     const historyPath = join(claudeDir, 'history.jsonl');
@@ -567,55 +568,101 @@ function listClaudeSessions() {
     const buf = Buffer.alloc(Math.min(TAIL, stat.size));
     readSync(fd, buf, 0, buf.length, start);
     closeSync(fd);
-    const lines = buf.toString('utf-8').split('\n').filter(l => l.trim());
-    for (const line of lines) {
+    for (const line of buf.toString('utf-8').split('\n').filter(l => l.trim())) {
       try {
         const entry = JSON.parse(line);
         if (entry.sessionId && entry.display) {
-          displayMap.set(entry.sessionId, {
-            display: entry.display,
-            project: entry.project,
-            timestamp: entry.timestamp,
-          });
+          displayMap.set(entry.sessionId, { display: entry.display, project: entry.project });
         }
       } catch {}
     }
   } catch {}
 
-  // Scan ALL project directories — sessions can be in any project
-  const allFiles = [];
-  try {
-    const dirs = readdirSync(projectsDir).filter(d => {
-      try { return statSync(join(projectsDir, d)).isDirectory(); } catch { return false; }
-    });
-    for (const dir of dirs) {
-      const dirPath = join(projectsDir, dir);
-      try {
-        const files = readdirSync(dirPath).filter(f => f.endsWith('.jsonl'));
-        for (const f of files) {
-          const id = f.replace('.jsonl', '');
-          const st = statSync(join(dirPath, f));
-          if (st.size === 0) continue;
-          const meta = displayMap.get(id) || {};
-          allFiles.push({
-            id,
-            size: st.size,
-            updatedAt: st.mtimeMs,
-            display: meta.display || null,
-            project: meta.project || dir.replace(/^-/, '/').replace(/-/g, '/'),
-          });
+  // 1. Get terminal Claude PIDs with their CWDs
+  const termPids = _getTerminalClaudePids();
+  const byCwd = {};
+  if (termPids.length > 0) {
+    try {
+      if (_isDocker) {
+        const readScript = termPids.map(pid => `echo ${pid} $(readlink /proc/${pid}/cwd 2>/dev/null)`).join('; ');
+        const out = execSync(`su - claude-user -c '${readScript}'`, { encoding: 'utf-8', timeout: 3000, shell: true });
+        for (const line of out.split('\n').filter(Boolean)) {
+          const parts = line.trim().split(/\s+/);
+          const cwd = resolve(parts.slice(1).join(' '));
+          (byCwd[cwd] = byCwd[cwd] || []).push(parts[0]);
         }
-      } catch {}
-    }
-  } catch {}
-
-  // Deduplicate by session ID (same session can appear in multiple project dirs) — keep newest
-  const byId = new Map();
-  for (const f of allFiles) {
-    const existing = byId.get(f.id);
-    if (!existing || f.updatedAt > existing.updatedAt) byId.set(f.id, f);
+      } else {
+        const out = execSync(`lsof -a -d cwd -F pn -p ${termPids.join(',')} 2>/dev/null`, { encoding: 'utf-8', timeout: 3000, shell: true });
+        let curPid = null;
+        for (const line of out.split('\n')) {
+          if (line.startsWith('p')) curPid = line.slice(1);
+          else if (line.startsWith('n') && curPid) {
+            const cwd = resolve(line.slice(1));
+            (byCwd[cwd] = byCwd[cwd] || []).push(curPid);
+            curPid = null;
+          }
+        }
+      }
+    } catch {}
   }
-  const sessions = [...byId.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+
+  // 2. For each CWD group, find top N .jsonl files by mtime
+  const result = new Map(); // sessionId → session object
+  for (const [cwd, pids] of Object.entries(byCwd)) {
+    const projectId = resolve(cwd).replace(/[\\\/.:]/g, '-');
+    const projectDir = join(projectsDir, projectId);
+    try {
+      const files = readdirSync(projectDir)
+        .filter(f => f.endsWith('.jsonl') && !f.startsWith('agent-'))
+        .map(f => {
+          const id = f.replace('.jsonl', '');
+          const st = statSync(join(projectDir, f));
+          return { id, size: st.size, updatedAt: st.mtimeMs };
+        })
+        .filter(f => f.size > 0)
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .slice(0, pids.length);
+
+      for (const f of files) {
+        const meta = displayMap.get(f.id) || {};
+        result.set(f.id, {
+          id: f.id,
+          size: f.size,
+          updatedAt: f.updatedAt,
+          display: meta.display || null,
+          project: meta.project || cwd,
+        });
+      }
+    } catch {}
+  }
+
+  // 3. Also include relay-managed sessions from the active map
+  for (const [sid] of active) {
+    if (result.has(sid)) continue;
+    // Find the session file in any project dir
+    try {
+      for (const dir of readdirSync(projectsDir)) {
+        const fp = join(projectsDir, dir, sid + '.jsonl');
+        try {
+          const st = statSync(fp);
+          if (st.size > 0) {
+            const meta = displayMap.get(sid) || {};
+            result.set(sid, {
+              id: sid,
+              size: st.size,
+              updatedAt: st.mtimeMs,
+              display: meta.display || null,
+              project: meta.project || dir.replace(/^-/, '/').replace(/-/g, '/'),
+            });
+            break;
+          }
+        } catch {}
+      }
+    } catch {}
+  }
+
+  const sessions = [...result.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+  console.log(`[sessions] detected ${Object.keys(byCwd).length} CWD groups, ${termPids.length} terminal PIDs → ${sessions.length} sessions`);
 
   _sessionsCache = sessions;
   _sessionsCacheTs = Date.now();
@@ -958,26 +1005,17 @@ export function registerClaudeAPI(app, io, authMiddleware) {
 
   app.get('/v2/claude/sessions', { preHandler: authMiddleware }, async (request) => {
     const limit = parseInt(request.query.limit) || 20;
-    const allSessions = listClaudeSessions();
-    const activeIds = new Set(active.keys());
-
-    // Show relay-managed active sessions + recent resumable sessions.
-    // Terminal PID detection is used only for the count indicator,
-    // NOT for session assignment — we can't reliably map PIDs to session files.
-    const termCount = _getTerminalClaudeCount();
-    const RECENT_CUTOFF = Date.now() - 48 * 60 * 60 * 1000; // 48h
-    const sessions = allSessions
+    const sessions = listActiveSessions()
       .filter(s => !_killedIds.has(s.id))
       .slice(0, limit);
 
     for (const s of sessions) {
       s.active = active.has(s.id);
-      s.live = s.active; // only relay-managed sessions are live
+      s.live = true; // all sessions returned by listActiveSessions are live (terminal or relay-managed)
       const err = sessionErrors.get(s.id);
       if (err) s.lastError = err.text;
     }
-    console.log(`[sessions] active=${[...activeIds].map(id=>id.slice(0,8))} terminal=${termCount} shown=${sessions.length}`);
-    return { sessions, terminalCount: termCount };
+    return { sessions };
   });
 
   // ─── DEBUG: Show raw ps output for claude processes ───
@@ -985,7 +1023,7 @@ export function registerClaudeAPI(app, io, authMiddleware) {
     try {
       let lsofOut = '';
       try { lsofOut = execSync("lsof 2>/dev/null | grep -E '\\.claude.*\\.jsonl'", { encoding: 'utf-8', timeout: 10000, shell: true }); } catch {}
-      const allSessions = listClaudeSessions();
+      const allSessions = listActiveSessions();
       const liveIds = [...new Set(active.keys())];
       const cutoff = Date.now() - 4 * 60 * 60 * 1000;
       const recentSessions = allSessions.filter(s => s.updatedAt > cutoff).map(s => s.id);
