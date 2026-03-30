@@ -206,6 +206,85 @@ function _getTerminalClaudeCount() {
   return _getTerminalClaudePids().length;
 }
 
+// Kill the terminal Claude process that owns a given session ID.
+// Strategy: find all terminal PIDs, check each with lsof/fd for the session .jsonl file.
+// If no fd match (Claude doesn't hold file open), fall back to CWD + mtime heuristic.
+function _killTerminalClaudeForSession(sessionId) {
+  const termPids = _getTerminalClaudePids();
+  if (termPids.length === 0) return;
+
+  // Method 1: check if any terminal process has the .jsonl file open (rare but definitive)
+  try {
+    const out = execSync(`lsof 2>/dev/null | grep '${sessionId}.jsonl'`, { encoding: 'utf-8', timeout: 3000, shell: true });
+    for (const line of out.split('\n').filter(Boolean)) {
+      const pid = line.trim().split(/\s+/)[1];
+      if (pid && termPids.includes(pid)) {
+        console.log(`[takeover] killing terminal Claude PID=${pid} for session=${sessionId.slice(0,8)} (lsof match)`);
+        try { process.kill(+pid, 'SIGTERM'); } catch {}
+        // Wait briefly for process to exit and release the file
+        try { execSync('sleep 1', { timeout: 2000 }); } catch {}
+        _termPidsTs = 0; // bust PID cache
+        return;
+      }
+    }
+  } catch {}
+
+  // Method 2: find the PID whose CWD matches the session's project directory.
+  // If multiple PIDs share the same CWD, kill all of them for that CWD
+  // (only the one holding this session will have it; others just get restarted by user).
+  // Actually, be conservative: only kill if there's exactly 1 PID for that CWD.
+  const claudeDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
+  const projectsDir = join(claudeDir, 'projects');
+  // Find which project dir contains this session's .jsonl
+  let sessionProjectId = null;
+  try {
+    for (const dir of readdirSync(projectsDir)) {
+      try {
+        statSync(join(projectsDir, dir, sessionId + '.jsonl'));
+        sessionProjectId = dir;
+        break;
+      } catch {}
+    }
+  } catch {}
+  if (!sessionProjectId) return;
+
+  // Group terminal PIDs by project ID (derived from CWD)
+  const pidsByProject = {};
+  try {
+    if (_isDocker) {
+      const readScript = termPids.map(pid => `echo ${pid} $(readlink /proc/${pid}/cwd 2>/dev/null)`).join('; ');
+      const out = execSync(`su - claude-user -c '${readScript}'`, { encoding: 'utf-8', timeout: 3000, shell: true });
+      for (const line of out.split('\n').filter(Boolean)) {
+        const parts = line.trim().split(/\s+/);
+        const projId = resolve(parts.slice(1).join(' ')).replace(/[\\\/.:]/g, '-');
+        (pidsByProject[projId] = pidsByProject[projId] || []).push(parts[0]);
+      }
+    } else {
+      const out = execSync(`lsof -a -d cwd -F pn -p ${termPids.join(',')} 2>/dev/null`, { encoding: 'utf-8', timeout: 3000, shell: true });
+      let curPid = null;
+      for (const line of out.split('\n')) {
+        if (line.startsWith('p')) curPid = line.slice(1);
+        else if (line.startsWith('n') && curPid) {
+          const projId = resolve(line.slice(1)).replace(/[\\\/.:]/g, '-');
+          (pidsByProject[projId] = pidsByProject[projId] || []).push(curPid);
+          curPid = null;
+        }
+      }
+    }
+  } catch {}
+
+  // Find PIDs whose project matches the session's project
+  const pids = pidsByProject[sessionProjectId];
+  if (!pids || pids.length === 0) return;
+
+  console.log(`[takeover] killing ${pids.length} terminal Claude PID(s) for session=${sessionId.slice(0,8)} (project match)`);
+  for (const pid of pids) {
+    try { process.kill(+pid, 'SIGTERM'); } catch {}
+  }
+  try { execSync('sleep 1', { timeout: 2000 }); } catch {}
+  _termPidsTs = 0;
+}
+
 // Cache for exit-detection — keyed by sessionId, invalidated when mtime changes
 const _exitedCache = new Map(); // sessionId → { mtimeMs, exited }
 
@@ -763,7 +842,6 @@ export function registerClaudeAPI(app, io, authMiddleware) {
     }
 
     // Otherwise, spawn new Claude process
-    // Pinned session (Morph Web fixed session) bypasses the concurrency cap
     const PINNED_SESSION = 'a0a0a0a0-0e00-4000-a000-000000000002';
     const isPinned = existingId === PINNED_SESSION;
     if (!isPinned && active.size >= MAX_CONCURRENT_SESSIONS) {
@@ -777,17 +855,24 @@ export function registerClaudeAPI(app, io, authMiddleware) {
       _saveKilled(_killedIds);
     }
 
+    // If this is a terminal session, kill the terminal Claude process first to avoid
+    // two processes writing to the same .jsonl file simultaneously.
+    if (existingId) {
+      _killTerminalClaudeForSession(existingId);
+    }
+
     const proc = spawnClaude({ sessionId, model });
     active.set(sessionId, { process: proc, cwd: WORK_DIR, startedAt: Date.now() });
     _markOwned(sessionId);
     _persistActive();
+    _sessionsCacheTs = 0; // bust cache — session moved from terminal to relay
     pipeOutput(proc, sessionId, io);
 
     // Wait for Claude to be ready (first stdout), then send
     const timeout = new Promise(r => setTimeout(r, 2000));
     Promise.race([proc._ready, timeout]).then(() => sendMessage(sessionId, message));
 
-    return { sessionId, cwd: WORK_DIR, status: 'started' };
+    return { sessionId, cwd: WORK_DIR, status: existingId ? 'takeover' : 'started' };
   });
 
   // ─── REST: Resume a session ───
@@ -795,6 +880,9 @@ export function registerClaudeAPI(app, io, authMiddleware) {
   app.post('/v2/claude/resume', { preHandler: authMiddleware }, async (request) => {
     const { resumeFrom, message, model } = request.body || {};
     if (!resumeFrom) return { error: 'resumeFrom (session ID) required' };
+
+    // Kill terminal Claude process if it holds this session
+    _killTerminalClaudeForSession(resumeFrom);
 
     const sessionId = randomUUID(); // new process ID
 

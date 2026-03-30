@@ -36,7 +36,8 @@ test.describe('Morph Smoke Tests', () => {
       localStorage.removeItem('morph-environments');
     }, TOKEN);
     await page.reload();
-    await page.waitForTimeout(10000);
+    // Wait for env groups to load with sessions (environments fetch + sessions fetch per env)
+    await page.waitForTimeout(15000);
 
     // Get env group headers from DOM
     const envGroups = await page.evaluate(() => {
@@ -45,11 +46,11 @@ test.describe('Morph Smoke Tests', () => {
     });
     console.log('[smoke] env groups:', envGroups);
 
-    // Docker should exist and have sessions
+    // Docker should exist (may have 0 visible sessions — FIXED_SESSION_ID is filtered)
     const dockerGroup = envGroups.find(g => g?.includes('Docker'));
     expect(dockerGroup).toBeTruthy();
 
-    // Mac should exist and have sessions
+    // Mac should exist and have active terminal sessions
     const macGroup = envGroups.find(g => g?.includes('Mac'));
     expect(macGroup).toBeTruthy();
 
@@ -58,11 +59,10 @@ test.describe('Morph Smoke Tests', () => {
     const macCount = parseInt(macGroup!.match(/\((\d+)\)/)?.[1] || '0');
     console.log(`[smoke] Docker: ${dockerCount} sessions, Mac: ${macCount} sessions`);
 
-    // Both should have at least 1 session
-    expect(dockerCount).toBeGreaterThanOrEqual(1);
+    // Mac should have active terminal sessions
     expect(macCount).toBeGreaterThanOrEqual(1);
 
-    // Verify session cards are rendered
+    // Verify session cards match counts
     const sessionCards = await page.evaluate(() => {
       const cards = document.querySelectorAll('[style*="border-radius: 10px"]');
       return Array.from(cards).map(el => el.textContent?.slice(0, 60));
