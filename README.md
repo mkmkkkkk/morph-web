@@ -1,6 +1,6 @@
 # Morph
 
-Phone-to-terminal sync for Claude Code, built on the [Happy Coder](https://github.com/mkmkkkkk/morph) dual-mode architecture.
+Phone-to-terminal sync for Claude Code, built on the [Happy Coder](https://www.happycoder.ai/) dual-mode architecture.
 
 ## Architecture
 
@@ -70,4 +70,4 @@ cd web && npm install && npm run dev
 
 ## Credits
 
-Architecture inspired by Happy Coder's dual-mode loop pattern — local/remote alternation with seamless handoff between phone and terminal sessions.
+Architecture inspired by [Happy Coder](https://www.happycoder.ai/)'s dual-mode loop pattern — local/remote alternation with seamless handoff between phone and terminal sessions.

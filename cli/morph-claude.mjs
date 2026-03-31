@@ -35,7 +35,7 @@ const userArgs = rawArgs;
 
 // ── Config ──
 const RELAY_URL = process.env.MORPH_RELAY_URL || 'https://morph.mkyang.ai';
-const TOKEN = process.env.MORPH_TOKEN || 'morph2026';
+const TOKEN = process.env.MORPH_TOKEN || '';
 const PROJECT_ID = resolve(CWD).replace(/[\\\/.:]/g, '-');
 const CLAUDE_DIR = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
 
