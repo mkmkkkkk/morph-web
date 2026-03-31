@@ -21,7 +21,7 @@ export function setupSocketIO(httpServer) {
     transports: ['websocket'],
     pingTimeout: 45000,
     pingInterval: 15000,
-    cors: { origin: ['https://morph.mkyang.ai', 'http://localhost:5173', 'http://localhost:4173'], credentials: true },
+    cors: { origin: (process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:4173').split(','), credentials: true },
   });
 
   // ─── Auth middleware ───
