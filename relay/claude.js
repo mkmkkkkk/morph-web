@@ -785,6 +785,9 @@ _collectOrphans();
 
 export function registerClaudeAPI(app, io, authMiddleware) {
 
+  // Phone's pinned session ID — maps to any connected terminal wrapper
+  const FIXED_SESSION = 'a0a0a0a0-0e00-4000-a000-000000000002';
+
   // Kill orphaned sessions and re-spawn with pipes now that io is available
   if (_pendingOrphans.length > 0) _restoreWithResume(io);
 
@@ -821,7 +824,27 @@ export function registerClaudeAPI(app, io, authMiddleware) {
     const { message, sessionId: existingId, model } = request.body || {};
     if (!message) return { error: 'message required' };
 
-    // If session exists and process is alive, send to stdin
+    // Priority 1: terminal wrapper (morph-claude CLI) holds the Claude stdin pipe
+    if (existingId) {
+      const termSocket = terminalClients.get(existingId);
+      console.log(`[send] existingId=${existingId?.slice(0,8)} terminalClients.size=${terminalClients.size} keys=[${[...terminalClients.keys()].map(k=>k.slice(0,8)).join(',')}] match=${!!termSocket} connected=${termSocket?.connected}`);
+      if (termSocket && termSocket.connected) {
+        console.log(`[send] routing to terminal wrapper (exact) ${existingId.slice(0,8)}`);
+        termSocket.emit('remote-message', { message, from: 'phone', ts: Date.now() });
+        return { sessionId: existingId, status: 'remote' };
+      }
+    }
+
+    // Priority 1b: any connected terminal wrapper — route there regardless of session ID
+    for (const [sid, sock] of terminalClients) {
+      if (sock.connected) {
+        console.log(`[send] routing to terminal wrapper (fallback) ${sid.slice(0,8)} (requested=${existingId?.slice(0,8)})`);
+        sock.emit('remote-message', { message, from: 'phone', ts: Date.now() });
+        return { sessionId: sid, status: 'remote' };
+      }
+    }
+
+    // Priority 2: relay-managed session with active process
     if (existingId && active.has(existingId)) {
       const result = sendMessage(existingId, message);
       // Orphaned terminal session — auto-resume with a new process
@@ -855,12 +878,6 @@ export function registerClaudeAPI(app, io, authMiddleware) {
       _saveKilled(_killedIds);
     }
 
-    // If this is a terminal session, kill the terminal Claude process first to avoid
-    // two processes writing to the same .jsonl file simultaneously.
-    if (existingId) {
-      _killTerminalClaudeForSession(existingId);
-    }
-
     const proc = spawnClaude({ sessionId, model });
     active.set(sessionId, { process: proc, cwd: WORK_DIR, startedAt: Date.now() });
     _markOwned(sessionId);
@@ -881,8 +898,24 @@ export function registerClaudeAPI(app, io, authMiddleware) {
     const { resumeFrom, message, model } = request.body || {};
     if (!resumeFrom) return { error: 'resumeFrom (session ID) required' };
 
-    // Kill terminal Claude process if it holds this session
-    _killTerminalClaudeForSession(resumeFrom);
+    // Priority 1: exact match — terminal wrapper holds this session ID
+    const termSocket = terminalClients.get(resumeFrom);
+    console.log(`[resume] resumeFrom=${resumeFrom.slice(0,8)} terminalClients.size=${terminalClients.size} keys=[${[...terminalClients.keys()].map(k=>k.slice(0,8)).join(',')}] match=${!!termSocket} connected=${termSocket?.connected}`);
+    if (termSocket && termSocket.connected) {
+      console.log(`[resume] routing to terminal wrapper (exact) ${resumeFrom.slice(0,8)}`);
+      termSocket.emit('remote-message', { message: message || '', from: 'phone', ts: Date.now() });
+      return { sessionId: resumeFrom, status: 'remote' };
+    }
+
+    // Priority 1b: any connected terminal wrapper — route message there regardless of session ID
+    // This ensures phone messages always reach the Mac terminal if it's online
+    for (const [sid, sock] of terminalClients) {
+      if (sock.connected) {
+        console.log(`[resume] routing to terminal wrapper (fallback) ${sid.slice(0,8)} (requested=${resumeFrom.slice(0,8)})`);
+        sock.emit('remote-message', { message: message || '', from: 'phone', ts: Date.now() });
+        return { sessionId: sid, status: 'remote' };
+      }
+    }
 
     const sessionId = randomUUID(); // new process ID
 
@@ -907,6 +940,23 @@ export function registerClaudeAPI(app, io, authMiddleware) {
   app.post('/v2/claude/interrupt', { preHandler: authMiddleware }, async (request) => {
     const { sessionId } = request.body || {};
     if (!sessionId) return { error: 'sessionId required' };
+
+    // Terminal wrapper — forward interrupt
+    const termSocket = terminalClients.get(sessionId);
+    if (termSocket && termSocket.connected) {
+      termSocket.emit('terminal-interrupt', { sessionId });
+      return { ok: true, method: 'terminal' };
+    }
+    // Also handle FIXED_SESSION
+    if (sessionId === FIXED_SESSION) {
+      for (const [sid, sock] of terminalClients) {
+        if (sock.connected) {
+          sock.emit('terminal-interrupt', { sessionId: sid });
+          return { ok: true, method: 'terminal' };
+        }
+      }
+    }
+
     return sendInterrupt(sessionId);
   });
 
@@ -938,6 +988,34 @@ export function registerClaudeAPI(app, io, authMiddleware) {
   app.post('/v2/claude/stop', { preHandler: authMiddleware }, async (request) => {
     const { sessionId } = request.body || {};
     if (!sessionId) return { error: 'sessionId required' };
+
+    // 0) Terminal wrapper — tell wrapper to exit cleanly
+    const termSocket = terminalClients.get(sessionId);
+    if (termSocket && termSocket.connected) {
+      termSocket.emit('terminal-stop', { sessionId });
+      terminalClients.delete(sessionId);
+      terminalMeta.delete(sessionId);
+      _killedIds.add(sessionId);
+      _saveKilled(_killedIds);
+      _sessionsCacheTs = 0;
+      return { ok: true, method: 'terminal' };
+    }
+
+    // Also handle FIXED_SESSION (phone's pinned session) — maps to any terminal
+    if (sessionId === FIXED_SESSION) {
+      for (const [sid, sock] of terminalClients) {
+        if (sock.connected) {
+          sock.emit('terminal-stop', { sessionId: sid });
+          terminalClients.delete(sid);
+          terminalMeta.delete(sid);
+          break;
+        }
+      }
+      _killedIds.add(sessionId);
+      _saveKilled(_killedIds);
+      _sessionsCacheTs = 0;
+      return { ok: true, method: 'terminal' };
+    }
 
     // 1) Relay-managed — direct SIGTERM
     const session = active.get(sessionId);
@@ -1093,9 +1171,11 @@ export function registerClaudeAPI(app, io, authMiddleware) {
 
   app.get('/v2/claude/sessions', { preHandler: authMiddleware }, async (request) => {
     const limit = parseInt(request.query.limit) || 20;
-    const sessions = listActiveSessions()
-      .filter(s => !_killedIds.has(s.id))
-      .slice(0, limit);
+    const projectFilter = request.query.project || '';  // optional project path substring filter
+    let sessions = listActiveSessions()
+      .filter(s => !_killedIds.has(s.id));
+
+    const sessionIds = new Set(sessions.map(s => s.id));
 
     for (const s of sessions) {
       s.active = active.has(s.id);
@@ -1103,7 +1183,46 @@ export function registerClaudeAPI(app, io, authMiddleware) {
       const err = sessionErrors.get(s.id);
       if (err) s.lastError = err.text;
     }
-    return { sessions };
+
+    // Include terminal-registered sessions (remote wrappers like morph-claude)
+    for (const [sid, sock] of terminalClients) {
+      if (sessionIds.has(sid) || _killedIds.has(sid)) continue;
+      if (!sock.connected) continue;
+      const meta = terminalMeta.get(sid) || {};
+      sessions.push({
+        id: sid,
+        size: 0,
+        updatedAt: meta.registeredAt || Date.now(),
+        display: null,
+        project: meta.cwd || meta.projectId || 'remote',
+        active: true,
+        live: true,
+        terminal: true, // flag as terminal-managed session
+      });
+    }
+
+    // Filter by project path substring if requested
+    if (projectFilter) {
+      sessions = sessions.filter(s => s.project && s.project.includes(projectFilter));
+    }
+
+    // Deduplicate: within same project, if multiple sessions share the same display name, keep only the most recent
+    const deduped = [];
+    const seen = new Map(); // key: `${project}:::${display}` → index in deduped
+    sessions.sort((a, b) => b.updatedAt - a.updatedAt);
+    for (const s of sessions) {
+      if (s.display) {
+        const key = `${s.project || ''}:::${s.display}`;
+        if (seen.has(key)) {
+          // Already have a more recent session with same project+display — skip this one
+          continue;
+        }
+        seen.set(key, deduped.length);
+      }
+      deduped.push(s);
+    }
+
+    return { sessions: deduped.slice(0, limit) };
   });
 
   // ─── DEBUG: Show raw ps output for claude processes ───
@@ -1151,6 +1270,17 @@ export function registerClaudeAPI(app, io, authMiddleware) {
         startedAt: s.startedAt,
         alive: !s.process.killed,
       });
+    }
+    // Include terminal wrapper sessions — phone checks isSessionAlive(FIXED_SESSION)
+    // and skips system prompt injection when a terminal is connected.
+    // Report ANY connected terminal as alive for FIXED_SESSION so the phone knows.
+    if (!sessions.some(s => s.id === FIXED_SESSION)) {
+      for (const [sid, sock] of terminalClients) {
+        if (sock.connected) {
+          sessions.push({ id: FIXED_SESSION, cwd: '/workspace', alive: true, terminal: sid.slice(0, 8) });
+          break;
+        }
+      }
     }
     return { sessions };
   });
@@ -1316,11 +1446,18 @@ export function registerClaudeAPI(app, io, authMiddleware) {
     return { ok: true };
   });
 
+  // ─── Terminal clients: morph-claude wrappers that hold stdin pipes ───
+  // Map: sessionId → socket (terminal wrapper that owns the Claude process)
+  const terminalClients = new Map();
+  // Map: sessionId → { cwd, projectId, pid, registeredAt }
+  const terminalMeta = new Map();
+
   // ─── Socket.IO: direct mode events ───
 
   io.on('connection', (socket) => {
     // Track which sessions this socket has subscribed to
     const subscribedSessions = new Set();
+    let terminalSessionId = null; // if this socket is a terminal wrapper
 
     // Join direct session room — allow pre-subscription for cold start
     // On reconnect, replay any buffered events the client missed
@@ -1343,10 +1480,21 @@ export function registerClaudeAPI(app, io, authMiddleware) {
       }
     });
 
-    // Send message via Socket.IO — only to sessions this socket owns
+    // Send message via Socket.IO — route to terminal wrapper if available, else relay-managed
     socket.on('direct-send', (data) => {
       const { sessionId, message } = data;
-      if (sessionId && message && subscribedSessions.has(sessionId)) {
+      if (!sessionId || !message) return;
+
+      // Priority 1: terminal wrapper holds the Claude process stdin
+      const termSocket = terminalClients.get(sessionId);
+      if (termSocket && termSocket.connected) {
+        console.log(`[relay] routing message to terminal wrapper ${sessionId.slice(0,8)}`);
+        termSocket.emit('remote-message', { message, from: 'phone', ts: Date.now() });
+        return;
+      }
+
+      // Priority 2: relay-managed session
+      if (subscribedSessions.has(sessionId)) {
         sendMessage(sessionId, message);
       }
     });
@@ -1377,6 +1525,59 @@ export function registerClaudeAPI(app, io, authMiddleware) {
       console.log(`[claude:${data.sessionId.slice(0,8)}] denied — SIGCONT + SIGINT`);
       try { entry.process.kill('SIGCONT'); } catch {}
       setTimeout(() => { try { sendInterrupt(data.sessionId); } catch {} }, 100);
+    });
+
+    // ─── Terminal wrapper registration (morph-claude CLI) ───
+    socket.on('terminal-register', (data) => {
+      if (!data.sessionId) return;
+      terminalSessionId = data.sessionId;
+      terminalClients.set(data.sessionId, socket);
+      terminalMeta.set(data.sessionId, {
+        cwd: data.cwd || '',
+        projectId: data.projectId || '',
+        pid: data.pid,
+        registeredAt: Date.now(),
+      });
+      // Also join the direct room so phone subscribers see terminal output
+      socket.join(`direct:${data.sessionId}`);
+      console.log(`[terminal] registered ${data.sessionId.slice(0,8)} pid=${data.pid} cwd=${data.cwd}`);
+    });
+
+    // Terminal forwards Claude output events → relay → phone subscribers
+    socket.on('terminal-output', (data) => {
+      if (!data.sessionId) return;
+      const room = io.sockets.adapter.rooms.get(`direct:${data.sessionId}`);
+      console.log(`[terminal-output] ${data.sessionId.slice(0,8)} type=${data.data?.type} room_size=${room?.size || 0}`);
+      // Forward to phone clients watching this session (but not back to terminal)
+      socket.to(`direct:${data.sessionId}`).emit('claude-output', {
+        sessionId: data.sessionId,
+        data: data.data,
+        ts: data.ts || Date.now(),
+      });
+      bufferEvent(data.sessionId, 'claude-output', {
+        sessionId: data.sessionId,
+        data: data.data,
+        ts: data.ts || Date.now(),
+      });
+    });
+
+    // Terminal reports result complete
+    socket.on('terminal-result', (data) => {
+      if (!data.sessionId) return;
+      socket.to(`direct:${data.sessionId}`).emit('claude-output', {
+        sessionId: data.sessionId,
+        data: data.result,
+        ts: Date.now(),
+      });
+    });
+
+    // Cleanup on disconnect
+    socket.on('disconnect', () => {
+      if (terminalSessionId) {
+        terminalClients.delete(terminalSessionId);
+        terminalMeta.delete(terminalSessionId);
+        console.log(`[terminal] disconnected ${terminalSessionId.slice(0,8)}`);
+      }
     });
   });
 }

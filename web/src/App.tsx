@@ -892,25 +892,235 @@ function UsageWidget() {
   );
 }
 
-// Canvas overlay — renders all environment groups
+// Color palette for project groups — deterministic via hash
+const PROJECT_COLORS = ['#636AFF', '#30d158', '#ff9f0a', '#bf5af2', '#ff6482'];
+function projectColor(project: string): string {
+  let hash = 0;
+  for (let i = 0; i < project.length; i++) hash = ((hash << 5) - hash + project.charCodeAt(i)) | 0;
+  return PROJECT_COLORS[Math.abs(hash) % PROJECT_COLORS.length];
+}
+function projectLabel(project: string): string {
+  if (!project) return 'Unknown';
+  const parts = project.replace(/\/+$/, '').split('/');
+  return parts[parts.length - 1] || project;
+}
+
+// Canvas overlay — auto-groups sessions by project
 function SessionCards({ onSelect, onNewSession }: { onSelect: (sessionId: string, display?: string, relayUrl?: string, relayToken?: string, project?: string, envId?: string) => void; onNewSession?: (envId: string, relayUrl?: string, relayToken?: string) => void }) {
-  const [envs, setEnvs] = useState<EnvConfig[]>(getEnvironments);
+  const [groups, setGroups] = useState<{ project: string; sessions: any[] }[]>([]);
+  const [viewed, setViewed] = useState<Set<string>>(getViewed);
+  const [pinned, setPinned] = useState<Set<string>>(() => getPinned('workspace'));
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [visKey, setVisKey] = useState(_visResumeCount);
+  const [killTarget, setKillTarget] = useState<any>(null);
+  const [newSessionProject, setNewSessionProject] = useState<string | null>(null);
+  const killedRef = useRef<Set<string>>(null);
+  if (!killedRef.current) {
+    try { killedRef.current = new Set(JSON.parse(localStorage.getItem('morph-killed') || '[]')); } catch { killedRef.current = new Set(); }
+  }
+
+  // Listen for visibility resume
   useEffect(() => {
-    const onStorage = () => setEnvs(getEnvironments());
-    window.addEventListener('storage', onStorage);
-    // Also poll for same-tab changes (localStorage events don't fire in same tab)
-    // Only update state when value actually changed to avoid re-rendering all EnvironmentGroups
-    const interval = setInterval(() => {
-      const next = getEnvironments();
-      setEnvs(prev => JSON.stringify(prev) === JSON.stringify(next) ? prev : next);
-    }, 5000);
-    return () => { window.removeEventListener('storage', onStorage); clearInterval(interval); };
+    const onVis = () => { if (document.visibilityState === 'visible') setVisKey(_visResumeCount); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
   }, []);
+
+  // Fetch all sessions and group by project
+  useEffect(() => {
+    const token = localStorage.getItem('morph-auth') || '';
+    const cacheKey = 'all-sessions';
+
+    const apply = (d: any) => {
+      const all: any[] = d.sessions || [];
+      const killed = killedRef.current!;
+      const filtered = all.filter((s: any) => s.id !== FIXED_SESSION_ID && !killed.has(s.id));
+
+      // Group by project
+      const map = new Map<string, any[]>();
+      for (const s of filtered) {
+        const proj = s.project || 'unknown';
+        if (!map.has(proj)) map.set(proj, []);
+        map.get(proj)!.push(s);
+      }
+
+      // Sort sessions within each group by updatedAt desc
+      const grouped: { project: string; sessions: any[] }[] = [];
+      for (const [proj, sess] of map) {
+        sess.sort((a: any, b: any) => b.updatedAt - a.updatedAt);
+        grouped.push({ project: proj, sessions: sess });
+      }
+      // Sort groups by most recent session first
+      grouped.sort((a, b) => {
+        const aMax = a.sessions[0]?.updatedAt || 0;
+        const bMax = b.sessions[0]?.updatedAt || 0;
+        return bMax - aMax;
+      });
+      setGroups(grouped);
+    };
+
+    const cached = envSessionsCache.get(cacheKey);
+    const age = cached ? Date.now() - cached.ts : Infinity;
+    if (cached && age < STALE_TTL) { apply(cached.data); return; }
+    if (cached && age < MAX_TTL) { apply(cached.data); }
+
+    fetch(`/v2/claude/sessions?limit=50`, { headers: { 'Authorization': `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(d => {
+        envSessionsCache.set(cacheKey, { data: d, ts: Date.now() });
+        apply(d);
+      })
+      .catch(() => {});
+  }, [visKey]);
+
+  const isExpanded = (proj: string, idx: number) => expanded[proj] !== undefined ? expanded[proj] : idx < 3;
+  const toggleExpanded = (proj: string) => setExpanded(prev => ({ ...prev, [proj]: !(prev[proj] !== undefined ? prev[proj] : true) }));
+
+  const dotColor = (s: any) => hasUnread(s) ? '#ffcc00' : '#555';
+  const borderColor = (s: any) => hasUnread(s) ? 'rgba(255,204,0,0.2)' : 'rgba(255,255,255,0.08)';
+
+  const handleSelect = (id: string) => {
+    markViewed(id);
+    setViewed(getViewed());
+    // Find which group this session belongs to
+    let session: any = null;
+    for (const g of groups) {
+      session = g.sessions.find(x => x.id === id);
+      if (session) break;
+    }
+    onSelect(id, session?.display, undefined, undefined, session?.project, 'workspace');
+  };
+
+  const sessionLongPress = (s: any) => {
+    let timer: any = null;
+    let fired = false;
+    const showKill = () => {
+      fired = true;
+      dbg(`[longpress] fired for ${(s.display || s.id).slice(0, 12)}`);
+      setKillTarget(s);
+    };
+    return {
+      onTouchStart: () => { fired = false; timer = setTimeout(showKill, 800); },
+      onTouchEnd: () => { clearTimeout(timer); },
+      onTouchMove: () => { clearTimeout(timer); },
+      onMouseDown: () => { fired = false; timer = setTimeout(showKill, 800); },
+      onMouseUp: () => { clearTimeout(timer); },
+      onMouseLeave: () => { clearTimeout(timer); },
+      onContextMenu: (e: any) => e.preventDefault(),
+      onClick: (e: any) => { if (fired) { e.stopPropagation(); fired = false; } else { handleSelect(s.id); } },
+    };
+  };
+
+  const confirmKill = () => {
+    if (!killTarget) return;
+    const sid = killTarget.id;
+    dbg(`[kill] confirmed ${(killTarget.display || sid).slice(0, 12)}`);
+    stopSession(sid);
+    killedRef.current!.add(sid);
+    try { localStorage.setItem('morph-killed', JSON.stringify([...killedRef.current!])); } catch {}
+    setGroups(prev => prev.map(g => ({ ...g, sessions: g.sessions.filter(s => s.id !== sid) })).filter(g => g.sessions.length > 0));
+    envSessionsCache.delete('all-sessions');
+    setKillTarget(null);
+  };
+
   return (
     <div style={{ position: 'absolute', top: 90, left: 0, right: 0, bottom: 0, zIndex: 2, padding: '0 8px', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
-      {envs.map(env => (
-        <EnvironmentGroup key={env.id} env={env} onSelect={onSelect} onNewSession={onNewSession} />
-      ))}
+      {groups.map((g, gIdx) => {
+        const open = isExpanded(g.project, gIdx);
+        const unviewedCount = g.sessions.filter(s => !viewed.has(s.id)).length;
+        const color = projectColor(g.project);
+        return (
+          <div key={g.project} style={{ marginBottom: 12, pointerEvents: 'none', userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none' }}>
+            <div
+              onClick={() => toggleExpanded(g.project)}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: open ? 6 : 0, cursor: 'pointer', pointerEvents: 'auto' }}
+            >
+              <span style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: color, flexShrink: 0 }} />
+              <span style={{ color: '#999', fontSize: 11, fontWeight: 600, textTransform: 'uppercase' as const, letterSpacing: 0.5 }}>
+                {projectLabel(g.project)} ({g.sessions.length})
+              </span>
+              {unviewedCount > 0 && <span style={{ fontSize: 9, color: '#ffcc00' }}>{unviewedCount} new</span>}
+              <span style={{ color: '#888', fontSize: 10 }}>{open ? '\u25BE' : '\u25B8'}</span>
+              <span
+                onClick={(e) => { e.stopPropagation(); setNewSessionProject(g.project); }}
+                style={{ marginLeft: 'auto', color: '#fff', fontSize: 20, lineHeight: 1, padding: '6px 10px', margin: '-6px -10px', cursor: 'pointer', userSelect: 'none', pointerEvents: 'auto', WebkitTapHighlightColor: 'transparent' }}
+              >+</span>
+            </div>
+            <AnimatePresence>
+              {open && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  style={{ overflow: 'hidden', pointerEvents: 'auto' }}
+                >
+                  {g.sessions.length === 0 && (
+                    <div style={{ color: '#555', fontSize: 12, padding: '8px 4px' }}>No sessions</div>
+                  )}
+                  {g.sessions.map(s => (
+                    <motion.div
+                      key={s.id}
+                      whileTap={{ scale: 0.98 }}
+                      {...sessionLongPress(s)}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        padding: '12px 10px', marginBottom: 4,
+                        backgroundColor: 'rgba(28,28,30,0.92)',
+                        borderRadius: 10, cursor: 'pointer',
+                        border: `1px solid ${borderColor(s)}`,
+                        userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none',
+                      }}
+                    >
+                      <div style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: dotColor(s), flexShrink: 0 }} />
+                      {pinned.has(s.id) && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><path d="M12 17v5M9 2h6l1 7h2l-1 4H7L6 9h2z"/></svg>}
+                      <div style={{ flex: 1, overflow: 'hidden', minWidth: 0 }}>
+                        <div style={{ color: '#ddd', fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+                          {s.display || s.id.slice(0, 8)}
+                        </div>
+                        {s.lastError && <div style={{ color: '#ff453a', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, marginTop: 2 }}>{s.lastError}</div>}
+                      </div>
+                      <span style={{ color: '#777', fontSize: 11, flexShrink: 0 }}>{timeAgo(s.updatedAt)}</span>
+                      <span onClick={(e) => { e.stopPropagation(); setPinned(togglePin('workspace', s.id)); }} style={{ cursor: 'pointer', padding: '8px 10px', margin: '-8px -10px -8px 0', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill={pinned.has(s.id) ? '#888' : 'none'} stroke={pinned.has(s.id) ? '#888' : '#444'} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg>
+                      </span>
+                    </motion.div>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+        );
+      })}
+      {killTarget && <KillConfirmModal sessionLabel={(killTarget.display || killTarget.id).slice(0, 16)} onConfirm={confirmKill} onCancel={() => setKillTarget(null)} />}
+      {newSessionProject !== null && createPortal(
+        <AnimatePresence>
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            onClick={() => setNewSessionProject(null)}
+            style={{ position: 'fixed', inset: 0, zIndex: 99999, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', paddingBottom: 40, backgroundColor: 'rgba(0,0,0,0.5)', WebkitBackdropFilter: 'blur(8px)', backdropFilter: 'blur(8px)' }}
+          >
+            <motion.div
+              initial={{ y: 30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 30, opacity: 0 }}
+              transition={{ type: 'spring', damping: 28, stiffness: 350 }}
+              onClick={(e) => e.stopPropagation()}
+              style={{ width: 'calc(100% - 32px)', maxWidth: 320, display: 'flex', flexDirection: 'column', gap: 8 }}
+            >
+              <div style={{ backgroundColor: 'rgba(44,44,46,0.95)', borderRadius: 14, overflow: 'hidden' }}>
+                <div style={{ padding: '18px 16px 14px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 13, color: '#999', lineHeight: 1.5 }}>
+                    Create a new session?
+                  </div>
+                </div>
+                <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+                  <button onClick={() => { setNewSessionProject(null); onNewSession?.('workspace', undefined, undefined); }} style={{ width: '100%', padding: '16px 0', border: 'none', cursor: 'pointer', fontSize: 17, fontWeight: 600, color: '#007aff', backgroundColor: 'transparent', fontFamily: 'inherit' }}>New Session</button>
+                </div>
+              </div>
+              <button onClick={() => setNewSessionProject(null)} style={{ width: '100%', padding: '16px 0', border: 'none', cursor: 'pointer', fontSize: 17, fontWeight: 600, color: '#999', backgroundColor: 'rgba(44,44,46,0.95)', borderRadius: 14, fontFamily: 'inherit' }}>Cancel</button>
+            </motion.div>
+          </motion.div>
+        </AnimatePresence>,
+        document.body
+      )}
     </div>
   );
 }
@@ -1235,7 +1445,7 @@ export default function App() {
   const [sessionMessages, setSessionMessages] = useState<Message[]>([]);
   const [hasVisitedConfig, setHasVisitedConfig] = useState(false);
   const liveSessionIdRef = useRef<string | null>(null); // tracks active process ID after resume
-  const sessionAliveCache = useRef<Map<string, { alive: boolean; ts: number }>>(new Map());
+  const sessionAliveCache = useRef<Map<string, { alive: boolean; ts: number; terminal?: boolean }>>(new Map());
   const sessionSendQueue = useRef<Array<() => Promise<void>>>([]);
   const sessionSendBusy = useRef(false);
   const idleTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -1675,7 +1885,8 @@ export default function App() {
               setSelectedSession({ id: sid, display: display || sid.slice(0, 8), relayUrl, relayToken, project, envId });
             }}
             onNewSession={(envId, relayUrl, relayToken) => {
-              const sid = crypto.randomUUID();
+              // Use FIXED_SESSION_ID so phone always routes through terminal wrapper
+              const sid = FIXED_SESSION_ID;
               if (envId !== 'workspace') registerSession(sid, envId);
               // Bust session cache so returning to canvas shows the new session immediately
               envSessionsCache.clear();
@@ -1683,7 +1894,7 @@ export default function App() {
               liveSessionIdRef.current = null;
               sessionSendQueue.current = [];
               sessionSendBusy.current = false;
-              setSelectedSession({ id: sid, display: 'New Session', relayUrl, relayToken, envId, isNew: true });
+              setSelectedSession({ id: sid, display: 'Terminal', relayUrl, relayToken, envId, isNew: true });
             }}
           />
           {/* Canvas iframe — fills full area */}
@@ -1901,13 +2112,14 @@ export default function App() {
                     await sendToSession(snapSession.id, text);
                     _log(`NEW PATH → sendToSession OK`);
                     liveSessionIdRef.current = snapSession.id;
-                    sessionAliveCache.current.set(snapSession.id, { alive: true, ts: Date.now() });
+                    sessionAliveCache.current.set(snapSession.id, { alive: true, ts: Date.now(), terminal: snapSession.id === FIXED_SESSION_ID });
                     setSelectedSession(prev => prev ? { ...prev, isNew: false } : prev);
                     _log(`NEW PATH → isNew cleared, liveId set`);
                   } else {
                   const ALIVE_TTL = 5_000;
+                  const TERMINAL_ALIVE_TTL = 30_000; // terminal wrapper sessions are long-lived
                   const cachedAlive = sessionAliveCache.current.get(liveId);
-                  const aliveFast = cachedAlive && Date.now() - cachedAlive.ts < ALIVE_TTL && cachedAlive.alive;
+                  const aliveFast = cachedAlive && Date.now() - cachedAlive.ts < (cachedAlive.terminal ? TERMINAL_ALIVE_TTL : ALIVE_TTL) && cachedAlive.alive;
                   _log(`EXISTING PATH | aliveFast=${!!aliveFast} | cachedAlive=${JSON.stringify(cachedAlive)}`);
                   if (aliveFast) {
                     _log(`ALIVE FAST → sendToSession(${liveId})`);
@@ -1917,9 +2129,9 @@ export default function App() {
                     const checkRes = await fetch(`${base}/v2/claude/active`, { headers: { 'Authorization': `Bearer ${token}` } });
                     const checkData = await checkRes.json();
                     const alive = (checkData.sessions || []).find((s: any) => s.id === liveId && s.alive);
-                    _log(`/active result: alive=${!!alive} | sessions=${JSON.stringify(checkData.sessions?.map((s:any)=>s.id))}`);
+                    _log(`/active result: alive=${!!alive} terminal=${alive?.terminal} | sessions=${JSON.stringify(checkData.sessions?.map((s:any)=>s.id))}`);
                     if (alive) {
-                      sessionAliveCache.current.set(liveId, { alive: true, ts: Date.now() });
+                      sessionAliveCache.current.set(liveId, { alive: true, ts: Date.now(), terminal: !!alive.terminal });
                       _log(`ALIVE → sendToSession(${liveId})`);
                       await sendToSession(liveId, text);
                     } else {

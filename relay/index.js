@@ -37,8 +37,7 @@ const fastifyStatic = await import('@fastify/static');
 app.register(fastifyStatic.default, {
   root: webDistPath,
   prefix: '/',
-  wildcard: false,
-  decorateReply: false,
+  wildcard: true,
 });
 // SPA fallback: non-API routes → index.html
 app.setNotFoundHandler((req, reply) => {

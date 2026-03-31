@@ -1,5 +1,35 @@
 # Morph — Changelog
 
+## 2.0.0 — 2026-03-31 — Architecture Upgrade (Happy Coder Dual-Mode)
+
+Phone-to-terminal sync via Happy Coder dual-mode loop pattern.
+
+### CLI (`cli/morph-claude.mjs`) — NEW
+- **Dual-mode wrapper** — `while(true) { local → remote → local }` loop, Happy Coder pattern
+- **Orange TUI** — 256-color theme (`\x1b[38;5;208m`), edge-to-edge minimal layout
+- **Double-space switch** — 400ms window prevents accidental mode triggers
+- **Socket.IO client** — connects to relay, receives `remote-message`, sends `terminal-output`
+- **Terminal stop/interrupt** — phone can kill or SIGINT the running Claude process
+
+### Relay (`relay/`)
+- **Terminal routing** — Priority 1 exact match → 1b fallback any terminal → 2 relay-managed
+- **`terminal-register` / `terminal-output`** — Socket.IO events for CLI wrapper
+- **Session dedup** — same display+project → keep most recent only
+- **FIXED_SESSION** — phone always uses `a0a0a0a0-...0002`, maps to any connected terminal
+- **Stop/interrupt forwarding** — `/v2/claude/stop`, `/v2/claude/interrupt` route to terminal
+
+### Web (`web/`)
+- **Session cards rewrite** — auto-grouped by `project` path, deterministic project colors
+- **FIXED_SESSION** — new session button uses fixed ID for terminal routing
+- **Alive cache** — 30s TTL for terminal sessions vs 5s for relay-managed
+- **Static serving** — `@fastify/static` serves built SPA from relay
+
+### Infrastructure
+- **Cloudflare Tunnel** — `tr-relay` tunnel routes `morph.mkyang.ai` to local Mac relay
+- **PM2** — `tr-relay` (relay) + `tr-tunnel` (cloudflared) managed processes
+
+---
+
 ## Unreleased (working tree)
 - **Terminal Chat** — 替代 Canvas WebView，terminal 风格聊天框 + 24px grid 背景
 - **Prompt 跳转** — 输入框空时按上/下箭头跳到上/下一个用户 Prompt 位置
