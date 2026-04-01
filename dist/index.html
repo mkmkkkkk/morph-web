@@ -12,7 +12,7 @@
   <link rel="manifest" href="/manifest.json" />
   <style>@font-face { font-family: 'CloisterBlack'; src: url('/CloisterBlack.ttf'); }</style>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=DotGothic16&family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -86,7 +86,7 @@
       --warning: #ff9900;
       --bar-track: rgba(0,255,136,0.10); --bar-fill: rgba(0,255,136,0.40);
       --scrollbar-thumb: rgba(0,255,136,0.20);
-      --font-body: 'VT323', 'Press Start 2P', 'Menlo', monospace;
+      --font-body: 'VT323', 'DotGothic16', 'Press Start 2P', 'Menlo', monospace;
       --sunny-texture: none;
       --pixel-scanlines: repeating-linear-gradient(transparent, transparent 2px, rgba(0,0,0,0.15) 2px, rgba(0,0,0,0.15) 4px);
       --pixel-border-radius: 0px;
@@ -123,7 +123,7 @@
     #root::before { content: ''; position: fixed; inset: 0; background-image: var(--pixel-scanlines); pointer-events: none; z-index: 9997; }
     #root > * { position: relative; z-index: 1; }
     /* Pixel: force sharp corners, pixelated rendering, chunky borders */
-    [data-theme="pixel"] * { border-radius: 0px !important; }
+    [data-theme="pixel"] * { border-radius: 0px !important; font-family: var(--font-body) !important; }
     [data-theme="pixel"] button { border: 2px solid rgba(0,255,136,0.25) !important; text-transform: uppercase; letter-spacing: 1px; font-weight: 700; }
     [data-theme="pixel"] input, [data-theme="pixel"] textarea { border: 2px solid rgba(0,255,136,0.25) !important; }
     /* Liquid Glass: 3-layer Apple spec — specular highlight + backdrop blur + depth shadow */
@@ -149,7 +149,6 @@
       pointer-events: none;
     }
   </style>
-  <script type="module" crossorigin src="/assets/index-C_ns0PCt.js"></script>
 </head>
 <body>
   <div id="root"></div>
@@ -252,5 +251,6 @@
       }
     });
   </script>
+  <script type="module" src="/src/main.tsx"></script>
 </body>
 </html>
