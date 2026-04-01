@@ -11,6 +11,21 @@ const BUILD_TS = typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : Date.n
 // Module-level constant — avoids array allocation on every render
 const IDLE_WORDS = ['thinking...', 'pondering...', 'wondering...', 'reasoning...', 'considering...', 'analyzing...', 'processing...'];
 
+// ─── Theme ───
+type Theme = 'dark' | 'light' | 'sunny' | 'pixel' | 'glass';
+const THEME_META: Record<Theme, string> = { dark: '#0a0a0a', light: '#f2f2f7', sunny: '#f4ede1', pixel: '#0a0f0a', glass: '#b8d8e8' };
+function getTheme(): Theme { return (localStorage.getItem('morph-theme') as Theme) || 'dark'; }
+function setThemeGlobal(t: Theme) {
+  localStorage.setItem('morph-theme', t);
+  document.documentElement.setAttribute('data-theme', t);
+  const meta = document.getElementById('meta-theme-color') as HTMLMetaElement | null;
+  if (meta) meta.content = THEME_META[t];
+  // Notify canvas iframe
+  document.querySelectorAll('iframe').forEach(f => {
+    try { f.contentWindow?.postMessage({ action: 'theme.set', theme: t }, '*'); } catch {}
+  });
+}
+
 // ─── Remote debug logger — sends to relay /v2/debug/log, read via /v2/debug/logs ───
 const _dbgQueue: string[] = [];
 function dbg(msg: string) {
@@ -196,16 +211,16 @@ function PasswordGate({ onAuth }: { onAuth: () => void }) {
   };
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 16, padding: 20 }}>
-      <div style={{ color: '#fff', fontSize: 48, fontFamily: "'CloisterBlack', serif", opacity: 0.8 }}>M</div>
-      <div style={{ color: '#888', fontSize: 14, marginTop: -8 }}>Morph</div>
+      <div style={{ color: 'var(--text-primary)', fontSize: 48, fontFamily: "'CloisterBlack', serif", opacity: 0.8 }}>M</div>
+      <div style={{ color: 'var(--text-secondary)', fontSize: 14, marginTop: -8 }}>Morph</div>
       <input type="password" value={pass}
         onChange={e => { setPass(e.target.value); setError(''); }}
         onKeyDown={e => { if (e.key === 'Enter') handleSubmit(); }}
         placeholder="Password"
-        style={{ width: '100%', maxWidth: 300, padding: '12px 16px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.1)', backgroundColor: '#1c1c1e', color: '#fff', fontSize: 16, outline: 'none', textAlign: 'center' }}
+        style={{ width: '100%', maxWidth: 300, padding: '12px 16px', borderRadius: 12, border: '1px solid var(--border-input)', backgroundColor: 'var(--bg-card)', color: 'var(--text-primary)', fontSize: 16, outline: 'none', textAlign: 'center' }}
       />
-      {error && <div style={{ color: '#ff453a', fontSize: 14 }}>{error}</div>}
-      <button onClick={handleSubmit} style={{ padding: '10px 32px', borderRadius: 12, border: 'none', backgroundColor: '#333', color: '#fff', fontSize: 16, cursor: 'pointer' }}>Enter</button>
+      {error && <div style={{ color: 'var(--danger)', fontSize: 14 }}>{error}</div>}
+      <button onClick={handleSubmit} style={{ padding: '10px 32px', borderRadius: 12, border: 'none', backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)', fontSize: 16, cursor: 'pointer' }}>Enter</button>
     </div>
   );
 }
@@ -244,7 +259,7 @@ const MessageRow = React.memo(function MessageRow({ msg }: { msg: Message }) {
     case 'text':
       return msg.role === 'user'
         ? <div style={{ ...monoOuter, color: '#30d158', marginBottom: 3, opacity: msg.pending ? 0.5 : 1 }}><span style={sel} data-sel>&gt; {msg.content}</span></div>
-        : <div style={{ ...monoOuter, color: '#e0e0e0', marginBottom: 3, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{
+        : <div style={{ ...monoOuter, color: 'var(--text-primary)', marginBottom: 3, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{
             msg.content.split('\n').map((line, i) => (
               <React.Fragment key={i}>
                 {line === ''
@@ -263,13 +278,13 @@ const MessageRow = React.memo(function MessageRow({ msg }: { msg: Message }) {
     case 'status':
       return msg.content.length > 120
         ? <Collapsible label="status" preview={msg.content.slice(0, 80).replace(/\n/g, ' ')} content={msg.content} color="#555" />
-        : <div style={{ ...monoOuter, color: '#777', textAlign: 'center', marginTop: 4, marginBottom: 4 }}><span style={sel} data-sel>{msg.content}</span></div>;
+        : <div style={{ ...monoOuter, color: 'var(--text-tertiary)', textAlign: 'center', marginTop: 4, marginBottom: 4 }}><span style={sel} data-sel>{msg.content}</span></div>;
     case 'error':
       return msg.content.length > 120
         ? <Collapsible label="error" preview={msg.content.slice(0, 80).replace(/\n/g, ' ')} content={msg.content} color="#ff453a" />
-        : <div style={{ ...monoOuter, color: '#ff453a', marginBottom: 3 }}><span style={sel} data-sel>{msg.content}</span></div>;
+        : <div style={{ ...monoOuter, color: 'var(--danger)', marginBottom: 3 }}><span style={sel} data-sel>{msg.content}</span></div>;
     case 'permission' as any:
-      return <div style={{ ...monoOuter, color: '#e0a030', marginBottom: 3, fontSize: 12 }}>
+      return <div style={{ ...monoOuter, color: 'var(--warning)', marginBottom: 3, fontSize: 12 }}>
         <span style={sel} data-sel>{msg.pending !== false ? '-- awaiting approval --' : '-- approved --'}</span>
       </div>;
     default: return null;
@@ -307,21 +322,21 @@ function PermissionBanner({ messages, sessionId }: { messages: Message[]; sessio
     <div style={{
       position: 'absolute', top: 0, left: 0, right: 0, zIndex: 20,
       padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 10,
-      backgroundColor: 'rgba(20,20,20,0.97)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+      backgroundColor: 'var(--bg-elevated)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
       borderBottom: '1px solid rgba(255,180,48,0.3)',
     }}>
       <div style={{ flex: 1, overflow: 'hidden', minWidth: 0 }}>
-        <div style={{ color: '#e0a030', fontSize: 13, fontWeight: 600, fontFamily: 'Menlo, monospace' }}>
+        <div style={{ color: 'var(--warning)', fontSize: 13, fontWeight: 600, fontFamily: 'Menlo, monospace' }}>
           {toolName}
         </div>
-        {preview && <div style={{ color: '#888', fontSize: 11, fontFamily: 'Menlo, monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 2 }}>
+        {preview && <div style={{ color: 'var(--text-secondary)', fontSize: 11, fontFamily: 'Menlo, monospace', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 2 }}>
           {preview}
         </div>}
       </div>
       <button onPointerDown={handleDeny} style={{
         padding: '8px 16px', borderRadius: 8, cursor: 'pointer', flexShrink: 0,
         border: '1px solid rgba(255,59,48,0.4)', backgroundColor: 'rgba(255,59,48,0.12)',
-        color: '#ff453a', fontSize: 14, fontWeight: 700,
+        color: 'var(--danger)', fontSize: 14, fontWeight: 700,
         fontFamily: '-apple-system, system-ui, sans-serif',
         touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent',
       }}>Deny</button>
@@ -387,7 +402,7 @@ function TerminalOverlay({ messages, visible }: { messages: Message[]; visible: 
     <div ref={scrollRef} onScroll={onScroll} style={{
       flex: '1 1 0', minHeight: 0, overflowY: 'scroll', overflowX: 'hidden',
       display: 'flex', flexDirection: 'column',
-      borderTop: '1px solid rgba(255,255,255,0.08)', backgroundColor: '#111',
+      borderTop: '1px solid var(--border)', backgroundColor: 'var(--bg-secondary)',
       WebkitOverflowScrolling: 'touch' as any,
       userSelect: 'none', WebkitUserSelect: 'none' as any,
       WebkitTouchCallout: 'none' as any,
@@ -397,7 +412,7 @@ function TerminalOverlay({ messages, visible }: { messages: Message[]; visible: 
       <div style={{ flex: '1 1 0' }} />
       <div style={{ padding: '8px 0' }}>
         {messages.length === 0
-          ? <div style={{ color: '#4a4a4a', fontSize: 13, textAlign: 'center', padding: 16, fontFamily: 'Menlo, monospace' }}>waiting for session...</div>
+          ? <div style={{ color: 'var(--text-tertiary)', fontSize: 13, textAlign: 'center', padding: 16, fontFamily: 'Menlo, monospace' }}>waiting for session...</div>
           : messages.map(msg => <MessageRow key={msg.id} msg={msg} />)
         }
       </div>
@@ -444,7 +459,7 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
   const dotColor = connected ? '#30d158' : '#636366'; // always green for online
   const inputBg = isSession ? '#1e1c14' : '#1c1c1e';
   const sendBg = isSession ? '#b8860b' : '#333';
-  const borderTint = isSession ? 'rgba(224,160,48,0.15)' : 'rgba(255,255,255,0.10)';
+  const borderTint = isSession ? 'var(--border-strong)' : 'var(--border-strong)';
 
   return (
     <div style={{ borderTop: `1px solid ${borderTint}`, padding: keyboardOpen ? '8px 10px 2px' : '6px 10px', display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -455,7 +470,7 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
       {onToggleTerminal && (
         <button tabIndex={-1} onClick={onToggleTerminal} style={{
           width: 34, height: 34, borderRadius: 17, border: 'none', cursor: 'pointer', flexShrink: 0,
-          backgroundColor: 'rgba(255,255,255,0.08)',
+          backgroundColor: 'var(--bg-input)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
           <div style={{
@@ -475,7 +490,7 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
         transition={isUploading ? { repeat: Infinity, duration: 0.75, ease: 'easeInOut' } : { type: 'spring', stiffness: 500, damping: 20 }}
         style={{
           width: 34, height: 34, borderRadius: 17, border: 'none', cursor: 'pointer', flexShrink: 0,
-          backgroundColor: (pendingSketch || pendingFile) ? 'rgba(48,209,88,0.2)' : isUploading ? 'rgba(48,209,88,0.12)' : 'rgba(255,255,255,0.08)',
+          backgroundColor: (pendingSketch || pendingFile) ? 'rgba(48,209,88,0.2)' : isUploading ? 'rgba(48,209,88,0.12)' : 'var(--bg-input)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
         {isUploading
@@ -486,7 +501,7 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
               ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#30d158" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
               : pendingFile === 'file'
                 ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#30d158" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
-                : <span style={{ color: '#888', fontSize: 22, lineHeight: '22px' }}>+</span>}
+                : <span style={{ color: 'var(--text-secondary)', fontSize: 22, lineHeight: '22px' }}>+</span>}
       </motion.button>
 
       {/* Text input — textarea with auto-grow, Enter=send, Shift+Enter=newline */}
@@ -508,7 +523,7 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
           flex: 1, minHeight: 36, maxHeight: 120, resize: 'none',
           borderRadius: 18, border: isSession ? `1px solid ${borderTint}` : 'none', outline: 'none',
           padding: '8px 16px', fontSize: 16, lineHeight: '20px',
-          fontFamily: '-apple-system, system-ui, sans-serif', backgroundColor: inputBg, color: '#fff',
+          fontFamily: '-apple-system, system-ui, sans-serif', backgroundColor: inputBg, color: 'var(--text-primary)',
           WebkitAppearance: 'none' as any,
         }}
       />
@@ -592,7 +607,7 @@ function KillConfirmModal({ sessionLabel, onConfirm, onCancel }: { sessionLabel:
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         transition={{ duration: 0.18 }}
         onClick={onCancel}
-        style={{ position: 'fixed', inset: 0, zIndex: 99999, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', paddingBottom: 40, backgroundColor: 'rgba(0,0,0,0.5)', WebkitBackdropFilter: 'blur(8px)', backdropFilter: 'blur(8px)' }}
+        style={{ position: 'fixed', inset: 0, zIndex: 99999, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', paddingBottom: 40, backgroundColor: 'var(--bg-overlay)', WebkitBackdropFilter: 'blur(8px)', backdropFilter: 'blur(8px)' }}
       >
         <motion.div
           initial={{ y: 30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 30, opacity: 0 }}
@@ -600,17 +615,17 @@ function KillConfirmModal({ sessionLabel, onConfirm, onCancel }: { sessionLabel:
           onClick={(e) => e.stopPropagation()}
           style={{ width: 'calc(100% - 32px)', maxWidth: 320, display: 'flex', flexDirection: 'column', gap: 8 }}
         >
-          <div style={{ backgroundColor: 'rgba(44,44,46,0.95)', borderRadius: 14, overflow: 'hidden' }}>
+          <div style={{ backgroundColor: 'var(--bg-elevated)', borderRadius: 14, overflow: 'hidden' }}>
             <div style={{ padding: '18px 16px 14px', textAlign: 'center' }}>
-              <div style={{ fontSize: 13, color: '#999', lineHeight: 1.5 }}>
-                Kill <span style={{ color: '#fff', fontFamily: 'Menlo, monospace', fontSize: 12 }}>{sessionLabel}</span> ?
+              <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                Kill <span style={{ color: 'var(--text-primary)', fontFamily: 'Menlo, monospace', fontSize: 12 }}>{sessionLabel}</span> ?
               </div>
             </div>
-            <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
-              <button onClick={onConfirm} style={{ width: '100%', padding: '16px 0', border: 'none', cursor: 'pointer', fontSize: 17, fontWeight: 600, color: '#ff453a', backgroundColor: 'transparent', fontFamily: 'inherit' }}>Kill Session</button>
+            <div style={{ borderTop: '1px solid var(--border)' }}>
+              <button onClick={onConfirm} style={{ width: '100%', padding: '16px 0', border: 'none', cursor: 'pointer', fontSize: 17, fontWeight: 600, color: 'var(--danger)', backgroundColor: 'transparent', fontFamily: 'inherit' }}>Kill Session</button>
             </div>
           </div>
-          <button onClick={onCancel} style={{ width: '100%', padding: '16px 0', border: 'none', cursor: 'pointer', fontSize: 17, fontWeight: 600, color: '#007aff', backgroundColor: 'rgba(44,44,46,0.95)', borderRadius: 14, fontFamily: 'inherit' }}>Cancel</button>
+          <button onClick={onCancel} style={{ width: '100%', padding: '16px 0', border: 'none', cursor: 'pointer', fontSize: 17, fontWeight: 600, color: 'var(--accent)', backgroundColor: 'var(--bg-elevated)', borderRadius: 14, fontFamily: 'inherit' }}>Cancel</button>
         </motion.div>
       </motion.div>
     </AnimatePresence>,
@@ -680,8 +695,8 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
     return '#555';
   };
   const borderColor = (s: any) => {
-    if (hasUnread(s)) return 'rgba(255,204,0,0.2)';
-    return 'rgba(255,255,255,0.08)';
+    if (hasUnread(s)) return 'var(--border-strong)';
+    return 'var(--bg-input)';
   };
 
   const handleSelect = (id: string) => {
@@ -739,14 +754,14 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
         style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: expanded ? 6 : 0, cursor: 'pointer', pointerEvents: 'auto' }}
       >
         <span style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: env.id === 'workspace' ? '#636AFF' : env.id === 'tensor-revive' ? '#30d158' : '#ff9f0a', flexShrink: 0 }} />
-        <span style={{ color: '#999', fontSize: 11, fontWeight: 600, textTransform: 'uppercase' as const, letterSpacing: 0.5 }}>
+        <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase' as const, letterSpacing: 0.5 }}>
           {env.label} ({sessions.length})
         </span>
-        {unviewedCount > 0 && <span style={{ fontSize: 9, color: '#ffcc00' }}>{unviewedCount} new</span>}
-        <span style={{ color: '#888', fontSize: 10 }}>{expanded ? '▾' : '▸'}</span>
+        {unviewedCount > 0 && <span style={{ fontSize: 9, color: 'var(--warning)' }}>{unviewedCount} new</span>}
+        <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>{expanded ? '▾' : '▸'}</span>
         <span
           onClick={(e) => { e.stopPropagation(); setNewSessionConfirm(true); }}
-          style={{ marginLeft: 'auto', color: '#fff', fontSize: 20, lineHeight: 1, padding: '6px 10px', margin: '-6px -10px', cursor: 'pointer', userSelect: 'none', pointerEvents: 'auto', WebkitTapHighlightColor: 'transparent' }}
+          style={{ marginLeft: 'auto', color: 'var(--text-primary)', fontSize: 20, lineHeight: 1, padding: '6px 10px', margin: '-6px -10px', cursor: 'pointer', userSelect: 'none', pointerEvents: 'auto', WebkitTapHighlightColor: 'transparent' }}
         >+</span>
       </div>
       <AnimatePresence>
@@ -757,7 +772,7 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
             style={{ overflow: 'hidden', pointerEvents: 'auto' }}
           >
             {sessions.length === 0 && (
-              <div style={{ color: '#555', fontSize: 12, padding: '8px 4px' }}>No sessions</div>
+              <div style={{ color: 'var(--text-tertiary)', fontSize: 12, padding: '8px 4px' }}>No sessions</div>
             )}
             {sessions.map(s => (
               <motion.div
@@ -767,7 +782,7 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
                 style={{
                   display: 'flex', alignItems: 'center', gap: 8,
                   padding: '12px 10px', marginBottom: 4,
-                  backgroundColor: 'rgba(28,28,30,0.92)',
+                  backgroundColor: 'var(--bg-elevated)',
                   borderRadius: 10, cursor: 'pointer',
                   border: `1px solid ${borderColor(s)}`,
                   userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none',
@@ -776,12 +791,12 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
                 <div style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: dotColor(s), flexShrink: 0 }} />
                 {pinned.has(s.id) && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><path d="M12 17v5M9 2h6l1 7h2l-1 4H7L6 9h2z"/></svg>}
                 <div style={{ flex: 1, overflow: 'hidden', minWidth: 0 }}>
-                  <div style={{ color: '#ddd', fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+                  <div style={{ color: 'var(--text-primary)', fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
                     {s.display || s.id.slice(0, 8)}
                   </div>
-                  {s.lastError && <div style={{ color: '#ff453a', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, marginTop: 2 }}>{s.lastError}</div>}
+                  {s.lastError && <div style={{ color: 'var(--danger)', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, marginTop: 2 }}>{s.lastError}</div>}
                 </div>
-                <span style={{ color: '#777', fontSize: 11, flexShrink: 0 }}>{timeAgo(s.updatedAt)}</span>
+                <span style={{ color: 'var(--text-tertiary)', fontSize: 11, flexShrink: 0 }}>{timeAgo(s.updatedAt)}</span>
                 <span onClick={(e) => { e.stopPropagation(); setPinned(togglePin(env.id, s.id)); }} style={{ cursor: 'pointer', padding: '8px 10px', margin: '-8px -10px -8px 0', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill={pinned.has(s.id) ? '#888' : 'none'} stroke={pinned.has(s.id) ? '#888' : '#444'} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg>
                 </span>
@@ -797,7 +812,7 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             transition={{ duration: 0.18 }}
             onClick={() => setNewSessionConfirm(false)}
-            style={{ position: 'fixed', inset: 0, zIndex: 99999, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', paddingBottom: 40, backgroundColor: 'rgba(0,0,0,0.5)', WebkitBackdropFilter: 'blur(8px)', backdropFilter: 'blur(8px)' }}
+            style={{ position: 'fixed', inset: 0, zIndex: 99999, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', paddingBottom: 40, backgroundColor: 'var(--bg-overlay)', WebkitBackdropFilter: 'blur(8px)', backdropFilter: 'blur(8px)' }}
           >
             <motion.div
               initial={{ y: 30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 30, opacity: 0 }}
@@ -805,17 +820,17 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
               onClick={(e) => e.stopPropagation()}
               style={{ width: 'calc(100% - 32px)', maxWidth: 320, display: 'flex', flexDirection: 'column', gap: 8 }}
             >
-              <div style={{ backgroundColor: 'rgba(44,44,46,0.95)', borderRadius: 14, overflow: 'hidden' }}>
+              <div style={{ backgroundColor: 'var(--bg-elevated)', borderRadius: 14, overflow: 'hidden' }}>
                 <div style={{ padding: '18px 16px 14px', textAlign: 'center' }}>
-                  <div style={{ fontSize: 13, color: '#999', lineHeight: 1.5 }}>
+                  <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
                     Create a new session?
                   </div>
                 </div>
-                <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
-                  <button onClick={() => { setNewSessionConfirm(false); onNewSession?.(env.id, env.relayUrl, env.token); }} style={{ width: '100%', padding: '16px 0', border: 'none', cursor: 'pointer', fontSize: 17, fontWeight: 600, color: '#007aff', backgroundColor: 'transparent', fontFamily: 'inherit' }}>New Session</button>
+                <div style={{ borderTop: '1px solid var(--border)' }}>
+                  <button onClick={() => { setNewSessionConfirm(false); onNewSession?.(env.id, env.relayUrl, env.token); }} style={{ width: '100%', padding: '16px 0', border: 'none', cursor: 'pointer', fontSize: 17, fontWeight: 600, color: 'var(--accent)', backgroundColor: 'transparent', fontFamily: 'inherit' }}>New Session</button>
                 </div>
               </div>
-              <button onClick={() => setNewSessionConfirm(false)} style={{ width: '100%', padding: '16px 0', border: 'none', cursor: 'pointer', fontSize: 17, fontWeight: 600, color: '#999', backgroundColor: 'rgba(44,44,46,0.95)', borderRadius: 14, fontFamily: 'inherit' }}>Cancel</button>
+              <button onClick={() => setNewSessionConfirm(false)} style={{ width: '100%', padding: '16px 0', border: 'none', cursor: 'pointer', fontSize: 17, fontWeight: 600, color: 'var(--text-secondary)', backgroundColor: 'var(--bg-elevated)', borderRadius: 14, fontFamily: 'inherit' }}>Cancel</button>
             </motion.div>
           </motion.div>
         </AnimatePresence>,
@@ -864,14 +879,14 @@ function UsageWidget() {
 
   const barW = 56;
   const barH = 4;
-  const barColor = '#555';
-  const trackColor = 'rgba(255,255,255,0.06)';
+  const barColor = 'var(--bar-fill)';
+  const trackColor = 'var(--bar-track)';
 
   return (
     <div style={{ position: 'absolute', top: 68, right: 12, zIndex: 3, pointerEvents: 'auto' }}>
       <div style={{
-        backgroundColor: 'rgba(28,28,30,0.85)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
-        borderRadius: 6, padding: '4px 8px', border: '1px solid rgba(255,255,255,0.06)',
+        backgroundColor: 'var(--bg-elevated)', backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+        borderRadius: 6, padding: '4px 8px', border: '1px solid var(--border)',
       }}>
         {/* Session bar (5h) */}
         <div style={{ marginBottom: 3 }}>
@@ -886,7 +901,7 @@ function UsageWidget() {
           </div>
         </div>
         {/* Reset countdown */}
-        {countdown && <div style={{ fontSize: 7, color: '#444', textAlign: 'center' as const, marginTop: 2 }}>{countdown}</div>}
+        {countdown && <div style={{ fontSize: 7, color: 'var(--text-tertiary)', textAlign: 'center' as const, marginTop: 2 }}>{countdown}</div>}
       </div>
     </div>
   );
@@ -977,7 +992,7 @@ function SessionCards({ onSelect, onNewSession }: { onSelect: (sessionId: string
   const toggleExpanded = (proj: string) => setExpanded(prev => ({ ...prev, [proj]: !(prev[proj] !== undefined ? prev[proj] : true) }));
 
   const dotColor = (s: any) => hasUnread(s) ? '#ffcc00' : '#555';
-  const borderColor = (s: any) => hasUnread(s) ? 'rgba(255,204,0,0.2)' : 'rgba(255,255,255,0.08)';
+  const borderColor = (s: any) => hasUnread(s) ? 'var(--border-strong)' : 'var(--bg-input)';
 
   const handleSelect = (id: string) => {
     markViewed(id);
@@ -1036,14 +1051,14 @@ function SessionCards({ onSelect, onNewSession }: { onSelect: (sessionId: string
               style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: open ? 6 : 0, cursor: 'pointer', pointerEvents: 'auto' }}
             >
               <span style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: color, flexShrink: 0 }} />
-              <span style={{ color: '#999', fontSize: 11, fontWeight: 600, textTransform: 'uppercase' as const, letterSpacing: 0.5 }}>
+              <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase' as const, letterSpacing: 0.5 }}>
                 {projectLabel(g.project)} ({g.sessions.length})
               </span>
-              {unviewedCount > 0 && <span style={{ fontSize: 9, color: '#ffcc00' }}>{unviewedCount} new</span>}
-              <span style={{ color: '#888', fontSize: 10 }}>{open ? '\u25BE' : '\u25B8'}</span>
+              {unviewedCount > 0 && <span style={{ fontSize: 9, color: 'var(--warning)' }}>{unviewedCount} new</span>}
+              <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>{open ? '\u25BE' : '\u25B8'}</span>
               <span
                 onClick={(e) => { e.stopPropagation(); setNewSessionProject(g.project); }}
-                style={{ marginLeft: 'auto', color: '#fff', fontSize: 20, lineHeight: 1, padding: '6px 10px', margin: '-6px -10px', cursor: 'pointer', userSelect: 'none', pointerEvents: 'auto', WebkitTapHighlightColor: 'transparent' }}
+                style={{ marginLeft: 'auto', color: 'var(--text-primary)', fontSize: 20, lineHeight: 1, padding: '6px 10px', margin: '-6px -10px', cursor: 'pointer', userSelect: 'none', pointerEvents: 'auto', WebkitTapHighlightColor: 'transparent' }}
               >+</span>
             </div>
             <AnimatePresence>
@@ -1054,7 +1069,7 @@ function SessionCards({ onSelect, onNewSession }: { onSelect: (sessionId: string
                   style={{ overflow: 'hidden', pointerEvents: 'auto' }}
                 >
                   {g.sessions.length === 0 && (
-                    <div style={{ color: '#555', fontSize: 12, padding: '8px 4px' }}>No sessions</div>
+                    <div style={{ color: 'var(--text-tertiary)', fontSize: 12, padding: '8px 4px' }}>No sessions</div>
                   )}
                   {g.sessions.map(s => (
                     <motion.div
@@ -1064,7 +1079,7 @@ function SessionCards({ onSelect, onNewSession }: { onSelect: (sessionId: string
                       style={{
                         display: 'flex', alignItems: 'center', gap: 8,
                         padding: '12px 10px', marginBottom: 4,
-                        backgroundColor: 'rgba(28,28,30,0.92)',
+                        backgroundColor: 'var(--bg-elevated)',
                         borderRadius: 10, cursor: 'pointer',
                         border: `1px solid ${borderColor(s)}`,
                         userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none',
@@ -1073,12 +1088,12 @@ function SessionCards({ onSelect, onNewSession }: { onSelect: (sessionId: string
                       <div style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: dotColor(s), flexShrink: 0 }} />
                       {pinned.has(s.id) && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><path d="M12 17v5M9 2h6l1 7h2l-1 4H7L6 9h2z"/></svg>}
                       <div style={{ flex: 1, overflow: 'hidden', minWidth: 0 }}>
-                        <div style={{ color: '#ddd', fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+                        <div style={{ color: 'var(--text-primary)', fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
                           {s.display || s.id.slice(0, 8)}
                         </div>
-                        {s.lastError && <div style={{ color: '#ff453a', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, marginTop: 2 }}>{s.lastError}</div>}
+                        {s.lastError && <div style={{ color: 'var(--danger)', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, marginTop: 2 }}>{s.lastError}</div>}
                       </div>
-                      <span style={{ color: '#777', fontSize: 11, flexShrink: 0 }}>{timeAgo(s.updatedAt)}</span>
+                      <span style={{ color: 'var(--text-tertiary)', fontSize: 11, flexShrink: 0 }}>{timeAgo(s.updatedAt)}</span>
                       <span onClick={(e) => { e.stopPropagation(); setPinned(togglePin('workspace', s.id)); }} style={{ cursor: 'pointer', padding: '8px 10px', margin: '-8px -10px -8px 0', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill={pinned.has(s.id) ? '#888' : 'none'} stroke={pinned.has(s.id) ? '#888' : '#444'} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg>
                       </span>
@@ -1097,7 +1112,7 @@ function SessionCards({ onSelect, onNewSession }: { onSelect: (sessionId: string
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             transition={{ duration: 0.18 }}
             onClick={() => setNewSessionProject(null)}
-            style={{ position: 'fixed', inset: 0, zIndex: 99999, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', paddingBottom: 40, backgroundColor: 'rgba(0,0,0,0.5)', WebkitBackdropFilter: 'blur(8px)', backdropFilter: 'blur(8px)' }}
+            style={{ position: 'fixed', inset: 0, zIndex: 99999, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', paddingBottom: 40, backgroundColor: 'var(--bg-overlay)', WebkitBackdropFilter: 'blur(8px)', backdropFilter: 'blur(8px)' }}
           >
             <motion.div
               initial={{ y: 30, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 30, opacity: 0 }}
@@ -1105,17 +1120,17 @@ function SessionCards({ onSelect, onNewSession }: { onSelect: (sessionId: string
               onClick={(e) => e.stopPropagation()}
               style={{ width: 'calc(100% - 32px)', maxWidth: 320, display: 'flex', flexDirection: 'column', gap: 8 }}
             >
-              <div style={{ backgroundColor: 'rgba(44,44,46,0.95)', borderRadius: 14, overflow: 'hidden' }}>
+              <div style={{ backgroundColor: 'var(--bg-elevated)', borderRadius: 14, overflow: 'hidden' }}>
                 <div style={{ padding: '18px 16px 14px', textAlign: 'center' }}>
-                  <div style={{ fontSize: 13, color: '#999', lineHeight: 1.5 }}>
+                  <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
                     Create a new session?
                   </div>
                 </div>
-                <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }}>
-                  <button onClick={() => { setNewSessionProject(null); onNewSession?.('workspace', undefined, undefined); }} style={{ width: '100%', padding: '16px 0', border: 'none', cursor: 'pointer', fontSize: 17, fontWeight: 600, color: '#007aff', backgroundColor: 'transparent', fontFamily: 'inherit' }}>New Session</button>
+                <div style={{ borderTop: '1px solid var(--border)' }}>
+                  <button onClick={() => { setNewSessionProject(null); onNewSession?.('workspace', undefined, undefined); }} style={{ width: '100%', padding: '16px 0', border: 'none', cursor: 'pointer', fontSize: 17, fontWeight: 600, color: 'var(--accent)', backgroundColor: 'transparent', fontFamily: 'inherit' }}>New Session</button>
                 </div>
               </div>
-              <button onClick={() => setNewSessionProject(null)} style={{ width: '100%', padding: '16px 0', border: 'none', cursor: 'pointer', fontSize: 17, fontWeight: 600, color: '#999', backgroundColor: 'rgba(44,44,46,0.95)', borderRadius: 14, fontFamily: 'inherit' }}>Cancel</button>
+              <button onClick={() => setNewSessionProject(null)} style={{ width: '100%', padding: '16px 0', border: 'none', cursor: 'pointer', fontSize: 17, fontWeight: 600, color: 'var(--text-secondary)', backgroundColor: 'var(--bg-elevated)', borderRadius: 14, fontFamily: 'inherit' }}>Cancel</button>
             </motion.div>
           </motion.div>
         </AnimatePresence>,
@@ -1125,34 +1140,239 @@ function SessionCards({ onSelect, onNewSession }: { onSelect: (sessionId: string
   );
 }
 
+// ─── Toggle Switch ───
+function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div onClick={() => onChange(!value)} style={{
+      width: 44, height: 26, borderRadius: 13, cursor: 'pointer', position: 'relative',
+      backgroundColor: value ? 'var(--accent)' : 'var(--bg-hover)', transition: 'background-color 0.2s',
+      flexShrink: 0,
+    }}>
+      <div style={{
+        position: 'absolute', top: 2, left: value ? 20 : 2, width: 22, height: 22,
+        borderRadius: 11, backgroundColor: '#fff', transition: 'left 0.2s',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+      }} />
+    </div>
+  );
+}
+
 // ─── Config Tab ───
-function ConfigTab({ connState, onQuickAction, onRefresh }: { connState: string; onQuickAction: (prompt: string) => void; onRefresh?: () => void }) {
+function ConfigTab({ connState }: { connState: string }) {
+  const relayUrl = () => localStorage.getItem('morph-relay-url') || '';
   const token = () => localStorage.getItem('morph-auth') || '';
   const headers = () => ({ 'Authorization': `Bearer ${token()}` });
+  const [theme, setTheme] = useState<Theme>(getTheme);
+
+  const [usage, setUsage] = useState<{ messagesToday: string; totalSessions: string; uptime: string }>({ messagesToday: '—', totalSessions: '—', uptime: '—' });
+  const [sessions, setSessions] = useState<any[]>([]);
+  const [debugEnabled, setDebugEnabled] = useState(() => localStorage.getItem('morph-debug-enabled') === 'true');
+  const [debugLogs, setDebugLogs] = useState<string[]>([]);
+  const [pushStatus, setPushStatus] = useState<'Enabled' | 'Disabled' | 'Not supported'>(() => {
+    if (!('Notification' in window) || !('serviceWorker' in navigator)) return 'Not supported';
+    return localStorage.getItem('morph-push-enabled') === 'true' ? 'Enabled' : 'Disabled';
+  });
+  const [wsState, setWsState] = useState('—');
+
+  useEffect(() => {
+    fetch(`${relayUrl()}/v2/usage`, { headers: headers() })
+      .then(r => r.json())
+      .then(d => setUsage({
+        messagesToday: String(d.messagesToday ?? '—'),
+        totalSessions: String(d.totalSessions ?? '—'),
+        uptime: d.uptime ?? '—',
+      }))
+      .catch(() => {});
+
+    fetchSessions()
+      .then(s => setSessions(s))
+      .catch(() => {});
+
+    setWsState(getState() || connState);
+
+    if (debugEnabled) {
+      fetch(`${relayUrl()}/v2/debug/logs`, { headers: headers() })
+        .then(r => r.json())
+        .then(d => setDebugLogs(d.lines || []))
+        .catch(() => {});
+    }
+  }, []);
+
+  const handleDebugToggle = (v: boolean) => {
+    setDebugEnabled(v);
+    localStorage.setItem('morph-debug-enabled', String(v));
+    if (v) {
+      fetch(`${relayUrl()}/v2/debug/logs`, { headers: headers() })
+        .then(r => r.json())
+        .then(d => setDebugLogs(d.lines || []))
+        .catch(() => {});
+    }
+  };
+
+  const handleClearLogs = () => {
+    setDebugLogs([]);
+    fetch(`${relayUrl()}/v2/debug/clear`, { method: 'POST', headers: headers() }).catch(() => {});
+  };
+
+  const handlePushToggle = async (v: boolean) => {
+    if (!('Notification' in window) || !('serviceWorker' in navigator)) return;
+    const base = relayUrl();
+    const auth = token();
+    if (v) {
+      try {
+        // Check existing permission first — avoid re-prompting on iOS
+        let perm = Notification.permission;
+        if (perm === 'default') {
+          perm = await Notification.requestPermission();
+        }
+        if (perm !== 'granted') { setPushStatus('Disabled'); return; }
+        // Reuse existing SW registration or register fresh
+        let reg = await navigator.serviceWorker.getRegistration('/sw.js');
+        if (!reg) {
+          reg = await navigator.serviceWorker.register('/sw.js');
+        }
+        await navigator.serviceWorker.ready;
+        // Check for existing subscription first
+        let sub = await reg.pushManager.getSubscription();
+        if (!sub) {
+          const vapidRes = await fetch(`${base}/v2/push/vapid-public`, { headers: { 'Authorization': `Bearer ${auth}` } });
+          const { publicKey } = await vapidRes.json();
+          if (!publicKey) throw new Error('No VAPID key from server');
+          sub = await reg.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: Uint8Array.from(atob(publicKey.replace(/-/g,'+').replace(/_/g,'/')), c => c.charCodeAt(0)),
+          });
+        }
+        await fetch(`${base}/v2/push/subscribe`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${auth}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ subscription: sub.toJSON() }),
+        });
+        localStorage.setItem('morph-push-enabled', 'true');
+        setPushStatus('Enabled');
+      } catch (e) {
+        console.error('[push] subscribe failed:', e);
+        setPushStatus('Disabled');
+      }
+    } else {
+      try {
+        const reg = await navigator.serviceWorker.getRegistration('/sw.js');
+        const sub = await reg?.pushManager?.getSubscription();
+        if (sub) {
+          await fetch(`${base}/v2/push/unsubscribe`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${auth}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ endpoint: sub.endpoint }),
+          });
+          await sub.unsubscribe();
+        }
+      } catch {}
+      localStorage.setItem('morph-push-enabled', 'false');
+      setPushStatus('Disabled');
+    }
+  };
+
+  const sessionAge = (s: any) => {
+    if (!s.created && !s.ts) return '';
+    const ms = Date.now() - new Date(s.created || s.ts).getTime();
+    if (ms < 60000) return 'just now';
+    if (ms < 3600000) return `${Math.floor(ms / 60000)}m ago`;
+    if (ms < 86400000) return `${Math.floor(ms / 3600000)}h ago`;
+    return `${Math.floor(ms / 86400000)}d ago`;
+  };
 
   return (
     <div style={{ flex: 1, overflowY: 'scroll', padding: 16, paddingTop: 56, minHeight: 0, WebkitOverflowScrolling: 'touch' as any }}>
 
-      <Section title="Connection">
-        <Row label="Status" value={connState} valueColor={connState === 'connected' ? '#30d158' : '#ff453a'} />
-        <Row label="Server" value={window.location.origin} />
-        <button onClick={() => { if (onRefresh) onRefresh(); }} style={{
-          marginTop: 8, padding: '8px 0', border: 'none', borderRadius: 8, cursor: 'pointer',
-          fontSize: 13, width: '100%', backgroundColor: 'rgba(99,106,255,0.15)', color: '#636AFF',
-        }}>↻ Refresh</button>
+      <Section title="Appearance">
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {(['dark', 'light', 'sunny', 'pixel', 'glass'] as Theme[]).map(t => (
+            <button key={t} onClick={() => { setTheme(t); setThemeGlobal(t); }} style={{
+              flex: '1 0 auto', minWidth: 70, padding: '10px 0', border: theme === t ? '2px solid var(--accent)' : '2px solid transparent',
+              borderRadius: 10, cursor: 'pointer', fontSize: 13, fontWeight: theme === t ? 700 : 400,
+              backgroundColor: theme === t ? 'var(--accent-bg)' : 'var(--bg-input)',
+              color: theme === t ? 'var(--accent)' : 'var(--text-secondary)',
+              textTransform: 'capitalize', transition: 'all 0.2s',
+            }}>{{ dark: '● dark', light: '○ light', sunny: '☀ sunny', pixel: '▦ pixel', glass: '◈ liquid' }[t]}</button>
+          ))}
+        </div>
       </Section>
 
-      <Section title="Quick Actions">
-        {[
-          { label: 'Status Check', prompt: 'Give me a brief status update on current work.' },
-          { label: 'Git Status', prompt: 'Run git status and summarize.' },
-          { label: 'Run Heartbeat', prompt: 'Run heartbeat check and report any overdue jobs.' },
-        ].map(a => (
-          <button key={a.label} onClick={() => onQuickAction(a.prompt)} style={{
-            padding: '10px 0', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 14, width: '100%', textAlign: 'center',
-            backgroundColor: 'rgba(255,255,255,0.10)', color: '#fff', marginBottom: 4,
-          }}>{a.label}</button>
+      <Section title="Connection">
+        <Row label="Status" value={connState} valueColor={connState === 'connected' ? 'var(--success)' : 'var(--danger)'} />
+        <Row label="Server" value={window.location.origin} />
+      </Section>
+
+      <Section title="Usage">
+        <Row label="Messages Today" value={usage.messagesToday} />
+        <Row label="Total Sessions" value={usage.totalSessions} />
+        <Row label="Uptime" value={usage.uptime} />
+      </Section>
+
+      <Section title="Sessions">
+        {sessions.length === 0 && (
+          <div style={{ color: 'var(--text-tertiary)', fontSize: 13, padding: '4px 0' }}>No active sessions</div>
+        )}
+        {sessions.map(s => (
+          <div key={s.id} style={{ display: 'flex', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
+            <div style={{
+              width: 8, height: 8, borderRadius: 4, flexShrink: 0, marginRight: 8,
+              backgroundColor: s.alive ? '#30d158' : '#8e8e93',
+            }} />
+            <span style={{ flex: 1, color: 'var(--text-primary)', fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+              {s.display || s.id?.slice(0, 12)}
+            </span>
+            <span style={{ color: 'var(--text-tertiary)', fontSize: 11, fontFamily: 'Menlo, monospace', marginLeft: 8 }}>
+              {sessionAge(s)}
+            </span>
+          </div>
         ))}
+      </Section>
+
+      <Section title="Notifications">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
+          <span style={{ color: 'var(--text-secondary)', fontSize: 14 }}>Push Notifications</span>
+          {pushStatus === 'Not supported' ? (
+            <span style={{ color: 'var(--text-tertiary)', fontSize: 12, fontFamily: 'Menlo, monospace' }}>Not supported</span>
+          ) : (
+            <Toggle value={pushStatus === 'Enabled'} onChange={handlePushToggle} />
+          )}
+        </div>
+        <div style={{ color: 'var(--text-tertiary)', fontSize: 11, paddingTop: 4 }}>
+          {pushStatus === 'Not supported'
+            ? 'Push notifications are not available in this browser.'
+            : pushStatus === 'Enabled'
+              ? 'You will receive notifications when sessions need attention.'
+              : 'Enable to get notified when sessions need attention.'}
+        </div>
+      </Section>
+
+      <Section title="Debug">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
+          <span style={{ color: 'var(--text-secondary)', fontSize: 14 }}>Remote Logging</span>
+          <Toggle value={debugEnabled} onChange={handleDebugToggle} />
+        </div>
+        <Row label="WebSocket" value={wsState} valueColor={wsState === 'connected' ? 'var(--success)' : 'var(--text-tertiary)'} />
+        {debugEnabled && (
+          <>
+            <div style={{
+              marginTop: 8, maxHeight: 200, overflowY: 'auto', backgroundColor: 'var(--bg-primary)',
+              borderRadius: 8, padding: 8, fontSize: 11, fontFamily: 'Menlo, monospace',
+              color: 'var(--text-secondary)', lineHeight: 1.6,
+              WebkitOverflowScrolling: 'touch' as any,
+            }}>
+              {debugLogs.length === 0 ? (
+                <span style={{ color: 'var(--text-tertiary)' }}>No logs</span>
+              ) : debugLogs.map((line, i) => (
+                <div key={i} style={{ wordBreak: 'break-all' }}>{line}</div>
+              ))}
+            </div>
+            <button onClick={handleClearLogs} style={{
+              marginTop: 6, padding: '6px 0', border: 'none', borderRadius: 8, cursor: 'pointer',
+              fontSize: 12, width: '100%', backgroundColor: 'var(--bg-hover)', color: 'var(--text-secondary)',
+            }}>Clear Logs</button>
+          </>
+        )}
       </Section>
 
       <EnvManagerSection />
@@ -1160,7 +1380,7 @@ function ConfigTab({ connState, onQuickAction, onRefresh }: { connState: string;
       <Section title="Account">
         <button onClick={() => { localStorage.removeItem('morph-auth'); location.reload(); }} style={{
           padding: '10px 0', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 14, width: '100%', textAlign: 'center',
-          backgroundColor: 'rgba(255,59,48,0.15)', color: '#ff453a',
+          backgroundColor: 'var(--danger-bg)', color: 'var(--danger)',
         }}>Logout</button>
       </Section>
     </div>
@@ -1188,19 +1408,19 @@ function EnvManagerSection() {
   };
 
   const inputStyle = {
-    width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.12)',
-    backgroundColor: 'rgba(255,255,255,0.06)', color: '#fff', fontSize: 13, boxSizing: 'border-box' as const,
+    width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border-input)',
+    backgroundColor: 'var(--bg-hover)', color: 'var(--text-primary)', fontSize: 13, boxSizing: 'border-box' as const,
     marginBottom: 6, fontFamily: 'Menlo, monospace',
   };
 
   return (
     <Section title="Environments">
       {envs.map(e => (
-        <div key={e.id} style={{ display: 'flex', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        <div key={e.id} style={{ display: 'flex', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
           <div style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#30d158', marginRight: 8, flexShrink: 0 }} />
-          <span style={{ flex: 1, color: '#e0e0e0', fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{e.label}</span>
+          <span style={{ flex: 1, color: 'var(--text-primary)', fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{e.label}</span>
           {e.id !== 'workspace' && (
-            <button onClick={() => handleRemove(e.id)} style={{ border: 'none', background: 'none', color: '#ff453a', fontSize: 18, cursor: 'pointer', padding: '0 4px', lineHeight: 1 }}>×</button>
+            <button onClick={() => handleRemove(e.id)} style={{ border: 'none', background: 'none', color: 'var(--danger)', fontSize: 18, cursor: 'pointer', padding: '0 4px', lineHeight: 1 }}>×</button>
           )}
         </div>
       ))}
@@ -1211,12 +1431,12 @@ function EnvManagerSection() {
           <input placeholder="Relay URL" value={form.relayUrl} onChange={e => setForm(f => ({...f, relayUrl: e.target.value}))} style={inputStyle} />
           <input placeholder="Auth Token" type="password" value={form.token} onChange={e => setForm(f => ({...f, token: e.target.value}))} style={inputStyle} />
           <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
-            <button onClick={() => { setAdding(false); setForm({ label: '', relayUrl: '', token: '' }); }} style={{ flex: 1, padding: '8px 0', border: 'none', borderRadius: 8, cursor: 'pointer', backgroundColor: 'rgba(255,255,255,0.06)', color: '#888', fontSize: 13 }}>Cancel</button>
-            <button onClick={handleAdd} style={{ flex: 1, padding: '8px 0', border: 'none', borderRadius: 8, cursor: 'pointer', backgroundColor: '#636AFF', color: '#fff', fontSize: 13, fontWeight: 600 }}>Add</button>
+            <button onClick={() => { setAdding(false); setForm({ label: '', relayUrl: '', token: '' }); }} style={{ flex: 1, padding: '8px 0', border: 'none', borderRadius: 8, cursor: 'pointer', backgroundColor: 'var(--bg-hover)', color: 'var(--text-secondary)', fontSize: 13 }}>Cancel</button>
+            <button onClick={handleAdd} style={{ flex: 1, padding: '8px 0', border: 'none', borderRadius: 8, cursor: 'pointer', backgroundColor: 'var(--accent)', color: 'var(--text-primary)', fontSize: 13, fontWeight: 600 }}>Add</button>
           </div>
         </div>
       ) : (
-        <button onClick={() => setAdding(true)} style={{ marginTop: 8, width: '100%', padding: '8px 0', border: 'none', borderRadius: 8, cursor: 'pointer', backgroundColor: 'rgba(99,106,255,0.15)', color: '#636AFF', fontSize: 13 }}>+ Add Environment</button>
+        <button onClick={() => setAdding(true)} style={{ marginTop: 8, width: '100%', padding: '8px 0', border: 'none', borderRadius: 8, cursor: 'pointer', backgroundColor: 'var(--accent-bg)', color: 'var(--accent)', fontSize: 13 }}>+ Add Environment</button>
       )}
     </Section>
   );
@@ -1225,8 +1445,8 @@ function EnvManagerSection() {
 function Section({ title, children }: { title: React.ReactNode; children: React.ReactNode }) {
   return (
     <div style={{ marginBottom: 20 }}>
-      <div style={{ color: '#8e8e93', fontSize: 13, fontWeight: 600, textTransform: 'uppercase', marginBottom: 8, letterSpacing: 0.5 }}>{title}</div>
-      <div style={{ backgroundColor: '#1c1c1e', borderRadius: 12, padding: 12 }}>{children}</div>
+      <div style={{ color: 'var(--text-label)', fontSize: 13, fontWeight: 600, textTransform: 'uppercase', marginBottom: 8, letterSpacing: 0.5 }}>{title}</div>
+      <div style={{ backgroundColor: 'var(--bg-card)', borderRadius: 12, padding: 12 }}>{children}</div>
     </div>
   );
 }
@@ -1234,8 +1454,8 @@ function Section({ title, children }: { title: React.ReactNode; children: React.
 function Row({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
-      <span style={{ color: '#aaa', fontSize: 14 }}>{label}</span>
-      <span style={{ color: valueColor || '#fff', fontSize: 14, fontFamily: 'Menlo, monospace' }}>{value}</span>
+      <span style={{ color: 'var(--text-secondary)', fontSize: 14 }}>{label}</span>
+      <span style={{ color: valueColor || 'var(--text-primary)', fontSize: 14, fontFamily: 'Menlo, monospace' }}>{value}</span>
     </div>
   );
 }
@@ -1244,12 +1464,12 @@ function Row({ label, value, valueColor }: { label: string; value: string; value
 const tabs = [{ id: 'canvas', label: 'Canvas' }, { id: 'config', label: 'Config' }];
 function TabBar({ tab, onTab, disabled }: { tab: string; onTab: (t: string) => void; disabled?: boolean }) {
   return (
-    <div style={{ display: 'flex', borderTop: '1px solid rgba(255,255,255,0.10)', paddingBottom: 'max(4px, env(safe-area-inset-bottom))', flexShrink: 0, position: 'relative', backgroundColor: '#0a0a0a', opacity: disabled ? 0.3 : 1, pointerEvents: disabled ? 'none' : 'auto' }}>
+    <div style={{ display: 'flex', borderTop: '1px solid var(--border-strong)', paddingBottom: 'max(4px, env(safe-area-inset-bottom))', flexShrink: 0, position: 'relative', backgroundColor: 'var(--bg-primary)', opacity: disabled ? 0.3 : 1, pointerEvents: disabled ? 'none' : 'auto' }}>
       {/* Sliding indicator */}
       {!disabled && <motion.div
         layoutId="tab-indicator"
         style={{
-          position: 'absolute', top: 0, height: 2, width: '50%', backgroundColor: '#fff', borderRadius: 1,
+          position: 'absolute', top: 0, height: 2, width: '50%', backgroundColor: 'var(--text-primary)', borderRadius: 1,
         }}
         animate={{ x: tab === 'canvas' ? 0 : '100%' }}
         transition={{ type: 'spring', stiffness: 500, damping: 35 }}
@@ -1259,7 +1479,7 @@ function TabBar({ tab, onTab, disabled }: { tab: string; onTab: (t: string) => v
           whileTap={disabled ? undefined : { scale: 0.92 }}
           style={{
             flex: 1, padding: '8px 0 4px', border: 'none', cursor: disabled ? 'default' : 'pointer', backgroundColor: 'transparent',
-            color: disabled ? '#333' : (tab === t.id ? '#fff' : '#636366'), display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
+            color: disabled ? 'var(--text-tertiary)' : (tab === t.id ? 'var(--text-primary)' : 'var(--text-tertiary)'), display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2,
             transition: 'color 0.2s',
           }}>
           <span style={{ display: 'flex' }}>
@@ -1316,7 +1536,7 @@ function SessionTerminal({ session, messages, onBack, onSend, onInterrupt, keybo
       initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
       transition={{ type: 'tween', duration: 0.25, ease: 'easeInOut' }}
       style={{ x: dragX, position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-        backgroundColor: '#0a0a0a', zIndex: 50, display: 'flex', flexDirection: 'column' }}
+        backgroundColor: 'var(--bg-primary)', zIndex: 50, display: 'flex', flexDirection: 'column' }}
     >
       {/* Narrow left-edge zone for swipe-back — keeps touch handlers off the message area */}
       <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
@@ -1329,14 +1549,14 @@ function SessionTerminal({ session, messages, onBack, onSend, onInterrupt, keybo
       }}>
         <motion.button whileTap={{ scale: 0.9 }} onClick={onBack}
           style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 8px',
-            color: '#e0a030', fontSize: 14, display: 'flex', alignItems: 'center', gap: 4 }}>
+            color: 'var(--warning)', fontSize: 14, display: 'flex', alignItems: 'center', gap: 4 }}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
           Back
         </motion.button>
-        <span style={{ color: '#ddd', fontSize: 14, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+        <span style={{ color: 'var(--text-primary)', fontSize: 14, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
           {session.display}
         </span>
-        <span style={{ color: '#777', fontSize: 11, fontFamily: 'Menlo, monospace' }}>{session.id.slice(0, 8)}</span>
+        <span style={{ color: 'var(--text-tertiary)', fontSize: 11, fontFamily: 'Menlo, monospace' }}>{session.id.slice(0, 8)}</span>
       </div>
 
       {/* Messages + Permission banner + ESC overlay */}
@@ -1350,7 +1570,7 @@ function SessionTerminal({ session, messages, onBack, onSend, onInterrupt, keybo
           </span>
           <button tabIndex={-1} onPointerDown={(e) => { e.preventDefault(); onInterrupt(); }} style={{
             padding: '3px 10px', borderRadius: 5, cursor: 'pointer', flexShrink: 0,
-            border: isProcessing ? '1px solid rgba(255,59,48,0.4)' : '1px solid rgba(255,255,255,0.08)',
+            border: isProcessing ? '1px solid rgba(255,59,48,0.4)' : '1px solid var(--border)',
             backgroundColor: isProcessing ? 'rgba(255,59,48,0.15)' : 'rgba(17,17,17,0.7)',
             color: isProcessing ? '#ff453a' : '#444', fontSize: 11, fontFamily: 'Menlo, monospace',
             pointerEvents: 'auto', touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' as any,
@@ -1363,7 +1583,7 @@ function SessionTerminal({ session, messages, onBack, onSend, onInterrupt, keybo
       {flow.uploadError && (
         <div onClick={flow.clearUploadError} style={{
           padding: '8px 14px', backgroundColor: 'rgba(255,59,48,0.85)',
-          color: '#fff', fontSize: 13, fontFamily: '-apple-system, system-ui, sans-serif',
+          color: 'var(--text-primary)', fontSize: 13, fontFamily: '-apple-system, system-ui, sans-serif',
           flexShrink: 0, cursor: 'pointer',
         }}>
           Upload failed: {flow.uploadError}
@@ -1395,7 +1615,7 @@ function SessionTerminal({ session, messages, onBack, onSend, onInterrupt, keybo
           <motion.div key="s-menu" initial={{ scale: 0.3, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.3, opacity: 0 }}
             transition={{ type: 'spring', stiffness: 500, damping: 25 }}
             style={{ position: 'absolute', bottom: 60, left: 12, zIndex: 999,
-              backgroundColor: 'rgba(30,30,50,0.95)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+              backgroundColor: 'var(--bg-elevated)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
               borderRadius: 14, padding: '4px 0', minWidth: 200,
               boxShadow: '0 8px 40px rgba(0,0,0,0.6)', border: '1px solid rgba(224,160,48,0.15)',
               transformOrigin: 'bottom left' }}>
@@ -1405,13 +1625,13 @@ function SessionTerminal({ session, messages, onBack, onSend, onInterrupt, keybo
               { label: 'Sketch', icon: (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>), action: () => { flow.setAttachMenu(false); flow.setSketchOpen(true); } },
             ].map((item, i) => (
               <div key={item.label}>
-                {i > 0 && <div style={{ height: 1, backgroundColor: 'rgba(224,160,48,0.10)', margin: '0 12px' }} />}
+                {i > 0 && <div style={{ height: 1, backgroundColor: 'var(--border)', margin: '0 12px' }} />}
                 <button tabIndex={-1} onClick={item.action} style={{
                   display: 'flex', alignItems: 'center', gap: 12, width: '100%',
                   padding: '11px 16px', border: 'none', cursor: 'pointer',
-                  backgroundColor: 'transparent', color: '#e0e0e0',
+                  backgroundColor: 'transparent', color: 'var(--text-primary)',
                   fontSize: 15, textAlign: 'left', fontFamily: '-apple-system, system-ui, sans-serif',
-                }}><span style={{ color: '#e0a030', display: 'flex' }}>{item.icon}</span> {item.label}</button>
+                }}><span style={{ color: 'var(--warning)', display: 'flex' }}>{item.icon}</span> {item.label}</button>
               </div>
             ))}
           </motion.div>
@@ -1864,7 +2084,7 @@ export default function App() {
       {connState !== 'connected' && (
         <div style={{
           position: 'fixed', top: 'max(8px, env(safe-area-inset-top))', right: 12, zIndex: 99999,
-          color: '#f5a623', fontSize: 11, fontFamily: 'Menlo, monospace',
+          color: 'var(--warning)', fontSize: 11, fontFamily: 'Menlo, monospace',
           pointerEvents: 'none',
         }}>
           reconnecting...
@@ -1898,26 +2118,22 @@ export default function App() {
             }}
           />
           {/* Canvas iframe — fills full area */}
-          <div style={{ flex: 1, position: 'relative', backgroundColor: '#0a0a0a' }}>
+          <div style={{ flex: 1, position: 'relative', backgroundColor: 'var(--bg-primary)' }}>
             {!canvasLoaded && (
-              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0a0a0a', zIndex: 1 }}>
-                <div style={{ width: 120, height: 2, borderRadius: 1, backgroundColor: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
-                  <div style={{ width: '40%', height: '100%', backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: 1, animation: 'canvasLoad 1.2s ease-in-out infinite' }} />
+              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'var(--bg-primary)', zIndex: 1 }}>
+                <div style={{ width: 120, height: 2, borderRadius: 1, backgroundColor: 'var(--bg-input)', overflow: 'hidden' }}>
+                  <div style={{ width: '40%', height: '100%', backgroundColor: 'var(--bar-fill)', borderRadius: 1, animation: 'canvasLoad 1.2s ease-in-out infinite' }} />
                 </div>
                 <style>{`@keyframes canvasLoad { 0% { transform: translateX(-120%); } 100% { transform: translateX(300%); } }`}</style>
               </div>
             )}
-            <iframe src={`/canvas.html?v=${BUILD_TS}`} onLoad={() => setCanvasLoaded(true)} style={{ width: '100%', height: '100%', border: 'none', backgroundColor: '#0a0a0a', willChange: 'transform' }} sandbox="allow-scripts allow-same-origin" />
+            <iframe src={`/canvas.html?v=${BUILD_TS}`} onLoad={() => setCanvasLoaded(true)} style={{ width: '100%', height: '100%', border: 'none', backgroundColor: 'var(--bg-primary)', willChange: 'transform' }} sandbox="allow-scripts allow-same-origin" />
           </div>
         </div>
 
         {/* Config content — lazy-mounted: only rendered after first visit */}
         {hasVisitedConfig && <div style={{ flex: 1, display: tab === 'config' ? 'flex' : 'none', overflow: 'hidden', flexDirection: 'column' }}>
-          <ConfigTab connState={connState} onQuickAction={(prompt) => {
-            send(prompt);
-            setTab('canvas'); setCurrentTab('canvas');
-            setTerminalVisible(true);
-          }} onRefresh={() => { if (connState !== 'connected') connect(); }} />
+          <ConfigTab connState={connState} />
         </div>}
 
         {/* Origin Terminal — always on top of Canvas UI */}
@@ -1928,7 +2144,7 @@ export default function App() {
           transition: dragging.current ? 'none' : 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
           willChange: 'transform',
           display: 'flex', flexDirection: 'column',
-          backgroundColor: '#111',
+          backgroundColor: 'var(--bg-secondary)',
           borderTopLeftRadius: 12, borderTopRightRadius: 12,
           boxShadow: terminalVisible ? '0 -4px 20px rgba(0,0,0,0.5)' : 'none',
         }}>
@@ -1970,10 +2186,10 @@ export default function App() {
             style={{
               display: 'flex', justifyContent: 'center', alignItems: 'center',
               padding: '10px 0 6px', cursor: 'grab', flexShrink: 0, touchAction: 'none',
-              backgroundColor: 'rgba(255,255,255,0.06)', borderBottom: '1px solid rgba(255,255,255,0.08)',
+              backgroundColor: 'var(--bg-hover)', borderBottom: '1px solid var(--border)',
             }}
           >
-            <div style={{ width: 40, height: 5, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.45)' }} />
+            <div style={{ width: 40, height: 5, borderRadius: 3, backgroundColor: 'var(--scrollbar-thumb)' }} />
           </div>
           <div style={{ flex: '1 1 0', minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
             <TerminalOverlay messages={messages} visible={true} />
@@ -1990,7 +2206,7 @@ export default function App() {
               </span>
               <button tabIndex={-1} onPointerDown={(e) => { e.preventDefault(); interrupt(); }} style={{
                 padding: '3px 10px', borderRadius: 5, cursor: 'pointer', flexShrink: 0,
-                border: isProcessing ? '1px solid rgba(255,59,48,0.4)' : '1px solid rgba(255,255,255,0.08)',
+                border: isProcessing ? '1px solid rgba(255,59,48,0.4)' : '1px solid var(--border)',
                 backgroundColor: isProcessing ? 'rgba(255,59,48,0.15)' : 'rgba(17,17,17,0.7)',
                 color: isProcessing ? '#ff453a' : '#444', fontSize: 11, fontFamily: 'Menlo, monospace',
                 pointerEvents: 'auto', touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' as any,
@@ -2035,9 +2251,9 @@ export default function App() {
               position: 'absolute',
               bottom: inputBarHeight + (keyboardOpen ? 8 : 36),
               left: 12, zIndex: 999,
-              backgroundColor: 'rgba(30,30,30,0.95)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+              backgroundColor: 'var(--bg-elevated)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
               borderRadius: 14, padding: '4px 0', minWidth: 200,
-              boxShadow: '0 8px 40px rgba(0,0,0,0.6)', border: '1px solid rgba(255,255,255,0.08)',
+              boxShadow: '0 8px 40px rgba(0,0,0,0.6)', border: '1px solid var(--border)',
               transformOrigin: 'bottom left',
             }}
           >
@@ -2050,13 +2266,13 @@ export default function App() {
                 initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: i * 0.06, type: 'spring', stiffness: 400, damping: 20 }}
               >
-                {i > 0 && <div style={{ height: 1, backgroundColor: 'rgba(255,255,255,0.10)', margin: '0 12px' }} />}
+                {i > 0 && <div style={{ height: 1, backgroundColor: 'var(--bg-input)', margin: '0 12px' }} />}
                 <button tabIndex={-1} onClick={item.action} style={{
                   display: 'flex', alignItems: 'center', gap: 12, width: '100%',
                   padding: '11px 16px', border: 'none', cursor: 'pointer', borderRadius: 0,
-                  backgroundColor: 'transparent', color: '#e0e0e0',
+                  backgroundColor: 'transparent', color: 'var(--text-primary)',
                   fontSize: 15, textAlign: 'left', fontFamily: '-apple-system, system-ui, sans-serif',
-                }}><span style={{ color: '#999', display: 'flex' }}>{item.icon}</span> {item.label}</button>
+                }}><span style={{ color: 'var(--text-secondary)', display: 'flex' }}>{item.icon}</span> {item.label}</button>
               </motion.div>
             ))}
           </motion.div>
@@ -2195,19 +2411,19 @@ export default function App() {
         return (
           <div style={{
             position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 9999,
-            background: 'rgba(20,20,22,0.97)', backdropFilter: 'blur(12px)',
-            borderTop: '1px solid rgba(255,255,255,0.10)',
+            background: 'var(--bg-elevated)', backdropFilter: 'blur(12px)',
+            borderTop: '1px solid var(--border-strong)',
             padding: '14px 16px', paddingBottom: 'max(14px, env(safe-area-inset-bottom))',
             display: 'flex', alignItems: 'flex-start', gap: 12,
           }}>
             <div style={{ flex: 1 }}>
-              <div style={{ color: '#fff', fontSize: 14, fontWeight: 600, marginBottom: 3 }}>Add Morph to Home Screen</div>
-              <div style={{ color: '#888', fontSize: 12, lineHeight: '16px' }}>
+              <div style={{ color: 'var(--text-primary)', fontSize: 14, fontWeight: 600, marginBottom: 3 }}>Add Morph to Home Screen</div>
+              <div style={{ color: 'var(--text-secondary)', fontSize: 12, lineHeight: '16px' }}>
                 Tap <svg style={{ display: 'inline', verticalAlign: 'middle', margin: '0 2px' }} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v13M7 7l5-5 5 5"/><path d="M3 17v3a1 1 0 001 1h16a1 1 0 001-1v-3"/></svg> Share, then "Add to Home Screen" for a better experience.
               </div>
             </div>
             <button onClick={() => { localStorage.setItem('morph-a2hs-dismissed', '1'); window.location.reload(); }} style={{
-              background: 'none', border: 'none', color: '#555', fontSize: 20, cursor: 'pointer',
+              background: 'none', border: 'none', color: 'var(--text-tertiary)', fontSize: 20, cursor: 'pointer',
               padding: '0 4px', lineHeight: 1, flexShrink: 0,
             }}>×</button>
           </div>

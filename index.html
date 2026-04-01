@@ -5,21 +5,166 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="theme-color" content="#0a0a0a" />
+  <meta name="theme-color" content="#0a0a0a" id="meta-theme-color" />
   <title>Morph</title>
   <link rel="icon" href="/icon-192.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="/apple-icon-v3.png" />
   <link rel="manifest" href="/manifest.json" />
   <style>@font-face { font-family: 'CloisterBlack'; src: url('/CloisterBlack.ttf'); }</style>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { margin: 0; padding: 0; background: #0a0a0a; overflow: hidden; height: var(--real-h, 100%); overscroll-behavior: none; }
-    #root { height: var(--real-h, 100%); width: 100%; background: #0a0a0a; color: #fff; font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; overflow: hidden; overscroll-behavior: none; }
+
+    /* ── Theme: Dark (default) ── */
+    :root, [data-theme="dark"] {
+      --bg-primary: #0a0a0a; --bg-secondary: #111; --bg-card: #1c1c1e;
+      --bg-elevated: rgba(28,28,30,0.92); --bg-overlay: rgba(0,0,0,0.5);
+      --bg-input: rgba(255,255,255,0.08); --bg-hover: rgba(255,255,255,0.06);
+      --text-primary: #fff; --text-secondary: #999; --text-tertiary: #666; --text-label: #8e8e93;
+      --border: rgba(255,255,255,0.08); --border-strong: rgba(255,255,255,0.10); --border-input: rgba(255,255,255,0.12);
+      --accent: #636AFF; --accent-bg: rgba(99,106,255,0.15);
+      --danger: #ff453a; --danger-bg: rgba(255,59,48,0.15); --danger-border: rgba(255,59,48,0.4);
+      --success: #30d158; --success-bg: rgba(48,209,88,0.12); --success-border: rgba(48,209,88,0.4);
+      --warning: #ff9f0a;
+      --bar-track: rgba(255,255,255,0.08); --bar-fill: rgba(255,255,255,0.3);
+      --scrollbar-thumb: rgba(255,255,255,0.15);
+      --font-body: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      --sunny-texture: none;
+      --pixel-scanlines: none;
+      color-scheme: dark;
+    }
+
+    /* ── Theme: Light ── */
+    [data-theme="light"] {
+      --bg-primary: #f2f2f7; --bg-secondary: #e5e5ea; --bg-card: #fff;
+      --bg-elevated: rgba(255,255,255,0.95); --bg-overlay: rgba(0,0,0,0.3);
+      --bg-input: rgba(0,0,0,0.05); --bg-hover: rgba(0,0,0,0.04);
+      --text-primary: #000; --text-secondary: #666; --text-tertiary: #999; --text-label: #6e6e73;
+      --border: rgba(0,0,0,0.06); --border-strong: rgba(0,0,0,0.10); --border-input: rgba(0,0,0,0.12);
+      --accent: #636AFF; --accent-bg: rgba(99,106,255,0.12);
+      --danger: #ff3b30; --danger-bg: rgba(255,59,48,0.10); --danger-border: rgba(255,59,48,0.3);
+      --success: #34c759; --success-bg: rgba(52,199,89,0.10); --success-border: rgba(52,199,89,0.3);
+      --warning: #ff9500;
+      --bar-track: rgba(0,0,0,0.06); --bar-fill: rgba(0,0,0,0.2);
+      --scrollbar-thumb: rgba(0,0,0,0.15);
+      --font-body: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      --sunny-texture: none;
+      --pixel-scanlines: none;
+      color-scheme: light;
+    }
+
+    /* ── Theme: Sunny ── */
+    [data-theme="sunny"] {
+      --bg-primary: #f4ede1; --bg-secondary: #eae2d3; --bg-card: #f7f1e7;
+      --bg-elevated: rgba(245,240,232,0.95); --bg-overlay: rgba(42,36,32,0.3);
+      --bg-input: rgba(42,36,32,0.06); --bg-hover: rgba(42,36,32,0.04);
+      --text-primary: #2a2420; --text-secondary: #6b5d4f; --text-tertiary: #998a7a; --text-label: #8a7d6e;
+      --border: rgba(42,36,32,0.08); --border-strong: rgba(42,36,32,0.12); --border-input: rgba(42,36,32,0.15);
+      --accent: #b87333; --accent-bg: rgba(184,115,51,0.12);
+      --danger: #c44230; --danger-bg: rgba(196,66,48,0.10); --danger-border: rgba(196,66,48,0.3);
+      --success: #5a8a4a; --success-bg: rgba(90,138,74,0.10); --success-border: rgba(90,138,74,0.3);
+      --warning: #d4882a;
+      --bar-track: rgba(42,36,32,0.08); --bar-fill: rgba(42,36,32,0.2);
+      --scrollbar-thumb: rgba(42,36,32,0.15);
+      --font-body: 'Georgia', 'Times New Roman', serif;
+      --sunny-texture: url("data:image/svg+xml,%3Csvg width='300' height='300' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.06'/%3E%3C/svg%3E"), url("data:image/svg+xml,%3Csvg width='200' height='200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='f'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.4' numOctaves='2' seed='5' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23f)' opacity='0.04'/%3E%3C/svg%3E");
+      --pixel-scanlines: none;
+      color-scheme: light;
+    }
+
+    /* ── Theme: Pixel — 8-bit retro mosaic ── */
+    [data-theme="pixel"] {
+      --bg-primary: #0a0f0a; --bg-secondary: #111a11; --bg-card: #0e150e;
+      --bg-elevated: rgba(14,21,14,0.96); --bg-overlay: rgba(0,0,0,0.7);
+      --bg-input: rgba(0,255,136,0.08); --bg-hover: rgba(0,255,136,0.05);
+      --text-primary: #d0f0d0; --text-secondary: #00ff88; --text-tertiary: #00aa55; --text-label: #00cc66;
+      --border: rgba(0,255,136,0.15); --border-strong: rgba(0,255,136,0.25); --border-input: rgba(0,255,136,0.18);
+      --accent: #ffcc00; --accent-bg: rgba(255,204,0,0.18);
+      --danger: #ff3322; --danger-bg: rgba(255,51,34,0.18); --danger-border: rgba(255,51,34,0.5);
+      --success: #00ff88; --success-bg: rgba(0,255,136,0.15); --success-border: rgba(0,255,136,0.5);
+      --warning: #ff9900;
+      --bar-track: rgba(0,255,136,0.10); --bar-fill: rgba(0,255,136,0.40);
+      --scrollbar-thumb: rgba(0,255,136,0.20);
+      --font-body: 'VT323', 'Press Start 2P', 'Menlo', monospace;
+      --sunny-texture: none;
+      --pixel-scanlines: repeating-linear-gradient(transparent, transparent 2px, rgba(0,0,0,0.15) 2px, rgba(0,0,0,0.15) 4px);
+      --pixel-border-radius: 0px;
+      color-scheme: dark;
+    }
+
+    /* ── Theme: Glass — iOS 26 Liquid Glass ── */
+    [data-theme="glass"] {
+      --bg-primary: transparent; --bg-secondary: rgba(255,255,255,0.08); --bg-card: rgba(255,255,255,0.15);
+      --bg-elevated: rgba(255,255,255,0.25); --bg-overlay: rgba(0,0,0,0.25);
+      --bg-input: rgba(255,255,255,0.15); --bg-hover: rgba(255,255,255,0.10);
+      --text-primary: rgba(0,0,0,0.85); --text-secondary: rgba(0,0,0,0.55); --text-tertiary: rgba(0,0,0,0.35); --text-label: rgba(0,0,0,0.50);
+      --border: rgba(255,255,255,0.30); --border-strong: rgba(255,255,255,0.50); --border-input: rgba(255,255,255,0.35);
+      --accent: #007AFF; --accent-bg: rgba(0,122,255,0.15);
+      --danger: #ff3b30; --danger-bg: rgba(255,59,48,0.12); --danger-border: rgba(255,59,48,0.35);
+      --success: #34c759; --success-bg: rgba(52,199,89,0.12); --success-border: rgba(52,199,89,0.35);
+      --warning: #ff9500;
+      --bar-track: rgba(255,255,255,0.12); --bar-fill: rgba(0,122,255,0.25);
+      --scrollbar-thumb: rgba(0,0,0,0.08);
+      --font-body: -apple-system, BlinkMacSystemFont, 'SF Pro Display', system-ui, sans-serif;
+      --sunny-texture: none;
+      --pixel-scanlines: none;
+      color-scheme: light;
+    }
+
+    html, body { margin: 0; padding: 0; background: var(--bg-primary); overflow: hidden; height: var(--real-h, 100%); overscroll-behavior: none; }
+    [data-theme="glass"] body { background: linear-gradient(145deg, #b8d8e8 0%, #d4e4d0 20%, #e8dcc8 40%, #c0d8e8 60%, #d8e0c8 80%, #b0d0e0 100%); background-size: 300% 300%; animation: liquidShift 20s ease infinite; }
+    @keyframes liquidShift { 0% { background-position: 0% 50%; } 33% { background-position: 100% 0%; } 66% { background-position: 50% 100%; } 100% { background-position: 0% 50%; } }
+    [data-theme="pixel"] body { background-color: #0a0f0a; background-image: linear-gradient(rgba(0,255,136,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(0,255,136,0.03) 1px, transparent 1px); background-size: 8px 8px; image-rendering: pixelated; }
+    #root { height: var(--real-h, 100%); width: 100%; background: var(--bg-primary); color: var(--text-primary); font-family: var(--font-body); overflow: hidden; overscroll-behavior: none; position: relative; }
+    [data-theme="glass"] #root { background: rgba(255,255,255,0.05); backdrop-filter: blur(16px) saturate(1.8); -webkit-backdrop-filter: blur(16px) saturate(1.8); }
+    [data-theme="pixel"] #root { background: transparent; }
+    #root::after { content: ''; position: fixed; inset: 0; background-image: var(--sunny-texture); background-repeat: repeat; pointer-events: none; z-index: 0; }
+    #root::before { content: ''; position: fixed; inset: 0; background-image: var(--pixel-scanlines); pointer-events: none; z-index: 9997; }
+    #root > * { position: relative; z-index: 1; }
+    /* Pixel: force sharp corners, pixelated rendering, chunky borders */
+    [data-theme="pixel"] * { border-radius: 0px !important; }
+    [data-theme="pixel"] button { border: 2px solid rgba(0,255,136,0.25) !important; text-transform: uppercase; letter-spacing: 1px; font-weight: 700; }
+    [data-theme="pixel"] input, [data-theme="pixel"] textarea { border: 2px solid rgba(0,255,136,0.25) !important; }
+    /* Liquid Glass: 3-layer Apple spec — specular highlight + backdrop blur + depth shadow */
+    [data-theme="glass"] div[style*="bg-card"], [data-theme="glass"] div[style*="Card"] {
+      backdrop-filter: blur(16px) saturate(1.8); -webkit-backdrop-filter: blur(16px) saturate(1.8);
+      border: 1px solid rgba(255,255,255,0.3) !important;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.8), inset 0 0 20px -5px rgba(255,255,255,0.3), 0 8px 32px rgba(31,38,135,0.15);
+    }
+
+    /* ── Sunny mode: tree shadow video overlay ── */
+    [data-theme="sunny"] #sunny-shadow { display: block; }
+    #sunny-shadow {
+      display: none;
+      position: fixed; inset: 0; pointer-events: none; z-index: 9998;
+      overflow: hidden;
+    }
+    #sunny-shadow video {
+      position: absolute;
+      width: 100%; height: 100%;
+      object-fit: cover;
+      mix-blend-mode: multiply;
+      opacity: 0.35;
+      pointer-events: none;
+    }
   </style>
 </head>
 <body>
   <div id="root"></div>
+  <!-- Sunny mode: real tree shadow video loop + mix-blend-mode: multiply -->
+  <div id="sunny-shadow">
+    <video autoplay loop muted playsinline disablepictureinpicture>
+      <source src="/tree-shadow.mp4" type="video/mp4">
+    </video>
+  </div>
   <script>
+    // Apply saved theme immediately (no flash)
+    var savedTheme = localStorage.getItem('morph-theme') || 'dark';
+    document.documentElement.setAttribute('data-theme', savedTheme);
+    var themeColors = { dark: '#0a0a0a', light: '#f2f2f7', sunny: '#f4ede1', pixel: '#0a0f0a', glass: '#b8d8e8' };
+    document.getElementById('meta-theme-color').content = themeColors[savedTheme] || themeColors.dark;
+
     // Standalone PWA: use screen.height (covers full screen incl. safe areas)
     // Safari browser: use innerHeight (screen.height > visible area → black gap above)
     var isStandalone = window.navigator.standalone;
@@ -36,6 +181,8 @@
       var t = e.target;
       // Always allow touch in input/textarea (cursor, selection)
       if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA') return;
+      // Skip overlay elements (sunny-shadow video, paper texture) — they're pointer-events:none but iOS can still target them
+      if (t.closest && t.closest('#sunny-shadow')) return;
       // Find scrollable ancestor
       var el = t;
       while (el && el !== document.body) {

@@ -2,30 +2,99 @@
 <html>
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500&family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
   <style>@font-face { font-family: 'CloisterBlack'; src: url('/CloisterBlack.ttf'); }</style>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    /* Theme vars — synced from parent via JS */
+    :root, [data-theme="dark"] {
+      --cv-bg: #0a0a0a; --cv-fg: #fff; --cv-card: rgba(28,28,30,0.95);
+      --cv-border: rgba(255,255,255,0.06); --cv-grid: rgba(255,255,255,0.03);
+      --cv-menu: #2c2c2e; --cv-menu-border: rgba(255,255,255,0.1);
+      --cv-hover: rgba(255,255,255,0.08); --cv-dim: #666; --cv-toolbar: #111;
+      --cv-agent: #1c1c2e; --cv-user: #1e3a2f;
+      --cv-shadow: 0 8px 40px rgba(0,0,0,0.6);
+      --cv-sketch-bg: #0a0a0a;
+    }
+    [data-theme="light"] {
+      --cv-bg: #f2f2f7; --cv-fg: #000; --cv-card: rgba(255,255,255,0.95);
+      --cv-border: rgba(0,0,0,0.06); --cv-grid: rgba(0,0,0,0.04);
+      --cv-menu: #fff; --cv-menu-border: rgba(0,0,0,0.1);
+      --cv-hover: rgba(0,0,0,0.05); --cv-dim: #999; --cv-toolbar: #fff;
+      --cv-agent: #e8e8f4; --cv-user: #dff0e6;
+      --cv-shadow: 0 8px 40px rgba(0,0,0,0.15);
+      --cv-sketch-bg: #f2f2f7;
+    }
+    [data-theme="sunny"] {
+      --cv-bg: #f4ede1; --cv-fg: #2a2420; --cv-card: rgba(247,241,231,0.95);
+      --cv-border: rgba(42,36,32,0.08); --cv-grid: rgba(42,36,32,0.04);
+      --cv-menu: #f7f1e7; --cv-menu-border: rgba(42,36,32,0.12);
+      --cv-hover: rgba(42,36,32,0.06); --cv-dim: #998a7a; --cv-toolbar: #f7f1e7;
+      --cv-agent: #ebe3d4; --cv-user: #e2e8d3;
+      --cv-shadow: 0 8px 40px rgba(42,36,32,0.12);
+      --cv-sketch-bg: #f4ede1;
+    }
+    [data-theme="pixel"] {
+      --cv-bg: #0a0f0a; --cv-fg: #d0f0d0; --cv-card: rgba(14,21,14,0.96);
+      --cv-border: rgba(0,255,136,0.15); --cv-grid: rgba(0,255,136,0.05);
+      --cv-menu: #0e150e; --cv-menu-border: rgba(0,255,136,0.25);
+      --cv-hover: rgba(0,255,136,0.08); --cv-dim: #00cc66; --cv-toolbar: #111a11;
+      --cv-agent: #081008; --cv-user: #0a1208;
+      --cv-shadow: 0 0 0 2px rgba(0,255,136,0.15);
+      --cv-sketch-bg: #0a0f0a;
+    }
+    [data-theme="glass"] {
+      --cv-bg: transparent; --cv-fg: rgba(0,0,0,0.85); --cv-card: rgba(255,255,255,0.15);
+      --cv-border: rgba(255,255,255,0.30); --cv-grid: rgba(0,0,0,0.03);
+      --cv-menu: rgba(255,255,255,0.20); --cv-menu-border: rgba(255,255,255,0.40);
+      --cv-hover: rgba(255,255,255,0.10); --cv-dim: rgba(0,0,0,0.45); --cv-toolbar: rgba(255,255,255,0.20);
+      --cv-agent: rgba(180,216,232,0.12); --cv-user: rgba(192,216,200,0.12);
+      --cv-shadow: inset 0 1px 0 rgba(255,255,255,0.8), inset 0 0 20px -5px rgba(255,255,255,0.3), 0 8px 32px rgba(31,38,135,0.15);
+      --cv-sketch-bg: rgba(255,255,255,0.08);
+    }
+
     body {
       font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-      background: #0a0a0a; color: #fff;
+      background: var(--cv-bg); color: var(--cv-fg);
       min-height: 100vh;
       padding: 0;
       padding-bottom: 80px;
       -webkit-font-smoothing: antialiased;
       /* Grid background */
       background-image:
-        linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+        linear-gradient(var(--cv-grid) 1px, transparent 1px),
+        linear-gradient(90deg, var(--cv-grid) 1px, transparent 1px);
       background-size: 24px 24px;
+    }
+    [data-theme="sunny"] body {
+      font-family: 'Georgia', 'Times New Roman', serif;
+    }
+    [data-theme="pixel"] body {
+      font-family: 'VT323', 'Press Start 2P', 'Menlo', monospace;
+      background-color: #0a0f0a;
+      background-image: linear-gradient(rgba(0,255,136,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(0,255,136,0.05) 1px, transparent 1px);
+      background-size: 8px 8px;
+    }
+    [data-theme="pixel"] * { border-radius: 0px !important; }
+    [data-theme="pixel"] .morph-component { border: 2px solid rgba(0,255,136,0.2) !important; box-shadow: 0 0 0 2px rgba(0,255,136,0.08); }
+    [data-theme="glass"] body {
+      background: linear-gradient(145deg, #b8d8e8 0%, #d4e4d0 20%, #e8dcc8 40%, #c0d8e8 60%, #d8e0c8 80%, #b0d0e0 100%);
+      background-size: 300% 300%; animation: liquidShift 20s ease infinite;
+    }
+    @keyframes liquidShift { 0% { background-position: 0% 50%; } 33% { background-position: 100% 0%; } 66% { background-position: 50% 100%; } 100% { background-position: 0% 50%; } }
+    [data-theme="glass"] .morph-component {
+      backdrop-filter: blur(16px) saturate(1.8); -webkit-backdrop-filter: blur(16px) saturate(1.8);
+      border: 1px solid rgba(255,255,255,0.3);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.8), inset 0 0 20px -5px rgba(255,255,255,0.3), 0 8px 32px rgba(31,38,135,0.15);
     }
     #morph-canvas {
       display: flex; flex-direction: column; gap: 12px;
       padding: 16px; position: relative; z-index: 1;
     }
     .morph-component {
-      background: rgba(28,28,30,0.95); border-radius: 14px; padding: 16px;
-      border: 1px solid rgba(255,255,255,0.06); position: relative;
+      background: var(--cv-card); border-radius: 14px; padding: 16px;
+      border: 1px solid var(--cv-border); position: relative;
       animation: fadeIn 0.3s ease;
       backdrop-filter: blur(8px);
     }
@@ -34,20 +103,20 @@
       to { opacity: 1; transform: translateY(0); }
     }
     .morph-component.draft {
-      border: 1px dashed rgba(255,255,255,0.15);
+      border: 1px dashed var(--cv-border);
     }
     .morph-component.draft::after {
       content: 'DRAFT'; position: absolute; top: 10px; right: 10px;
-      font-size: 9px; color: #666; text-transform: uppercase; letter-spacing: 1px;
-      background: rgba(255,255,255,0.06); padding: 3px 8px; border-radius: 4px;
+      font-size: 9px; color: var(--cv-dim); text-transform: uppercase; letter-spacing: 1px;
+      background: var(--cv-hover); padding: 3px 8px; border-radius: 4px;
       font-weight: 600;
     }
     .morph-action-menu {
-      display: none; position: fixed; background: #2c2c2e;
+      display: none; position: fixed; background: var(--cv-menu);
       border-radius: 14px; padding: 6px; gap: 2px;
-      box-shadow: 0 8px 40px rgba(0,0,0,0.6); z-index: 1000;
+      box-shadow: var(--cv-shadow); z-index: 1000;
       flex-direction: column; min-width: 160px;
-      border: 1px solid rgba(255,255,255,0.1);
+      border: 1px solid var(--cv-menu-border);
       animation: menuIn 0.15s ease;
     }
     @keyframes menuIn {
@@ -58,15 +127,15 @@
     .morph-action-btn {
       padding: 11px 16px; border: none; border-radius: 10px;
       font-size: 15px; cursor: pointer; text-align: left;
-      background: transparent; color: #fff;
+      background: transparent; color: var(--cv-fg);
       display: flex; align-items: center; gap: 10px;
     }
-    .morph-action-btn:active { background: rgba(255,255,255,0.08); }
+    .morph-action-btn:active { background: var(--cv-hover); }
     .morph-action-btn .icon { font-size: 16px; width: 20px; text-align: center; }
     .morph-action-btn.adopt .icon { color: #30d158; }
     .morph-action-btn.dismiss .icon { color: #ff453a; }
     .morph-action-btn.edit .icon { color: #5e5ce6; }
-    .morph-menu-sep { height: 1px; background: rgba(255,255,255,0.08); margin: 2px 8px; }
+    .morph-menu-sep { height: 1px; background: var(--cv-border); margin: 2px 8px; }
 
     /* Empty state */
     #morph-empty {
@@ -80,8 +149,8 @@
     }
 
     .morph-message { padding: 12px 16px; border-radius: 14px; margin: 4px 0; max-width: 85%; }
-    .morph-message.agent { background: #1c1c2e; align-self: flex-start; }
-    .morph-message.user { background: #1e3a2f; align-self: flex-end; margin-left: auto; }
+    .morph-message.agent { background: var(--cv-agent); align-self: flex-start; }
+    .morph-message.user { background: var(--cv-user); align-self: flex-end; margin-left: auto; }
     .morph-message pre { white-space: pre-wrap; font-size: 13px; line-height: 1.5; }
 
     /* === SKETCH MODE === */
@@ -106,8 +175,8 @@
     #sketch-toolbar {
       position: fixed; bottom: 24px; left: 50%;
       display: flex; gap: 4px; align-items: center; z-index: 501;
-      background: #111; border-radius: 20px; padding: 6px 10px;
-      border: 1px solid rgba(255,255,255,0.08);
+      background: var(--cv-toolbar); border-radius: 20px; padding: 6px 10px;
+      border: 1px solid var(--cv-border);
       box-shadow:
         0 12px 40px rgba(0,0,0,0.7),
         0 0 0 1px rgba(255,255,255,0.03);
@@ -120,13 +189,13 @@
 
     .sketch-btn {
       padding: 7px 14px; border: none; border-radius: 12px;
-      font-size: 13px; cursor: pointer; color: #888;
+      font-size: 13px; cursor: pointer; color: var(--cv-dim);
       background: transparent; font-weight: 600;
       font-family: 'Menlo', 'SF Mono', monospace;
       letter-spacing: -0.3px;
       transition: background 0.15s ease, color 0.15s ease;
     }
-    .sketch-btn:active { background: rgba(255,255,255,0.06); }
+    .sketch-btn:active { background: var(--cv-hover); }
 
     .sketch-btn.send {
       color: #0a0a0a; background: #30d158;
@@ -148,7 +217,7 @@
     .sketch-colors { display: flex; gap: 5px; align-items: center; padding: 0 4px; }
     .sketch-color {
       width: 20px; height: 20px; border-radius: 10px;
-      border: 2px solid rgba(255,255,255,0.06);
+      border: 2px solid var(--cv-border);
       cursor: pointer;
       transition: border-color 0.15s ease, transform 0.15s ease;
       box-shadow: 0 1px 3px rgba(0,0,0,0.3);
@@ -161,7 +230,7 @@
 
     .sketch-sep {
       width: 1px; height: 20px;
-      background: rgba(255,255,255,0.06);
+      background: var(--cv-hover);
       margin: 0 2px;
     }
 
@@ -185,13 +254,13 @@
     #sketch-label {
       position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
       z-index: 501;
-      background: rgba(255,255,255,0.04);
-      color: #444;
+      background: var(--cv-hover);
+      color: var(--cv-dim);
       padding: 5px 16px; border-radius: 20px;
       font-size: 10px; font-weight: 700;
       font-family: 'Menlo', 'SF Mono', monospace;
       letter-spacing: 2px; text-transform: uppercase;
-      border: 1px solid rgba(255,255,255,0.06);
+      border: 1px solid var(--cv-border);
     }
   </style>
 </head>
@@ -620,7 +689,7 @@
       tmp.width = outW; tmp.height = outH;
       var tCtx = tmp.getContext('2d');
       // Dark background so strokes are visible to AI vision (transparent → white = invisible)
-      tCtx.fillStyle = '#0a0a0a';
+      tCtx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--cv-sketch-bg').trim() || '#0a0a0a';
       tCtx.fillRect(0, 0, outW, outH);
       tCtx.drawImage(c, 0, 0, c.width, c.height, 0, 0, outW, outH);
       var dataUrl = tmp.toDataURL('image/png');
@@ -712,6 +781,23 @@
     var style = document.createElement('style');
     style.textContent = '@keyframes fadeOut { to { opacity: 0; transform: translateY(-8px); } }';
     document.head.appendChild(style);
+
+    // Sync theme from parent window
+    function _syncTheme() {
+      try {
+        var t = window.parent.document.documentElement.getAttribute('data-theme') || 'dark';
+        document.documentElement.setAttribute('data-theme', t);
+      } catch(e) {}
+    }
+    _syncTheme();
+    // Re-sync on message (parent sends theme changes)
+    window.addEventListener('message', function(e) {
+      if (e.data && e.data.action === 'theme.set') {
+        document.documentElement.setAttribute('data-theme', e.data.theme);
+      }
+    });
+    // Poll fallback (iframe same-origin)
+    setInterval(_syncTheme, 2000);
 
     _postToNative('canvas.ready', {});
   </script>
