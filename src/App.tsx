@@ -12,8 +12,8 @@ const BUILD_TS = typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : Date.n
 const IDLE_WORDS = ['thinking...', 'pondering...', 'wondering...', 'reasoning...', 'considering...', 'analyzing...', 'processing...'];
 
 // ─── Theme ───
-type Theme = 'dark' | 'light' | 'sunny' | 'pixel' | 'glass';
-const THEME_META: Record<Theme, string> = { dark: '#0a0a0a', light: '#f2f2f7', sunny: '#f4ede1', pixel: '#0a0f0a', glass: '#b8d8e8' };
+type Theme = 'dark' | 'light' | 'sunny' | 'pixel' | 'glass' | 'bloomberg';
+const THEME_META: Record<Theme, string> = { dark: '#0a0a0a', light: '#f2f2f7', sunny: '#f4ede1', pixel: '#0a0f0a', glass: '#b8d8e8', bloomberg: '#0c0c0c' };
 function getTheme(): Theme { return (localStorage.getItem('morph-theme') as Theme) || 'dark'; }
 function setThemeGlobal(t: Theme) {
   localStorage.setItem('morph-theme', t);
@@ -1316,14 +1316,14 @@ function ConfigTab({ connState }: { connState: string }) {
 
       <Section title="Appearance">
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {(['dark', 'light', 'sunny', 'pixel', 'glass'] as Theme[]).map(t => (
+          {(['dark', 'light', 'sunny', 'pixel', 'glass', 'bloomberg'] as Theme[]).map(t => (
             <button key={t} onClick={() => { setTheme(t); setThemeGlobal(t); }} style={{
-              flex: '1 0 auto', minWidth: 70, padding: '10px 0', border: theme === t ? '2px solid var(--accent)' : '2px solid transparent',
-              borderRadius: 10, cursor: 'pointer', fontSize: 13, fontWeight: theme === t ? 700 : 400,
+              flex: '1 0 auto', minWidth: 60, padding: '10px 0', border: theme === t ? '2px solid var(--accent)' : '2px solid transparent',
+              borderRadius: 10, cursor: 'pointer', fontSize: 12, fontWeight: theme === t ? 700 : 400,
               backgroundColor: theme === t ? 'var(--accent-bg)' : 'var(--bg-input)',
               color: theme === t ? 'var(--accent)' : 'var(--text-secondary)',
               textTransform: 'capitalize', transition: 'all 0.2s',
-            }}>{{ dark: '● dark', light: '○ light', sunny: '☀ sunny', pixel: '▦ pixel', glass: '◈ liquid' }[t]}</button>
+            }}>{{ dark: '● dark', light: '○ light', sunny: '☀ sunny', pixel: '▦ pixel', glass: '◈ liquid', bloomberg: '$ BB' }[t]}</button>
           ))}
         </div>
       </Section>
