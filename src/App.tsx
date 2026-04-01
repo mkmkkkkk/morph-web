@@ -1172,6 +1172,7 @@ function ConfigTab({ connState }: { connState: string }) {
     if (!('Notification' in window) || !('serviceWorker' in navigator)) return 'Not supported';
     return localStorage.getItem('morph-push-enabled') === 'true' ? 'Enabled' : 'Disabled';
   });
+  const [pushError, setPushError] = useState('');
   const [wsState, setWsState] = useState('—');
 
   useEffect(() => {
@@ -1196,6 +1197,11 @@ function ConfigTab({ connState }: { connState: string }) {
         .then(d => setDebugLogs(d.lines || []))
         .catch(() => {});
     }
+
+    // Pre-register service worker so it's ready when user toggles push
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
   }, []);
 
   const handleDebugToggle = (v: boolean) => {
@@ -1214,62 +1220,86 @@ function ConfigTab({ connState }: { connState: string }) {
     fetch(`${relayUrl()}/v2/debug/clear`, { method: 'POST', headers: headers() }).catch(() => {});
   };
 
+  // base64url → Uint8Array (Safari requires proper padding)
+  const urlBase64ToUint8Array = (base64String: string) => {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(base64);
+    const arr = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+    return arr;
+  };
+
   const handlePushToggle = async (v: boolean) => {
     if (!('Notification' in window) || !('serviceWorker' in navigator)) return;
+    setPushError('');
     const base = relayUrl();
     const auth = token();
     if (v) {
       try {
-        // Check existing permission first — avoid re-prompting on iOS
+        // 1. Permission — check existing first, only prompt if 'default'
         let perm = Notification.permission;
         if (perm === 'default') {
           perm = await Notification.requestPermission();
         }
-        if (perm !== 'granted') { setPushStatus('Disabled'); return; }
-        // Reuse existing SW registration or register fresh
-        let reg = await navigator.serviceWorker.getRegistration('/sw.js');
-        if (!reg) {
-          reg = await navigator.serviceWorker.register('/sw.js');
-        }
-        await navigator.serviceWorker.ready;
-        // Check for existing subscription first
+        if (perm === 'denied') { setPushError('Permission denied — enable in Settings'); setPushStatus('Disabled'); return; }
+        if (perm !== 'granted') { setPushError('Permission not granted'); setPushStatus('Disabled'); return; }
+
+        // 2. Service worker — use existing or register
+        const reg = await navigator.serviceWorker.ready;
+
+        // 3. Push subscription — reuse existing or create new
         let sub = await reg.pushManager.getSubscription();
         if (!sub) {
           const vapidRes = await fetch(`${base}/v2/push/vapid-public`, { headers: { 'Authorization': `Bearer ${auth}` } });
+          if (!vapidRes.ok) throw new Error(`VAPID fetch failed: ${vapidRes.status}`);
           const { publicKey } = await vapidRes.json();
-          if (!publicKey) throw new Error('No VAPID key from server');
+          if (!publicKey) throw new Error('Server returned no VAPID key');
           sub = await reg.pushManager.subscribe({
             userVisibleOnly: true,
-            applicationServerKey: Uint8Array.from(atob(publicKey.replace(/-/g,'+').replace(/_/g,'/')), c => c.charCodeAt(0)),
+            applicationServerKey: urlBase64ToUint8Array(publicKey),
           });
         }
-        await fetch(`${base}/v2/push/subscribe`, {
+
+        // 4. Register with relay
+        const regRes = await fetch(`${base}/v2/push/subscribe`, {
           method: 'POST',
           headers: { 'Authorization': `Bearer ${auth}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ subscription: sub.toJSON() }),
         });
+        if (!regRes.ok) throw new Error(`Relay register failed: ${regRes.status}`);
+
         localStorage.setItem('morph-push-enabled', 'true');
         setPushStatus('Enabled');
-      } catch (e) {
+      } catch (e: any) {
         console.error('[push] subscribe failed:', e);
+        setPushError(e?.message || 'Subscribe failed');
         setPushStatus('Disabled');
       }
     } else {
       try {
-        const reg = await navigator.serviceWorker.getRegistration('/sw.js');
+        const reg = await navigator.serviceWorker.getRegistration();
         const sub = await reg?.pushManager?.getSubscription();
         if (sub) {
           await fetch(`${base}/v2/push/unsubscribe`, {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${auth}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ endpoint: sub.endpoint }),
-          });
+          }).catch(() => {});
           await sub.unsubscribe();
         }
       } catch {}
       localStorage.setItem('morph-push-enabled', 'false');
       setPushStatus('Disabled');
     }
+  };
+
+  const handlePushTest = () => {
+    setPushError('');
+    fetch(`${relayUrl()}/v2/push/test`, { method: 'POST', headers: headers() })
+      .then(r => r.json())
+      .then(d => { if (d.sent === 0) setPushError('No subscriptions on server'); })
+      .catch(e => setPushError(`Test failed: ${e.message}`));
   };
 
   const sessionAge = (s: any) => {
@@ -1338,6 +1368,9 @@ function ConfigTab({ connState }: { connState: string }) {
             <Toggle value={pushStatus === 'Enabled'} onChange={handlePushToggle} />
           )}
         </div>
+        {pushError && (
+          <div style={{ color: 'var(--danger)', fontSize: 11, paddingTop: 4 }}>{pushError}</div>
+        )}
         <div style={{ color: 'var(--text-tertiary)', fontSize: 11, paddingTop: 4 }}>
           {pushStatus === 'Not supported'
             ? 'Push notifications are not available in this browser.'
@@ -1345,6 +1378,12 @@ function ConfigTab({ connState }: { connState: string }) {
               ? 'You will receive notifications when sessions need attention.'
               : 'Enable to get notified when sessions need attention.'}
         </div>
+        {pushStatus === 'Enabled' && (
+          <button onClick={handlePushTest} style={{
+            marginTop: 8, width: '100%', padding: '8px 0', border: 'none', borderRadius: 8,
+            cursor: 'pointer', backgroundColor: 'var(--accent-bg)', color: 'var(--accent)', fontSize: 12,
+          }}>Send Test Notification</button>
+        )}
       </Section>
 
       <Section title="Debug">

@@ -112,6 +112,9 @@
       color-scheme: light;
     }
 
+    /* Global input/textarea text + placeholder color — ensures visibility in all themes */
+    input, textarea { color: var(--text-primary); }
+    input::placeholder, textarea::placeholder { color: var(--text-tertiary); opacity: 1; }
     html, body { margin: 0; padding: 0; background: var(--bg-primary); overflow: hidden; height: var(--real-h, 100%); overscroll-behavior: none; }
     [data-theme="glass"] body { background: linear-gradient(145deg, #b8d8e8 0%, #d4e4d0 20%, #e8dcc8 40%, #c0d8e8 60%, #d8e0c8 80%, #b0d0e0 100%); background-size: 300% 300%; animation: liquidShift 20s ease infinite; }
     @keyframes liquidShift { 0% { background-position: 0% 50%; } 33% { background-position: 100% 0%; } 66% { background-position: 50% 100%; } 100% { background-position: 0% 50%; } }
