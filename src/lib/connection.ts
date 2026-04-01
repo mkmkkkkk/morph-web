@@ -4,6 +4,58 @@ const FIXED_SESSION = 'a0a0a0a0-0e00-4000-a000-000000000002';
 const PRIMARY = 'primary';
 function uid() { return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`; }
 
+// ─── Phase 2: Offline message queue (localStorage-backed) ───
+interface QueuedMessage { id: string; sessionId: string; text: string; ts: number; }
+const QUEUE_KEY = 'morph-offline-queue';
+function loadQueue(): QueuedMessage[] { try { return JSON.parse(localStorage.getItem(QUEUE_KEY) || '[]'); } catch { return []; } }
+function saveQueue(q: QueuedMessage[]) { localStorage.setItem(QUEUE_KEY, JSON.stringify(q)); }
+let _draining = false;
+
+async function drainQueue() {
+  if (_draining) return;
+  _draining = true;
+  const q = loadQueue();
+  const failed: QueuedMessage[] = [];
+  for (const item of q) {
+    try {
+      const relayId = resolveRelayId(item.sessionId);
+      const data = await relayPost(relayId, '/v2/claude/send', { message: item.text, sessionId: item.sessionId, cwd: '/workspace' });
+      if (data.error) throw new Error(data.error);
+      clog('queue-sent', `${item.sessionId.slice(0,8)} queued@${item.ts}`);
+    } catch {
+      failed.push(item);
+    }
+  }
+  saveQueue(failed);
+  _draining = false;
+  queueListeners.forEach(fn => fn(failed.length));
+}
+
+type QueueListener = (size: number) => void;
+const queueListeners = new Set<QueueListener>();
+export function onQueueChange(fn: QueueListener) { queueListeners.add(fn); return () => { queueListeners.delete(fn); }; }
+export function getQueueSize() { return loadQueue().length; }
+
+// ─── Phase 3: Local message cache (localStorage, last 50 msgs/session) ───
+const CACHE_PREFIX = 'morph-cache-';
+const CACHE_MAX = 50;
+
+function cacheMessage(sessionId: string, msg: Message) {
+  const key = CACHE_PREFIX + sessionId;
+  try {
+    const arr: Message[] = JSON.parse(localStorage.getItem(key) || '[]');
+    // Dedup by id
+    if (arr.some(m => m.id === msg.id)) return;
+    arr.push({ id: msg.id, role: msg.role, type: msg.type, content: msg.content?.slice(0, 2000), name: msg.name, ts: msg.ts, pending: msg.pending });
+    if (arr.length > CACHE_MAX) arr.splice(0, arr.length - CACHE_MAX);
+    localStorage.setItem(key, JSON.stringify(arr));
+  } catch { /* quota exceeded — ignore */ }
+}
+
+export function getCachedMessages(sessionId: string): Message[] {
+  try { return JSON.parse(localStorage.getItem(CACHE_PREFIX + sessionId) || '[]'); } catch { return []; }
+}
+
 // ─── Connection debug log (ring buffer, last 100 entries) ───
 const _connLog: { ts: number; event: string; detail?: string }[] = [];
 function clog(event: string, detail?: string) {
@@ -89,9 +141,11 @@ function relayFor(sessionId: string): RelayConn {
   return relayConns.get(id) ?? ensurePrimary();
 }
 
-// ─── Message routing: sessionId → listeners ───
+// ─── Message routing: sessionId → listeners + cache ───
 function routeMessage(sessionId: string, msg: Message) {
   sessionListeners.get(sessionId)?.forEach(fn => fn(msg));
+  // Phase 3: cache non-pending messages for offline access
+  if (!msg.pending) cacheMessage(sessionId, msg);
 }
 
 export function subscribe(sessionId: string, fn: Listener): () => void {
@@ -179,6 +233,8 @@ function connectRelaySocket(relayId: string): void {
       }
     }
     setConnState('connected');
+    // Phase 2: drain offline queue on reconnect
+    if (relayId === PRIMARY) drainQueue();
   });
   conn.socket.on('disconnect', (reason) => { clog('disconnected', `relay=${relayId} reason=${reason}`); setConnState('disconnected'); });
   conn.socket.on('connect_error', (err) => { clog('connect_error', `relay=${relayId} err=${err.message}`); setConnState('error'); });
@@ -322,9 +378,19 @@ export function registerSession(sessionId: string, relayId: string): void {
 // ─── Session operations (relay-aware) ───
 
 export async function sendToSession(sid: string, text: string): Promise<void> {
-  const relayId = resolveRelayId(sid);
-  const data = await relayPost(relayId, '/v2/claude/send', { message: text, sessionId: sid, cwd: '/workspace' });
-  if (data.error) throw new Error(data.error);
+  try {
+    const relayId = resolveRelayId(sid);
+    const data = await relayPost(relayId, '/v2/claude/send', { message: text, sessionId: sid, cwd: '/workspace' });
+    if (data.error) throw new Error(data.error);
+  } catch (err) {
+    // Phase 2: queue for retry on reconnect
+    const q = loadQueue();
+    q.push({ id: uid(), sessionId: sid, text, ts: Date.now() });
+    saveQueue(q);
+    clog('queue-add', `${sid.slice(0,8)} queued (total=${q.length})`);
+    queueListeners.forEach(fn => fn(q.length));
+    throw err; // still throw so caller knows it failed
+  }
 }
 
 export async function resumeSession(sid: string, text: string): Promise<string> {
@@ -467,7 +533,10 @@ export function send(text: string) {
     : '';
   sendToSession(FIXED_SESSION, ctx + text)
     .then(() => routeMessage(FIXED_SESSION, { id: msgId, role: 'user', type: 'text', content: text, ts: Date.now(), pending: false }))
-    .catch(() => ensurePrimary().socket?.emit('direct-send', { sessionId: FIXED_SESSION, message: ctx + text }));
+    .catch(() => {
+      // Message was queued by sendToSession — show "queued" status
+      routeMessage(FIXED_SESSION, { id: uid(), role: 'system', type: 'status', content: 'Message queued — will send when reconnected', ts: Date.now() });
+    });
 }
 
 export function interrupt() { interruptSession(FIXED_SESSION); }
