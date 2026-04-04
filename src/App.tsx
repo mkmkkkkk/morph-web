@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, useMotionValue } from 'framer-motion';
-import { connect, send, interrupt, interruptSession, clearSession, setCurrentTab, fetchSessions, onMessage, onState, onCompact, getState, sendToSession, resumeSession, isSessionAlive, loadHistory, subscribe, subscribeSessionMessages, unsubscribeSessionMessages, addRelay, registerSession, approvePermission, denyPermission, stopSession, type Message, type RelayConfig } from './lib/connection';
+import { connect, send, interrupt, interruptSession, clearSession, setCurrentTab, fetchSessions, onMessage, onState, onCompact, getState, sendToSession, resumeSession, isSessionAlive, loadHistory, subscribe, subscribeSessionMessages, unsubscribeSessionMessages, addRelay, registerSession, approvePermission, denyPermission, stopSession, sendToTTY, sendRawKeyToTTY, subscribeTTY, isTTYId, parseTTYId, type Message, type PtySection, type RelayConfig } from './lib/connection';
 import Sketch from './components/Sketch';
 
 // Cache-bust canvas.html per build (not per page load) — allows HTTP caching across reloads
@@ -258,7 +258,7 @@ const MessageRow = React.memo(function MessageRow({ msg }: { msg: Message }) {
   switch (msg.type) {
     case 'text':
       return msg.role === 'user'
-        ? <div style={{ ...monoOuter, color: '#30d158', marginBottom: 3, opacity: msg.pending ? 0.5 : 1 }}><span style={sel} data-sel>&gt; {msg.content}</span></div>
+        ? <div style={{ ...monoOuter, color: 'var(--success)', marginBottom: 3, opacity: msg.pending ? 0.5 : 1 }}><span style={sel} data-sel>&gt; {msg.content}</span></div>
         : <div style={{ ...monoOuter, color: 'var(--text-primary)', marginBottom: 3, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{
             msg.content.split('\n').map((line, i) => (
               <React.Fragment key={i}>
@@ -269,19 +269,31 @@ const MessageRow = React.memo(function MessageRow({ msg }: { msg: Message }) {
               </React.Fragment>
             ))
           }</div>;
+    case 'pty':
+      return <div>{(msg.sections || []).map((sec, i) =>
+        sec.type === 'tool'
+          ? <Collapsible key={i} label={sec.name || 'tool'} preview={sec.content.slice(0, 80).replace(/\n/g, ' ')} content={sec.content} color="var(--text-tertiary)" />
+          : <div key={i} style={{ ...monoOuter, color: 'var(--text-primary)', marginBottom: 3, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{
+              sec.content.split('\n').map((line, j) => (
+                <React.Fragment key={j}>
+                  {line === '' ? <div style={{ height: '10px', userSelect: 'none', WebkitUserSelect: 'none' } as any} /> : <span style={sel} data-sel>{line}</span>}
+                </React.Fragment>
+              ))
+            }</div>
+      )}</div>;
     case 'thinking':
-      return <Collapsible label="thinking" preview={msg.content.slice(0, 60)} content={msg.content} color="#636366" />;
+      return <Collapsible label="thinking" preview={msg.content.slice(0, 60)} content={msg.content} color="var(--text-tertiary)" />;
     case 'tool':
-      return <Collapsible label={msg.name || 'tool'} preview={msg.content.slice(0, 80).replace(/\n/g, ' ')} content={msg.content} color="#636366" />;
+      return <Collapsible label={msg.name || 'tool'} preview={msg.content.slice(0, 80).replace(/\n/g, ' ')} content={msg.content} color="var(--text-tertiary)" />;
     case 'tool_result':
-      return <Collapsible label="result" preview={msg.content.slice(0, 80).replace(/\n/g, ' ')} content={msg.content.length > 2000 ? msg.content.slice(0, 2000) + '\n...' : msg.content} color="#48484a" />;
+      return <Collapsible label="result" preview={msg.content.slice(0, 80).replace(/\n/g, ' ')} content={msg.content.length > 2000 ? msg.content.slice(0, 2000) + '\n...' : msg.content} color="var(--text-tertiary)" />;
     case 'status':
       return msg.content.length > 120
-        ? <Collapsible label="status" preview={msg.content.slice(0, 80).replace(/\n/g, ' ')} content={msg.content} color="#555" />
+        ? <Collapsible label="status" preview={msg.content.slice(0, 80).replace(/\n/g, ' ')} content={msg.content} color="var(--text-tertiary)" />
         : <div style={{ ...monoOuter, color: 'var(--text-tertiary)', textAlign: 'center', marginTop: 4, marginBottom: 4 }}><span style={sel} data-sel>{msg.content}</span></div>;
     case 'error':
       return msg.content.length > 120
-        ? <Collapsible label="error" preview={msg.content.slice(0, 80).replace(/\n/g, ' ')} content={msg.content} color="#ff453a" />
+        ? <Collapsible label="error" preview={msg.content.slice(0, 80).replace(/\n/g, ' ')} content={msg.content} color="var(--danger)" />
         : <div style={{ ...monoOuter, color: 'var(--danger)', marginBottom: 3 }}><span style={sel} data-sel>{msg.content}</span></div>;
     case 'permission' as any:
       return <div style={{ ...monoOuter, color: 'var(--warning)', marginBottom: 3, fontSize: 12 }}>
@@ -335,15 +347,15 @@ function PermissionBanner({ messages, sessionId }: { messages: Message[]; sessio
       </div>
       <button onPointerDown={handleDeny} style={{
         padding: '8px 16px', borderRadius: 8, cursor: 'pointer', flexShrink: 0,
-        border: '1px solid rgba(255,59,48,0.4)', backgroundColor: 'rgba(255,59,48,0.12)',
+        border: '1px solid var(--danger-border)', backgroundColor: 'var(--danger-bg)',
         color: 'var(--danger)', fontSize: 14, fontWeight: 700,
         fontFamily: '-apple-system, system-ui, sans-serif',
         touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent',
       }}>Deny</button>
       <button onPointerDown={handleApprove} style={{
         padding: '8px 20px', borderRadius: 8, cursor: 'pointer', flexShrink: 0,
-        border: '1px solid rgba(48,209,88,0.4)', backgroundColor: 'rgba(48,209,88,0.12)',
-        color: '#30d158', fontSize: 14, fontWeight: 700,
+        border: '1px solid var(--success-border)', backgroundColor: 'var(--success-bg)',
+        color: 'var(--success)', fontSize: 14, fontWeight: 700,
         fontFamily: '-apple-system, system-ui, sans-serif',
         touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent',
       }}>Approve</button>
@@ -352,7 +364,7 @@ function PermissionBanner({ messages, sessionId }: { messages: Message[]; sessio
 }
 
 // ─── Terminal Overlay (toggle-able, sits above input bar) ───
-function TerminalOverlay({ messages, visible }: { messages: Message[]; visible: boolean }) {
+function TerminalOverlay({ messages, visible, sessionId }: { messages: Message[]; visible: boolean; sessionId?: string }) {
   const scrollRef = React.useRef<HTMLDivElement>(null);
   const stickRef = React.useRef(true); // auto-scroll when near bottom
 
@@ -412,7 +424,9 @@ function TerminalOverlay({ messages, visible }: { messages: Message[]; visible: 
       <div style={{ flex: '1 1 0' }} />
       <div style={{ padding: '8px 0' }}>
         {messages.length === 0
-          ? <div style={{ color: 'var(--text-tertiary)', fontSize: 13, textAlign: 'center', padding: 16, fontFamily: 'Menlo, monospace' }}>waiting for session...</div>
+          ? (sessionId && isTTYId(sessionId)
+            ? <div style={{ color: 'var(--text-tertiary)', fontSize: 12, textAlign: 'center', padding: 16, fontFamily: 'Menlo, monospace', opacity: 0.6 }}>{parseTTYId(sessionId)}</div>
+            : <div style={{ color: 'var(--text-tertiary)', fontSize: 13, textAlign: 'center', padding: 16, fontFamily: 'Menlo, monospace' }}>waiting for session...</div>)
           : messages.map(msg => <MessageRow key={msg.id} msg={msg} />)
         }
       </div>
@@ -455,10 +469,10 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
   }, [text, onSend, pendingSketch, pendingFile, storageKey]);
 
   const isSession = tint === 'amber';
-  const accent = isSession ? '#e0a030' : '#30d158';
-  const dotColor = connected ? '#30d158' : '#636366'; // always green for online
-  const inputBg = isSession ? '#1e1c14' : '#1c1c1e';
-  const sendBg = isSession ? '#b8860b' : '#333';
+  const accent = isSession ? 'var(--warning)' : 'var(--success)';
+  const dotColor = connected ? 'var(--success)' : 'var(--text-tertiary)';
+  const inputBg = 'var(--bg-card)';
+  const sendBg = isSession ? 'var(--warning)' : 'var(--bg-input)';
   const borderTint = isSession ? 'var(--border-strong)' : 'var(--border-strong)';
 
   return (
@@ -477,8 +491,8 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
             width: 0, height: 0,
             borderLeft: '6px solid transparent', borderRight: '6px solid transparent',
             ...(terminalVisible
-              ? { borderTop: `10px solid ${isProcessing ? accent : hasNew ? '#999' : '#888'}` }
-              : { borderBottom: `10px solid ${isProcessing ? accent : hasNew ? '#999' : '#888'}` }),
+              ? { borderTop: `10px solid ${isProcessing ? accent : hasNew ? 'var(--text-secondary)' : 'var(--text-tertiary)'}` }
+              : { borderBottom: `10px solid ${isProcessing ? accent : hasNew ? 'var(--text-secondary)' : 'var(--text-tertiary)'}` }),
           }} />
         </button>
       )}
@@ -490,17 +504,17 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
         transition={isUploading ? { repeat: Infinity, duration: 0.75, ease: 'easeInOut' } : { type: 'spring', stiffness: 500, damping: 20 }}
         style={{
           width: 34, height: 34, borderRadius: 17, border: 'none', cursor: 'pointer', flexShrink: 0,
-          backgroundColor: (pendingSketch || pendingFile) ? 'rgba(48,209,88,0.2)' : isUploading ? 'rgba(48,209,88,0.12)' : 'var(--bg-input)',
+          backgroundColor: (pendingSketch || pendingFile) ? 'var(--success-bg)' : isUploading ? 'var(--success-bg)' : 'var(--bg-input)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
         {isUploading
-          ? <span style={{ color: '#30d158', fontSize: 16, lineHeight: '16px' }}>↑</span>
+          ? <span style={{ color: 'var(--success)', fontSize: 16, lineHeight: '16px' }}>↑</span>
           : pendingSketch
-            ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#30d158" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+            ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.85 0 114 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
             : pendingFile === 'image'
-              ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#30d158" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+              ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
               : pendingFile === 'file'
-                ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#30d158" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
+                ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--success)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
                 : <span style={{ color: 'var(--text-secondary)', fontSize: 22, lineHeight: '22px' }}>+</span>}
       </motion.button>
 
@@ -536,7 +550,7 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
           backgroundColor: canSend ? sendBg : inputBg, cursor: canSend ? 'pointer' : 'default',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' as any,
-        }}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={canSend ? '#fff' : '#666'} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+        }}><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={canSend ? 'var(--text-primary)' : 'var(--text-tertiary)'} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
     </div>
   );
 }
@@ -691,8 +705,8 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
   }, [env.id, env.relayUrl, limit, expanded, visKey]);
 
   const dotColor = (s: any) => {
-    if (hasUnread(s)) return '#ffcc00';
-    return '#555';
+    if (hasUnread(s)) return 'var(--warning)';
+    return 'var(--text-tertiary)';
   };
   const borderColor = (s: any) => {
     if (hasUnread(s)) return 'var(--border-strong)';
@@ -753,7 +767,7 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
         onClick={() => setExpanded(v => !v)}
         style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: expanded ? 6 : 0, cursor: 'pointer', pointerEvents: 'auto' }}
       >
-        <span style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: env.id === 'workspace' ? '#636AFF' : env.id === 'tensor-revive' ? '#30d158' : '#ff9f0a', flexShrink: 0 }} />
+        <span style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: env.id === 'workspace' ? 'var(--accent)' : 'var(--warning)', flexShrink: 0 }} />
         <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase' as const, letterSpacing: 0.5 }}>
           {env.label} ({sessions.length})
         </span>
@@ -798,7 +812,7 @@ function EnvironmentGroup({ env, onSelect, onNewSession, maxVisible, initialExpa
                 </div>
                 <span style={{ color: 'var(--text-tertiary)', fontSize: 11, flexShrink: 0 }}>{timeAgo(s.updatedAt)}</span>
                 <span onClick={(e) => { e.stopPropagation(); setPinned(togglePin(env.id, s.id)); }} style={{ cursor: 'pointer', padding: '8px 10px', margin: '-8px -10px -8px 0', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill={pinned.has(s.id) ? '#888' : 'none'} stroke={pinned.has(s.id) ? '#888' : '#444'} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill={pinned.has(s.id) ? 'var(--text-secondary)' : 'none'} stroke={pinned.has(s.id) ? 'var(--text-secondary)' : 'var(--text-tertiary)'} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg>
                 </span>
               </motion.div>
             ))}
@@ -920,8 +934,100 @@ function projectLabel(project: string): string {
   return parts[parts.length - 1] || project;
 }
 
+// Strip residual DEC escape fragments from terminal text for display
+function cleanTermText(s: string): string {
+  return s.replace(/\??\d{2,}[hl]/g, '').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+// Spatial grid — mirrors Ghostty pane layout
+function SpatialGrid({ layout, onSelect }: { layout: any; onSelect: (id: string, display?: string, underlyingSessionId?: string, textPreview?: string) => void }) {
+  if (!layout || !layout.windows || layout.windows.length === 0) return null;
+
+  const handlePaneTap = (p: any) => {
+    const isRoutable = p.routable !== false;
+    const selectId = p.tty ? `tty:${p.tty}` : p.sessionId;
+    const label = p.cwd?.split('/').pop() || p.tty || p.display;
+    if (isRoutable && selectId) onSelect(selectId, label, p.sessionId || undefined, p.axText || p.textPreview || undefined);
+  };
+
+  return (
+    <div style={{ padding: '0 4px' }}>
+      {layout.windows.map((win: any, wi: number) => {
+        const aspect = win.bounds.h / win.bounds.w;
+        return (
+          <div key={win.id || wi} style={{
+            position: 'relative', width: '100%', aspectRatio: `${1 / aspect}`,
+            marginBottom: layout.windows.length > 1 ? 12 : 0,
+            borderRadius: 10, overflow: 'hidden',
+            backgroundColor: 'var(--bg-card)',
+            border: '1px solid var(--border)',
+          }}>
+            {win.panes.map((p: any, pi: number) => {
+              const isRoutable = p.routable !== false;
+              const isIdle = p.idle;
+              return (
+                <div
+                  key={p.tty || pi}
+                  role={isRoutable ? 'button' : undefined}
+                  tabIndex={isRoutable ? 0 : undefined}
+                  onClick={() => handlePaneTap(p)}
+                  onPointerUp={(e) => { if (e.pointerType === 'touch') { e.preventDefault(); handlePaneTap(p); } }}
+                  style={{
+                    position: 'absolute',
+                    left: `${p.x * 100}%`, top: `${p.y * 100}%`,
+                    width: `${p.w * 100}%`, height: `${p.h * 100}%`,
+                    boxSizing: 'border-box',
+                    padding: 1,
+                    touchAction: 'manipulation',
+                    WebkitTapHighlightColor: 'transparent',
+                    userSelect: 'none',
+                    WebkitUserSelect: 'none',
+                  } as React.CSSProperties}
+                >
+                  <div style={{
+                    width: '100%', height: '100%',
+                    borderRadius: 6,
+                    backgroundColor: isRoutable ? 'var(--accent-bg)' : 'var(--bg-input)',
+                    border: `1px solid ${isRoutable ? 'var(--accent)' : 'var(--border)'}`,
+                    cursor: isRoutable ? 'pointer' : 'default',
+                    opacity: isIdle ? 0.5 : 1,
+                    display: 'flex', flexDirection: 'column', alignItems: 'stretch', justifyContent: 'flex-start',
+                    overflow: 'hidden', padding: '3px 5px',
+                    pointerEvents: 'auto',
+                  }}>
+                    <span style={{
+                      fontFamily: 'Menlo, monospace', fontSize: 9, fontWeight: 600,
+                      color: isRoutable ? 'var(--accent)' : 'var(--text-tertiary)',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const,
+                      pointerEvents: 'none',
+                    }}>
+                      {isRoutable ? (p.tty || p.cwd?.split('/').pop() || 'claude') : p.tty}
+                    </span>
+                    {p.textPreview && (
+                      <span style={{
+                        fontFamily: 'Menlo, monospace', fontSize: 8, lineHeight: '11px',
+                        color: 'var(--text-secondary)', opacity: 0.7,
+                        overflow: 'hidden', display: '-webkit-box',
+                        WebkitLineClamp: 3, WebkitBoxOrient: 'vertical',
+                        wordBreak: 'break-all',
+                        pointerEvents: 'none', marginTop: 1,
+                      } as React.CSSProperties}>
+                        {cleanTermText(p.textPreview)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // Canvas overlay — auto-groups sessions by project
-function SessionCards({ onSelect, onNewSession }: { onSelect: (sessionId: string, display?: string, relayUrl?: string, relayToken?: string, project?: string, envId?: string) => void; onNewSession?: (envId: string, relayUrl?: string, relayToken?: string) => void }) {
+function SessionCards({ onSelect, onNewSession }: { onSelect: (sessionId: string, display?: string, relayUrl?: string, relayToken?: string, project?: string, envId?: string, textPreview?: string) => void; onNewSession?: (envId: string, relayUrl?: string, relayToken?: string) => void }) {
   const [groups, setGroups] = useState<{ project: string; sessions: any[] }[]>([]);
   const [viewed, setViewed] = useState<Set<string>>(getViewed);
   const [pinned, setPinned] = useState<Set<string>>(() => getPinned('workspace'));
@@ -929,6 +1035,8 @@ function SessionCards({ onSelect, onNewSession }: { onSelect: (sessionId: string
   const [visKey, setVisKey] = useState(_visResumeCount);
   const [killTarget, setKillTarget] = useState<any>(null);
   const [newSessionProject, setNewSessionProject] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => (localStorage.getItem('morph-session-view') as any) || 'grid');
+  const [layout, setLayout] = useState<any>(null);
   const killedRef = useRef<Set<string>>(null);
   if (!killedRef.current) {
     try { killedRef.current = new Set(JSON.parse(localStorage.getItem('morph-killed') || '[]')); } catch { killedRef.current = new Set(); }
@@ -940,6 +1048,20 @@ function SessionCards({ onSelect, onNewSession }: { onSelect: (sessionId: string
     document.addEventListener('visibilitychange', onVis);
     return () => document.removeEventListener('visibilitychange', onVis);
   }, []);
+
+  // Fetch spatial layout for grid view
+  useEffect(() => {
+    const token = localStorage.getItem('morph-auth') || '';
+    const fetchLayout = () => {
+      fetch('/v2/claude/layout', { headers: { 'Authorization': `Bearer ${token}` } })
+        .then(r => r.json())
+        .then(d => { if (d.windows && d.windows.length > 0) setLayout(d); })
+        .catch(() => {});
+    };
+    fetchLayout();
+    const interval = setInterval(fetchLayout, 30000);
+    return () => clearInterval(interval);
+  }, [visKey]);
 
   // Fetch all sessions and group by project
   useEffect(() => {
@@ -991,7 +1113,7 @@ function SessionCards({ onSelect, onNewSession }: { onSelect: (sessionId: string
   const isExpanded = (proj: string, idx: number) => expanded[proj] !== undefined ? expanded[proj] : idx < 3;
   const toggleExpanded = (proj: string) => setExpanded(prev => ({ ...prev, [proj]: !(prev[proj] !== undefined ? prev[proj] : true) }));
 
-  const dotColor = (s: any) => hasUnread(s) ? '#ffcc00' : '#555';
+  const dotColor = (s: any) => hasUnread(s) ? 'var(--warning)' : 'var(--text-tertiary)';
   const borderColor = (s: any) => hasUnread(s) ? 'var(--border-strong)' : 'var(--bg-input)';
 
   const handleSelect = (id: string) => {
@@ -1038,9 +1160,47 @@ function SessionCards({ onSelect, onNewSession }: { onSelect: (sessionId: string
     setKillTarget(null);
   };
 
+  const toggleViewMode = () => {
+    const next = viewMode === 'grid' ? 'list' : 'grid';
+    setViewMode(next);
+    localStorage.setItem('morph-session-view', next);
+  };
+
+  const handleGridSelect = (sessionId: string, display?: string, underlyingSessionId?: string, textPreview?: string) => {
+    markViewed(sessionId);
+    setViewed(getViewed());
+    onSelect(sessionId, display, undefined, undefined, underlyingSessionId, 'workspace', textPreview);
+  };
+
   return (
-    <div style={{ position: 'absolute', top: 90, left: 0, right: 0, bottom: 0, zIndex: 2, padding: '0 8px', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
-      {groups.map((g, gIdx) => {
+    <div style={{ position: 'absolute', top: 128, left: 0, right: 0, bottom: 0, zIndex: 2, padding: '0 8px', overflowY: 'auto', WebkitOverflowScrolling: 'touch' } as React.CSSProperties}>
+      {/* Grid/List toggle */}
+      {layout && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', marginBottom: 8, gap: 6 }}>
+          <span style={{ fontSize: 10, color: 'var(--text-tertiary)', fontFamily: 'Menlo, monospace' }}>
+            {viewMode === 'grid' ? 'GRID' : 'LIST'}
+          </span>
+          <div
+            onClick={toggleViewMode}
+            style={{
+              width: 32, height: 18, borderRadius: 9, cursor: 'pointer', position: 'relative',
+              backgroundColor: viewMode === 'grid' ? 'var(--accent)' : 'var(--bg-hover)', transition: 'background-color 0.2s',
+            }}
+          >
+            <div style={{
+              position: 'absolute', top: 2, left: viewMode === 'grid' ? 16 : 2, width: 14, height: 14,
+              borderRadius: 7, backgroundColor: '#fff', transition: 'left 0.2s',
+              boxShadow: '0 1px 2px rgba(0,0,0,0.2)',
+            }} />
+          </div>
+        </div>
+      )}
+      {/* Spatial grid view */}
+      {viewMode === 'grid' && layout && (
+        <SpatialGrid layout={layout} onSelect={handleGridSelect} />
+      )}
+      {/* List view */}
+      {(viewMode === 'list' || !layout) && groups.map((g, gIdx) => {
         const open = isExpanded(g.project, gIdx);
         const unviewedCount = g.sessions.filter(s => !viewed.has(s.id)).length;
         const color = projectColor(g.project);
@@ -1095,7 +1255,7 @@ function SessionCards({ onSelect, onNewSession }: { onSelect: (sessionId: string
                       </div>
                       <span style={{ color: 'var(--text-tertiary)', fontSize: 11, flexShrink: 0 }}>{timeAgo(s.updatedAt)}</span>
                       <span onClick={(e) => { e.stopPropagation(); setPinned(togglePin('workspace', s.id)); }} style={{ cursor: 'pointer', padding: '8px 10px', margin: '-8px -10px -8px 0', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill={pinned.has(s.id) ? '#888' : 'none'} stroke={pinned.has(s.id) ? '#888' : '#444'} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill={pinned.has(s.id) ? 'var(--text-secondary)' : 'none'} stroke={pinned.has(s.id) ? 'var(--text-secondary)' : 'var(--text-tertiary)'} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg>
                       </span>
                     </motion.div>
                   ))}
@@ -1347,7 +1507,7 @@ function ConfigTab({ connState }: { connState: string }) {
           <div key={s.id} style={{ display: 'flex', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
             <div style={{
               width: 8, height: 8, borderRadius: 4, flexShrink: 0, marginRight: 8,
-              backgroundColor: s.alive ? '#30d158' : '#8e8e93',
+              backgroundColor: s.alive ? 'var(--success)' : 'var(--text-label)',
             }} />
             <span style={{ flex: 1, color: 'var(--text-primary)', fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
               {s.display || s.id?.slice(0, 12)}
@@ -1385,6 +1545,8 @@ function ConfigTab({ connState }: { connState: string }) {
           }}>Send Test Notification</button>
         )}
       </Section>
+
+      <HeartbeatSection />
 
       <Section title="Debug">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0' }}>
@@ -1426,6 +1588,170 @@ function ConfigTab({ connState }: { connState: string }) {
   );
 }
 
+// ─── Heartbeat Section (per-environment) ───
+function HeartbeatSection() {
+  const envs = getEnvironments();
+  const mainToken = () => localStorage.getItem('morph-auth') || '';
+  const [activeEnv, setActiveEnv] = useState(envs[0]?.id || 'workspace');
+
+  const envConfig = envs.find(e => e.id === activeEnv) || envs[0];
+  // First env = self (served by this relay) → same-origin; others → proxy through this relay
+  const isSelf = envConfig === envs[0];
+  const baseUrl = isSelf ? '' : `/relay-proxy/${activeEnv}`;
+  const authToken = envConfig?.token || mainToken();
+  const hdrs = () => ({ 'Authorization': `Bearer ${authToken}`, 'Content-Type': 'application/json' });
+
+  // Cron interval
+  const [hours, setHours] = useState('2');
+  const [cronLoading, setCronLoading] = useState(true);
+  const [cronSaving, setCronSaving] = useState(false);
+  const [hbJob, setHbJob] = useState<any>(null);
+
+  // HEARTBEAT.md
+  const HB_FILE = 'HEARTBEAT.md';
+  const [fileContent, setFileContent] = useState('');
+  const [fileLoading, setFileLoading] = useState(true);
+  const [fileEditing, setFileEditing] = useState(false);
+  const [fileSaving, setFileSaving] = useState(false);
+  const [fileError, setFileError] = useState('');
+
+  // Load cron + file on mount / env change
+  useEffect(() => {
+    setCronLoading(true);
+    setFileLoading(true);
+    setFileEditing(false);
+    setFileError('');
+
+    const h = hdrs();
+
+    // Fetch cron
+    fetch(`${baseUrl}/v2/system/cron`, { headers: h })
+      .then(r => { if (!r.ok) throw new Error(`${r.status}`); return r.json(); })
+      .then(d => {
+        const hb = (d.jobs || []).find((j: any) => j.id === 'heartbeat');
+        setHbJob(hb || null);
+        if (hb) setHours(String(hb.intervalMs / 3600000));
+      })
+      .catch(() => {})
+      .finally(() => setCronLoading(false));
+
+    // Fetch HEARTBEAT.md
+    const fileUrl = `${baseUrl}/v2/files/read?path=${encodeURIComponent(HB_FILE)}`;
+    fetch(fileUrl, { headers: h })
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status} from ${fileUrl}`); return r.json(); })
+      .then(d => {
+        if (d.error) { setFileError(`${d.error} (${fileUrl})`); setFileContent(''); }
+        else setFileContent(d.content || '');
+      })
+      .catch(e => setFileError(e?.message || `Failed: ${fileUrl}`))
+      .finally(() => setFileLoading(false));
+  }, [activeEnv, baseUrl]);
+
+  // Save interval
+  const saveCron = async () => {
+    const ms = Math.max(parseFloat(hours) || 2, 0.1) * 3600000;
+    setCronSaving(true);
+    try {
+      const body = hbJob
+        ? { ...hbJob, intervalMs: ms }
+        : { id: 'heartbeat', message: '[HEARTBEAT] Run system health check', intervalMs: ms, enabled: true };
+      const resp = await fetch(`${baseUrl}/v2/system/cron`, { method: 'POST', headers: hdrs(), body: JSON.stringify(body) });
+      const d = await resp.json();
+      if (d.ok && d.job) setHbJob(d.job);
+    } catch {}
+    setCronSaving(false);
+  };
+
+  // Save file
+  const saveFile = async () => {
+    setFileSaving(true);
+    setFileError('');
+    try {
+      const resp = await fetch(`${baseUrl}/v2/files/write`, {
+        method: 'POST', headers: hdrs(),
+        body: JSON.stringify({ path: HB_FILE, content: fileContent }),
+      });
+      const d = await resp.json();
+      if (d.error) setFileError(d.error);
+      else setFileEditing(false);
+    } catch (e: any) { setFileError(e.message); }
+    setFileSaving(false);
+  };
+
+  const inputStyle = {
+    width: '100%', padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border-input)',
+    backgroundColor: 'var(--bg-hover)', color: 'var(--text-primary)', fontSize: 13, boxSizing: 'border-box' as const,
+    fontFamily: 'Menlo, monospace',
+  };
+
+  return (
+    <Section title="Heartbeat">
+      {/* Multi-env selector */}
+      {envs.length > 1 && (
+        <div style={{ display: 'flex', gap: 4, marginBottom: 10, flexWrap: 'wrap' }}>
+          {envs.map(e => (
+            <button key={e.id} onClick={() => setActiveEnv(e.id)} style={{
+              padding: '4px 10px', borderRadius: 6, border: activeEnv === e.id ? '1.5px solid var(--accent)' : '1.5px solid transparent',
+              backgroundColor: activeEnv === e.id ? 'var(--accent-bg)' : 'var(--bg-hover)',
+              color: activeEnv === e.id ? 'var(--accent)' : 'var(--text-tertiary)',
+              fontSize: 11, cursor: 'pointer', fontWeight: activeEnv === e.id ? 600 : 400,
+            }}>{e.label}</button>
+          ))}
+        </div>
+      )}
+
+      {/* ── Cron interval ── */}
+      <div style={{ color: 'var(--text-tertiary)', fontSize: 11, marginBottom: 4 }}>Interval (hours)</div>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <input type="number" step="0.5" min="0.1" value={hours} onChange={e => setHours(e.target.value)}
+          style={{ ...inputStyle, flex: 1 }} placeholder="2" disabled={cronLoading} />
+        <button onClick={saveCron} disabled={cronSaving || cronLoading} style={{
+          padding: '8px 16px', borderRadius: 8, border: 'none', cursor: 'pointer', flexShrink: 0,
+          backgroundColor: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 600,
+          opacity: cronSaving ? 0.6 : 1,
+        }}>{cronSaving ? '...' : 'Save'}</button>
+      </div>
+      {hbJob && (
+        <div style={{ color: 'var(--text-tertiary)', fontSize: 11, marginTop: 4 }}>
+          Current: {hbJob.intervalMs / 3600000}h {hbJob.enabled ? '' : '(paused)'}
+        </div>
+      )}
+
+      {/* ── HEARTBEAT.md ── */}
+      <div style={{ marginTop: 14, borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+          <span style={{ color: 'var(--text-label)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>HEARTBEAT.md</span>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {!fileEditing ? (
+              <button onClick={() => setFileEditing(true)} style={{ border: 'none', background: 'none', color: 'var(--accent)', fontSize: 11, cursor: 'pointer' }}>Edit</button>
+            ) : (
+              <>
+                <button onClick={() => { setFileEditing(false); /* reload */ fetch(`${baseUrl}/v2/files/read?path=${encodeURIComponent(HB_FILE)}`, { headers: hdrs() }).then(r => r.json()).then(d => setFileContent(d.content || '')).catch(() => {}); }} style={{ border: 'none', background: 'none', color: 'var(--text-tertiary)', fontSize: 11, cursor: 'pointer' }}>Cancel</button>
+                <button onClick={saveFile} disabled={fileSaving} style={{ border: 'none', background: 'none', color: 'var(--accent)', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}>{fileSaving ? '...' : 'Save'}</button>
+              </>
+            )}
+          </div>
+        </div>
+        {fileError && <div style={{ color: 'var(--danger)', fontSize: 11, marginBottom: 4 }}>{fileError}</div>}
+        {fileLoading ? (
+          <div style={{ color: 'var(--text-tertiary)', fontSize: 12, padding: 8 }}>Loading...</div>
+        ) : fileEditing ? (
+          <textarea value={fileContent} onChange={e => setFileContent(e.target.value)} style={{
+            ...inputStyle, minHeight: 200, resize: 'vertical', lineHeight: 1.5,
+          }} />
+        ) : (
+          <div style={{
+            maxHeight: 400, overflowY: 'auto', backgroundColor: 'var(--bg-primary)',
+            borderRadius: 8, padding: 10, fontSize: 12, fontFamily: 'Menlo, monospace',
+            color: 'var(--text-secondary)', lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+            WebkitOverflowScrolling: 'touch' as any,
+          }}>{fileContent || '(empty)'}</div>
+        )}
+      </div>
+    </Section>
+  );
+}
+
 function EnvManagerSection() {
   const [envs, setEnvs] = useState<EnvConfig[]>(getEnvironments);
   const [adding, setAdding] = useState(false);
@@ -1456,7 +1782,7 @@ function EnvManagerSection() {
     <Section title="Environments">
       {envs.map(e => (
         <div key={e.id} style={{ display: 'flex', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
-          <div style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#30d158', marginRight: 8, flexShrink: 0 }} />
+          <div style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: 'var(--success)', marginRight: 8, flexShrink: 0 }} />
           <span style={{ flex: 1, color: 'var(--text-primary)', fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{e.label}</span>
           {e.id !== 'workspace' && (
             <button onClick={() => handleRemove(e.id)} style={{ border: 'none', background: 'none', color: 'var(--danger)', fontSize: 18, cursor: 'pointer', padding: '0 4px', lineHeight: 1 }}>×</button>
@@ -1536,11 +1862,12 @@ function TabBar({ tab, onTab, disabled }: { tab: string; onTab: (t: string) => v
 }
 
 // ─── Session Terminal (slide-in from right, swipe to go back) ───
-function SessionTerminal({ session, messages, onBack, onSend, onInterrupt, keyboardOpen, isProcessing = false, isCompacting = false }: {
+function SessionTerminal({ session, messages, onBack, onSend, onRawKey, onInterrupt, keyboardOpen, isProcessing = false, isCompacting = false }: {
   session: { id: string; display: string; relayUrl?: string; relayToken?: string };
   messages: Message[];
   onBack: () => void;
   onSend: (text: string) => void;
+  onRawKey?: (key: string) => void;
   onInterrupt: () => void;
   keyboardOpen?: boolean;
   isProcessing?: boolean;
@@ -1548,6 +1875,18 @@ function SessionTerminal({ session, messages, onBack, onSend, onInterrupt, keybo
 }) {
   const dragX = useMotionValue(0);
   const swipeStart = useRef<{ x: number } | null>(null);
+  const [resumeOpen, setResumeOpen] = useState(false);
+  const [resumeSessions, setResumeSessions] = useState<{ id: string; slug: string | null; firstMessage: string | null; updatedAt: number }[]>([]);
+
+  const loadResumeSessions = useCallback(async () => {
+    const token = localStorage.getItem('morph-auth') || '';
+    try {
+      const res = await fetch('/v2/claude/resumable?limit=20', { headers: { 'Authorization': `Bearer ${token}` } });
+      const data = await res.json();
+      setResumeSessions(data.sessions || []);
+      setResumeOpen(true);
+    } catch {}
+  }, []);
 
   // Swipe-back handled entirely by React touch handlers below.
   const flow = useSendFlow(onSend, { relayUrl: session.relayUrl, relayToken: session.relayToken });
@@ -1596,22 +1935,70 @@ function SessionTerminal({ session, messages, onBack, onSend, onInterrupt, keybo
           {session.display}
         </span>
         <span style={{ color: 'var(--text-tertiary)', fontSize: 11, fontFamily: 'Menlo, monospace' }}>{session.id.slice(0, 8)}</span>
+        {onRawKey && (
+          <motion.button whileTap={{ scale: 0.9 }} onClick={loadResumeSessions}
+            style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, cursor: 'pointer',
+              padding: '3px 8px', color: 'var(--text-secondary)', fontSize: 11, fontFamily: 'Menlo, monospace' }}>
+            resume
+          </motion.button>
+        )}
       </div>
+
+      {/* Resume session picker modal */}
+      {resumeOpen && (
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 60,
+          backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', flexDirection: 'column' }}
+          onClick={() => setResumeOpen(false)}>
+          <div onClick={e => e.stopPropagation()} style={{
+            margin: 'auto 12px', maxHeight: '70vh', backgroundColor: 'var(--bg-primary)',
+            borderRadius: 12, border: '1px solid var(--border)', overflow: 'hidden',
+            display: 'flex', flexDirection: 'column',
+          }}>
+            <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', color: 'var(--text-primary)',
+              fontSize: 14, fontWeight: 600 }}>
+              Resume Session
+            </div>
+            <div style={{ overflow: 'auto', flex: 1 }}>
+              {resumeSessions.map(s => (
+                <button key={s.id} onClick={() => {
+                  setResumeOpen(false);
+                  onSend(`/resume ${s.id}`);
+                }} style={{
+                  display: 'block', width: '100%', textAlign: 'left', padding: '10px 16px',
+                  border: 'none', borderBottom: '1px solid var(--border)', cursor: 'pointer',
+                  backgroundColor: 'transparent', color: 'var(--text-primary)',
+                }}>
+                  <div style={{ fontSize: 13, fontFamily: 'Menlo, monospace', marginBottom: 2 }}>
+                    {s.slug || s.id.slice(0, 8)}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-tertiary)', overflow: 'hidden',
+                    textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+                    {s.firstMessage || '(no message)'}
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginTop: 2 }}>
+                    {new Date(s.updatedAt).toLocaleString()}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Messages + Permission banner + ESC overlay */}
       <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column' }}>
-        <TerminalOverlay messages={messages} visible={true} />
+        <TerminalOverlay messages={messages} visible={true} sessionId={session.id} />
         <PermissionBanner messages={messages} sessionId={session.id} />
         {(() => { const w = isCompacting ? 'compacting...' : isProcessing ? IDLE_WORDS[Math.floor(Date.now() / 4000) % IDLE_WORDS.length] : 'idle'; return (
         <div style={{ position: 'absolute', bottom: 4, right: 8, display: 'flex', alignItems: 'center', gap: 6, pointerEvents: 'none' }}>
-          <span style={{ color: isCompacting ? '#3a8eff' : '#444', fontSize: 11, fontFamily: 'Menlo, monospace' }}>
+          <span style={{ color: isCompacting ? 'var(--accent)' : 'var(--text-tertiary)', fontSize: 11, fontFamily: 'Menlo, monospace' }}>
             {w}
           </span>
           <button tabIndex={-1} onPointerDown={(e) => { e.preventDefault(); onInterrupt(); }} style={{
             padding: '3px 10px', borderRadius: 5, cursor: 'pointer', flexShrink: 0,
-            border: isProcessing ? '1px solid rgba(255,59,48,0.4)' : '1px solid var(--border)',
-            backgroundColor: isProcessing ? 'rgba(255,59,48,0.15)' : 'rgba(17,17,17,0.7)',
-            color: isProcessing ? '#ff453a' : '#444', fontSize: 11, fontFamily: 'Menlo, monospace',
+            border: isProcessing ? '1px solid var(--danger-border)' : '1px solid var(--border)',
+            backgroundColor: isProcessing ? 'var(--danger-bg)' : 'var(--bg-elevated)',
+            color: isProcessing ? 'var(--danger)' : 'var(--text-tertiary)', fontSize: 11, fontFamily: 'Menlo, monospace',
             pointerEvents: 'auto', touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' as any,
           }}>ESC</button>
         </div>
@@ -1626,6 +2013,30 @@ function SessionTerminal({ session, messages, onBack, onSend, onInterrupt, keybo
           flexShrink: 0, cursor: 'pointer',
         }}>
           Upload failed: {flow.uploadError}
+        </div>
+      )}
+      {/* Control keys — arrow keys, Tab, Enter for navigating interactive menus */}
+      {onRawKey && (
+        <div style={{
+          display: 'flex', justifyContent: 'center', gap: 6, padding: '6px 12px',
+          borderTop: '1px solid rgba(224,160,48,0.12)', flexShrink: 0,
+        }}>
+          {[
+            { label: 'Tab', key: '\t' },
+            { label: '\u2191', key: '\x1b[A' },
+            { label: '\u2193', key: '\x1b[B' },
+            { label: '\u2190', key: '\x1b[D' },
+            { label: '\u2192', key: '\x1b[C' },
+            { label: '\u21B5', key: '\r' },
+          ].map(({ label, key }) => (
+            <button key={label} onPointerDown={(e) => { e.preventDefault(); onRawKey(key); }}
+              style={{
+                flex: 1, maxWidth: 56, padding: '8px 0', borderRadius: 6, cursor: 'pointer',
+                border: '1px solid var(--border)', backgroundColor: 'var(--bg-elevated)',
+                color: 'var(--text-secondary)', fontSize: 16, fontFamily: 'Menlo, monospace',
+                touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' as any,
+              }}>{label}</button>
+          ))}
         </div>
       )}
       {/* Shared InputBar — amber tint, no terminal toggle (header has Back) */}
@@ -1698,7 +2109,7 @@ export default function App() {
   const [canvasLoaded, setCanvasLoaded] = useState(false);
   const mainFlow = useSendFlow(send);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
-  const [selectedSession, setSelectedSession] = useState<{ id: string; display: string; relayUrl?: string; relayToken?: string; project?: string; envId?: string; isNew?: boolean } | null>(() => {
+  const [selectedSession, setSelectedSession] = useState<{ id: string; display: string; relayUrl?: string; relayToken?: string; project?: string; envId?: string; isNew?: boolean; underlyingSessionId?: string; textPreview?: string } | null>(() => {
     try { const s = sessionStorage.getItem('morph-selected-session'); return s ? JSON.parse(s) : null; } catch { return null; }
   });
   const [sessionMessages, setSessionMessages] = useState<Message[]>([]);
@@ -1808,7 +2219,7 @@ export default function App() {
 
     // Workspace (local relay) — start at 1.5s
     preloadEnv('', mainToken, 1500);
-    // All other envs (e.g. tensor-revive via proxy) — start at 4s to not compete with workspace
+    // Other envs via proxy — start at 4s to not compete with workspace
     const otherEnvs = getEnvironments().filter(e => e.relayUrl);
     otherEnvs.forEach((env, i) => {
       preloadEnv(env.relayUrl, env.token || mainToken, 4000 + i * 1000);
@@ -1888,6 +2299,90 @@ export default function App() {
   // When a session is selected, load from cache instantly, then subscribe for live updates
   useEffect(() => {
     if (!selectedSession) return;
+
+    // TTY-based session (from spatial grid): load history + subscribe for live PTY updates
+    if (isTTYId(selectedSession.id)) {
+      const tty = parseTTYId(selectedSession.id);
+      const sessionId = selectedSession.id; // capture for closure guards
+      let cancelled = false;
+      liveSessionIdRef.current = sessionId;
+      setSessionIsProcessing(false);
+      const abortCtrl = new AbortController();
+
+      // Clear messages immediately to prevent stale content from previous pane
+      setSessionMessages([]);
+
+      // Resolve the actual session UUID (not the TTY key) for cache + history
+      const underlyingSession = selectedSession.project || (selectedSession as any).underlyingSessionId;
+
+      // Show textPreview instantly while history loads
+      const initPreview = (selectedSession as any).textPreview;
+      if (initPreview) {
+        const uid = `init_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        setSessionMessages([{ id: uid, role: 'agent' as const, type: 'text' as const, content: initPreview, ts: Date.now() }]);
+      } else if (underlyingSession) {
+        // Cache keyed by actual session UUID (not TTY key) to prevent cross-session stale reads
+        const cached = sessionCache.current.get(underlyingSession);
+        if (cached && cached.length > 0) setSessionMessages(cached);
+      }
+
+      // Load full conversation history from JSONL
+      if (underlyingSession) {
+        const token = localStorage.getItem('morph-auth') || '';
+        fetch(`/v2/claude/history/${underlyingSession}?limit=50`, { headers: { 'Authorization': `Bearer ${token}` }, signal: abortCtrl.signal })
+          .then(r => r.json())
+          .then(d => {
+            // Guard: skip if session changed while fetch was in flight
+            if (cancelled || liveSessionIdRef.current !== sessionId) return;
+            const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+            const historyMsgs: Message[] = (d.messages || []).map((m: any) => ({
+              id: uid(), role: m.role, type: m.type, content: m.content, name: m.name,
+              ts: m.ts ? new Date(m.ts).getTime() : Date.now(),
+            }));
+            if (historyMsgs.length > 0) {
+              setSessionMessages(prev => {
+                // Keep any live PTY messages (added after init), prepend history
+                const liveMessages = prev.filter(m => m.id && !m.id.startsWith('init_'));
+                return [...historyMsgs, ...liveMessages];
+              });
+              // Cache by actual session UUID, not TTY key
+              sessionCache.current.set(underlyingSession, historyMsgs);
+            }
+          })
+          .catch(() => {});
+      }
+
+      // Subscribe for live PTY output from TTY room
+      const onSessionMsg = (msg: Message) => {
+        // Guard: ignore messages after cleanup or if session switched
+        if (cancelled || liveSessionIdRef.current !== sessionId) return;
+        // Skip very short PTY updates (spinner ticks, empty frames) — but not JSONL text messages
+        if (msg.type === 'pty' && msg.content.length < 10) return;
+
+        setSessionMessages(prev => {
+          // PTY structured or text: replace the last PTY/agent-text message (terminal screen update)
+          if (msg.type === 'pty' || (msg.role === 'agent' && msg.type === 'text')) {
+            const lastIdx = prev.length - 1;
+            if (lastIdx >= 0 && (prev[lastIdx].type === 'pty' || (prev[lastIdx].role === 'agent' && prev[lastIdx].type === 'text'))) {
+              if (msg.content.length >= prev[lastIdx].content.length * 0.3) {
+                const next = [...prev]; next[lastIdx] = msg; return next;
+              }
+              return prev;
+            }
+          }
+          return [...prev, msg];
+        });
+        if (msg.role === 'agent' || msg.type === 'tool' || msg.type === 'thinking') setSessionIsProcessing(true);
+        if (msg.type === 'status' && (msg.content.includes('done') || msg.content.includes('exit'))) setSessionIsProcessing(false);
+        if (msg.type === 'error') setSessionIsProcessing(false);
+        clearTimeout(sessionIdleTimer.current);
+        sessionIdleTimer.current = setTimeout(() => setSessionIsProcessing(false), 30000);
+      };
+      const unsub = subscribeTTY(tty, onSessionMsg);
+
+      return () => { cancelled = true; unsub(); abortCtrl.abort(); };
+    }
+
     // CRITICAL: hydrate relay mapping before any network calls — prevents cross-env leak
     if (selectedSession.envId && selectedSession.envId !== 'workspace') {
       registerSession(selectedSession.id, selectedSession.envId);
@@ -2137,11 +2632,11 @@ export default function App() {
           <UsageWidget />
           {/* Session cards — floating overlay */}
           <SessionCards
-            onSelect={(sid, display, relayUrl, relayToken, project, envId) => {
+            onSelect={(sid, display, relayUrl, relayToken, project, envId, textPreview) => {
               setSessionMessages(sessionCache.current.get(sid) || []);
               sessionSendQueue.current = [];
               sessionSendBusy.current = false;
-              setSelectedSession({ id: sid, display: display || sid.slice(0, 8), relayUrl, relayToken, project, envId });
+              setSelectedSession({ id: sid, display: display || sid.slice(0, 8), relayUrl, relayToken, project, envId, textPreview } as any);
             }}
             onNewSession={(envId, relayUrl, relayToken) => {
               // Use FIXED_SESSION_ID so phone always routes through terminal wrapper
@@ -2240,14 +2735,14 @@ export default function App() {
               display: 'flex', alignItems: 'center', gap: 6,
               pointerEvents: 'none',
             }}>
-              <span style={{ color: isCompacting ? '#3a8eff' : '#444', fontSize: 11, fontFamily: 'Menlo, monospace' }}>
+              <span style={{ color: isCompacting ? 'var(--accent)' : 'var(--text-tertiary)', fontSize: 11, fontFamily: 'Menlo, monospace' }}>
                 {w}
               </span>
               <button tabIndex={-1} onPointerDown={(e) => { e.preventDefault(); interrupt(); }} style={{
                 padding: '3px 10px', borderRadius: 5, cursor: 'pointer', flexShrink: 0,
-                border: isProcessing ? '1px solid rgba(255,59,48,0.4)' : '1px solid var(--border)',
-                backgroundColor: isProcessing ? 'rgba(255,59,48,0.15)' : 'rgba(17,17,17,0.7)',
-                color: isProcessing ? '#ff453a' : '#444', fontSize: 11, fontFamily: 'Menlo, monospace',
+                border: isProcessing ? '1px solid var(--danger-border)' : '1px solid var(--border)',
+                backgroundColor: isProcessing ? 'var(--danger-bg)' : 'var(--bg-elevated)',
+                color: isProcessing ? 'var(--danger)' : 'var(--text-tertiary)', fontSize: 11, fontFamily: 'Menlo, monospace',
                 pointerEvents: 'auto', touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' as any,
               }}>ESC</button>
             </div>
@@ -2332,11 +2827,21 @@ export default function App() {
             isCompacting={sessionIsCompacting || isCompacting}
             onBack={() => { envSessionsCache.clear(); setSelectedSession(null); }}
             onInterrupt={() => interruptSession(liveSessionIdRef.current || selectedSession.id)}
+            onRawKey={isTTYId(selectedSession.id) ? (key: string) => sendRawKeyToTTY(parseTTYId(selectedSession.id), key) : undefined}
             onSend={async (text) => {
               if (text === '/clear') {
                 setSessionMessages([]);
                 sessionCache.current.delete(selectedSession.id);
                 setSessionIsProcessing(false);
+                return;
+              }
+              // TTY-based session: send via direct-send { tty, message }
+              if (isTTYId(selectedSession.id)) {
+                const tty = parseTTYId(selectedSession.id);
+                const msgId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                setSessionMessages(prev => [...prev, { id: msgId, role: 'user', type: 'text', content: text, ts: Date.now() }]);
+                sendToTTY(tty, text);
+                setSessionIsProcessing(true);
                 return;
               }
               // Show user message immediately

@@ -70,15 +70,17 @@ if (typeof window !== 'undefined') {
   (window as any).__connLogRaw = () => [..._connLog];
 }
 
+export interface PtySection { type: 'text' | 'tool'; name?: string; content: string; }
 export interface Message {
   id: string;
   role: 'user' | 'agent' | 'system';
-  type: 'text' | 'thinking' | 'tool' | 'tool_result' | 'status' | 'error' | 'permission';
+  type: 'text' | 'thinking' | 'tool' | 'tool_result' | 'status' | 'error' | 'permission' | 'pty';
   content: string;
   name?: string;
   collapsed?: boolean;
   pending?: boolean;
   ts: number;
+  sections?: PtySection[];
 }
 
 export interface RelayConfig {
@@ -159,8 +161,56 @@ export function subscribe(sessionId: string, fn: Listener): () => void {
   };
 }
 
+// ─── Strip ANSI/terminal escape sequences for display ───
+function stripTermEscapes(s: string): string {
+  return s
+    .replace(/\x1b\[\?[0-9;]*[hl]/g, '')           // DEC private mode (before CSI)
+    .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')         // CSI sequences
+    .replace(/\x1b\][^\x07]*\x07/g, '')            // OSC sequences
+    .replace(/\x1b[()][AB012]/g, '')                // charset
+    .replace(/\x1b[\x20-\x2f]*[\x40-\x7e]/g, '')   // other escapes
+    .replace(/[\x00-\x09\x0b-\x1f]/g, '')          // control chars except \n
+    .replace(/\??\d{2,}[hl]/g, '')                   // residual DEC mode numbers
+    // Claude TUI chrome (safety net — wrapper should strip these too)
+    .replace(/^.*⏵⏵.*$/gm, '')                      // status bar
+    .replace(/^.*(?:shift\+tab|esc to interrupt|to cycle).*$/gim, '') // UI hints
+    .replace(/^\s*[─━]{3,}\s*$/gm, '')             // horizontal rules
+    .replace(/^\s*[\u2800-\u28FF]+\s*$/gm, '')     // spinner-only lines
+    .replace(/^(\s*)⎿\s*/gm, '$1')                 // ⎿ response marker
+    .replace(/^(\s*)│\s?/gm, '$1  ')               // │ side border → indent
+    .replace(/\n{3,}/g, '\n\n')                     // collapse excessive newlines
+    .trim();
+}
+
 // ─── Parse Claude stream-json ───
 function parseOutput(data: any): Message[] {
+  // JSONL structured messages from wrapper (clean, authoritative source)
+  if (data?.type === 'jsonl' && data?.messages?.length) {
+    const ts = data.ts || Date.now();
+    return (data.messages as any[]).map((m: any) => {
+      const role = m.role === 'user' ? 'user' as const : 'agent' as const;
+      if (m.type === 'tool') {
+        return { id: m.toolId || uid(), role, type: 'tool' as const, content: m.content || '', name: m.name, ts, collapsed: true };
+      }
+      if (m.type === 'tool_result') {
+        return { id: uid(), role, type: 'tool_result' as const, content: m.content || '', ts, collapsed: true };
+      }
+      return { id: uid(), role, type: 'text' as const, content: m.content || '', ts };
+    });
+  }
+  // PTY structured sections from wrapper (collapsible tools + clean text)
+  if (data?.type === 'pty' && data?.sections?.length) {
+    const ts = data.ts || Date.now();
+    const sections: PtySection[] = data.sections;
+    const fallback = sections.map(s => s.content).join('\n');
+    return [{ id: uid(), role: 'agent', type: 'pty', content: fallback, sections, ts }];
+  }
+  // Legacy PTY raw text (fallback for old wrappers)
+  if (data?.type === 'pty' && data?.text) {
+    const clean = stripTermEscapes(data.text);
+    if (!clean) return [];
+    return [{ id: uid(), role: 'agent', type: 'text', content: clean, ts: data.ts || Date.now() }];
+  }
   const d = data?.data;
   if (!d) return [];
   const msgs: Message[] = [];
@@ -249,10 +299,16 @@ function connectRelaySocket(relayId: string): void {
 
   conn.socket.on('claude-output', (data: any) => {
     const sid = data?.sessionId;
+    const tty = data?.tty;
     const ts = data?.ts || data?.data?.ts;
     if (sid && ts) lastSeenTs.set(sid, ts);
     const msgs = parseOutput(data);
+    // Route to session listeners
     if (sid) msgs.forEach(m => routeMessage(sid, m));
+    // Route to TTY listeners (spatial grid mode)
+    if (tty && ttyListeners.has(tty)) {
+      ttyListeners.get(tty)!.forEach(fn => msgs.forEach(m => fn(m)));
+    }
   });
   conn.socket.on('claude-permission', (data: any) => {
     const sid = data?.sessionId;
@@ -566,6 +622,50 @@ export function subscribeSessionMessages(sid: string, cb: Listener) {
 export function unsubscribeSessionMessages() {
   if (_sessionUnsub) { _sessionUnsub(); _sessionUnsub = null; }
 }
+
+// ─── TTY-based routing (spatial grid) ───
+
+const ttyListeners = new Map<string, Set<Listener>>();
+
+/** Send a message to a specific TTY via Socket.IO direct-send. */
+export function sendToTTY(tty: string, text: string): void {
+  const primary = ensurePrimary();
+  if (!primary.socket?.connected) {
+    clog('tty-send-fail', `not connected, tty=${tty}`);
+    return;
+  }
+  clog('tty-send', `tty=${tty} msg=${text.slice(0, 40)}`);
+  primary.socket.emit('direct-send', { tty, message: text });
+}
+
+/** Send a raw key sequence to a specific TTY (arrow keys, Esc, Ctrl, etc.) */
+export function sendRawKeyToTTY(tty: string, key: string): void {
+  const primary = ensurePrimary();
+  if (!primary.socket?.connected) return;
+  primary.socket.emit('direct-send', { tty, message: key, raw: true });
+}
+
+/** Subscribe to output from a specific TTY room. Returns unsubscribe function. */
+export function subscribeTTY(tty: string, cb: Listener): () => void {
+  if (!ttyListeners.has(tty)) ttyListeners.set(tty, new Set());
+  ttyListeners.get(tty)!.add(cb);
+
+  const primary = ensurePrimary();
+  if (primary.socket?.connected) {
+    primary.socket.emit('subscribe-tty', { tty });
+    clog('tty-subscribe', `tty=${tty}`);
+  }
+
+  return () => {
+    ttyListeners.get(tty)?.delete(cb);
+    if (ttyListeners.get(tty)?.size === 0) ttyListeners.delete(tty);
+  };
+}
+
+/** Check if an ID is a TTY-prefixed ID (from spatial grid). */
+export function isTTYId(id: string): boolean { return id.startsWith('tty:'); }
+/** Extract TTY name from a tty:XXX prefixed ID. */
+export function parseTTYId(id: string): string { return id.replace('tty:', ''); }
 
 // Instant reconnect when page comes back to foreground
 // Socket.IO's built-in reconnection uses exponential backoff — up to 5s delay.
