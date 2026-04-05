@@ -304,7 +304,7 @@ function connectRelaySocket(relayId: string): void {
     }
     setConnState('connected');
     // Phase 2: drain offline queue on reconnect
-    if (relayId === PRIMARY) drainQueue();
+    if (relayId === PRIMARY) { drainQueue(); _initOriginSession(); }
   });
   conn.socket.on('disconnect', (reason) => { clog('disconnected', `relay=${relayId} reason=${reason}`); setConnState('disconnected'); });
   conn.socket.on('connect_error', (err) => { clog('connect_error', `relay=${relayId} err=${err.message}`); setConnState('error'); });
@@ -574,21 +574,11 @@ export async function fetchAllSessions(): Promise<any[]> {
 let _currentTab = 'canvas';
 export function setCurrentTab(tab: string) { _currentTab = tab; }
 
-export async function connect(): Promise<void> {
-  const primary = ensurePrimary();
-  primary.state = 'connecting';
-  stateListeners.forEach(fn => fn('connecting'));
+let _initDone = false;
 
+async function _initOriginSession() {
+  if (_initDone) return;
   try {
-    connectRelaySocket(PRIMARY);
-    await new Promise<void>((resolve) => {
-      if (primary.socket?.connected) { resolve(); return; }
-      let resolved = false;
-      const done = () => { if (resolved) return; resolved = true; primary.socket?.off('connect', done); clearTimeout(t); resolve(); };
-      primary.socket?.on('connect', done);
-      const t = setTimeout(done, 3000);
-    });
-
     const [history, alive] = await Promise.all([
       loadHistory(FIXED_SESSION, 30),
       isSessionAlive(FIXED_SESSION),
@@ -602,16 +592,26 @@ export async function connect(): Promise<void> {
       });
     }
 
-    // Always ensure FIXED_SESSION is subscribed (covers alive=true case too)
+    const primary = ensurePrimary();
     if (primary.socket?.connected) primary.socket.emit('direct-subscribe', { sessionId: FIXED_SESSION, sinceTs: lastSeenTs.get(FIXED_SESSION) || 0 });
 
-    // Connect secondary relays saved from previous session
-    loadSavedRelays();
+    _initDone = true;
+    clog('init-done', 'origin session initialized');
   } catch (err: any) {
-    primary.state = 'error';
-    stateListeners.forEach(fn => fn('error'));
-    routeMessage(FIXED_SESSION, { id: uid(), role: 'system', type: 'error', content: err.message, ts: Date.now() });
+    clog('init-retry', `failed: ${err.message} — will retry on reconnect`);
+    // Don't set error state — socket.io will reconnect and retry
   }
+}
+
+export async function connect(): Promise<void> {
+  const primary = ensurePrimary();
+  primary.state = 'connecting';
+  stateListeners.forEach(fn => fn('connecting'));
+
+  connectRelaySocket(PRIMARY);
+
+  // Connect secondary relays saved from previous session
+  loadSavedRelays();
 }
 
 export function send(text: string) {

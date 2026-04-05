@@ -2071,6 +2071,7 @@ function SessionTerminal({ session, messages, onBack, onSend, onRawKey, onInterr
   const swipeStart = useRef<{ x: number } | null>(null);
   const [resumeOpen, setResumeOpen] = useState(false);
   const [resumeSessions, setResumeSessions] = useState<{ id: string; slug: string | null; firstMessage: string | null; updatedAt: number }[]>([]);
+  const arrowThrottle = useRef({ lastSent: 0, pending: null as string | null, timer: null as ReturnType<typeof setTimeout> | null });
 
   const loadResumeSessions = useCallback(async () => {
     const token = localStorage.getItem('morph-auth') || '';
@@ -2225,7 +2226,7 @@ function SessionTerminal({ session, messages, onBack, onSend, onRawKey, onInterr
         borderTop: '1px solid rgba(224,160,48,0.12)', flexShrink: 0,
       }}>
         {onRawKey && <>
-          <button onPointerDown={(e) => { e.preventDefault(); onInterrupt(); }}
+          <button onPointerDown={(e) => { e.preventDefault(); onRawKey('\x1b'); }}
             style={{
               flex: 1, maxWidth: 56, padding: '8px 0', borderRadius: 6, cursor: 'pointer',
               border: isProcessing ? '1px solid var(--danger-border)' : '1px solid var(--border)',
@@ -2238,7 +2239,32 @@ function SessionTerminal({ session, messages, onBack, onSend, onRawKey, onInterr
             { label: '\u2193', key: '\x1b[B' },
             { label: '\u21B5', key: '\r' },
           ].map(({ label, key }) => (
-            <button key={label} onPointerDown={(e) => { e.preventDefault(); onRawKey(key); }}
+            <button key={label} onPointerDown={(e) => {
+              e.preventDefault();
+              if ((key === '\x1b[A' || key === '\x1b[B') && onRawKey) {
+                // Throttle arrows: 2s cooldown, last direction wins
+                const now = Date.now();
+                const t = arrowThrottle.current;
+                t.pending = key;
+                if (now - t.lastSent >= 2000) {
+                  t.lastSent = now; t.pending = null;
+                  if (t.timer) { clearTimeout(t.timer); t.timer = null; }
+                  onRawKey(key);
+                } else if (!t.timer) {
+                  const wait = 2000 - (now - t.lastSent);
+                  t.timer = setTimeout(() => {
+                    t.timer = null;
+                    if (t.pending && onRawKey) {
+                      t.lastSent = Date.now();
+                      const k = t.pending; t.pending = null;
+                      onRawKey(k);
+                    }
+                  }, wait);
+                }
+              } else if (onRawKey) {
+                onRawKey(key);
+              }
+            }}
               style={{
                 flex: 1, maxWidth: 56, padding: '8px 0', borderRadius: 6, cursor: 'pointer',
                 border: '1px solid var(--border)', backgroundColor: 'var(--bg-elevated)',
@@ -2993,18 +3019,24 @@ export default function App() {
             onInterrupt={() => interruptSession(liveSessionIdRef.current || selectedSession.id)}
             onRawKey={isTTYId(selectedSession.id) ? (key: string) => sendRawKeyToTTY(parseTTYId(selectedSession.id), key) : undefined}
             onSend={async (text) => {
+              // TTY-based session: send via direct-send { tty, message }
+              // No local echo — PTY will echo the input naturally
+              if (isTTYId(selectedSession.id)) {
+                if (text === '/clear') {
+                  // Clear local + forward to terminal
+                  setSessionMessages([]);
+                  sessionCache.current.delete(selectedSession.id);
+                  setSessionIsProcessing(false);
+                }
+                const tty = parseTTYId(selectedSession.id);
+                sendToTTY(tty, text);
+                setSessionIsProcessing(true);
+                return;
+              }
               if (text === '/clear') {
                 setSessionMessages([]);
                 sessionCache.current.delete(selectedSession.id);
                 setSessionIsProcessing(false);
-                return;
-              }
-              // TTY-based session: send via direct-send { tty, message }
-              // No local echo — PTY will echo the input naturally
-              if (isTTYId(selectedSession.id)) {
-                const tty = parseTTYId(selectedSession.id);
-                sendToTTY(tty, text);
-                setSessionIsProcessing(true);
                 return;
               }
               // Show user message immediately
