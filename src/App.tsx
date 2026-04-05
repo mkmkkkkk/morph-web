@@ -182,8 +182,8 @@ function parsePtySegments(cleaned: string): PtySegment[] {
 const IDLE_WORDS =['thinking...', 'pondering...', 'wondering...', 'reasoning...', 'considering...', 'analyzing...', 'processing...'];
 
 // ─── Theme ───
-type Theme = 'dark' | 'light' | 'sunny' | 'brutalist' | 'glass' | 'bloomberg' | 'ink' | 'cosmos' | 'aurora' | 'hud';
-const THEME_META: Record<Theme, string> = { dark: '#0a0a0a', light: '#f5f0eb', sunny: '#f4ede1', brutalist: '#e8e4e0', glass: '#d5cdc4', bloomberg: '#0c0c0c', ink: '#f0ebe0', cosmos: '#08080f', aurora: '#080810', hud: '#06090c' };
+type Theme = 'dark' | 'light' | 'sunny' | 'brutalist' | 'onyx' | 'clay' | 'terminal' | 'noir' | 'stone' | 'rust';
+const THEME_META: Record<Theme, string> = { dark: '#0a0a0a', light: '#f5f0eb', sunny: '#f4ede1', brutalist: '#e8e4e0', onyx: '#28241e', clay: '#d8d0c8', terminal: '#000000', noir: '#0a0a0a', stone: '#c8c0b4', rust: '#120e0a' };
 function getTheme(): Theme { const t = localStorage.getItem('morph-theme'); return (t && t in THEME_META) ? t as Theme : 'dark'; }
 function setThemeGlobal(t: Theme) {
   localStorage.setItem('morph-theme', t);
@@ -1670,14 +1670,14 @@ function ConfigTab({ connState }: { connState: string }) {
 
       <Section title="Appearance">
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {(['dark', 'light', 'sunny', 'brutalist', 'glass', 'bloomberg', 'ink', 'cosmos', 'aurora', 'hud'] as Theme[]).map(t => (
+          {(['dark', 'light', 'sunny', 'brutalist', 'onyx', 'clay', 'terminal', 'noir', 'stone', 'rust'] as Theme[]).map(t => (
             <button key={t} onClick={() => { setTheme(t); setThemeGlobal(t); }} style={{
               flex: '1 0 auto', minWidth: 60, padding: '10px 0', border: theme === t ? '2px solid var(--accent)' : '2px solid transparent',
               borderRadius: 10, cursor: 'pointer', fontSize: 12, fontWeight: theme === t ? 700 : 400,
               backgroundColor: theme === t ? 'var(--accent-bg)' : 'var(--bg-input)',
               color: theme === t ? 'var(--accent)' : 'var(--text-secondary)',
               textTransform: 'capitalize', transition: 'all 0.2s',
-            }}>{{ dark: '● dark', light: '○ light', sunny: '☀ sunny', brutalist: '■ brutal', glass: '◈ liquid', bloomberg: '$ BB', ink: '墨 ink', cosmos: '✦ cosmos', aurora: '◐ aurora', hud: '◇ HUD' }[t]}</button>
+            }}>{{ dark: '● dark', light: '○ light', sunny: '☀ sunny', brutalist: '■ brutal', onyx: '◉ onyx', clay: '◎ clay', terminal: '> term', noir: '◑ noir', stone: '◻ stone', rust: '⚙ rust' }[t]}</button>
           ))}
         </div>
       </Section>
