@@ -8,8 +8,171 @@ import Sketch from './components/Sketch';
 declare const __BUILD_TIME__: string;
 const BUILD_TS = typeof __BUILD_TIME__ !== 'undefined' ? __BUILD_TIME__ : Date.now().toString(36);
 
+// Strip ANSI/terminal escapes for phone rendering
+function stripTermEscapesForRender(s: string): string {
+  // Step 0: find the last full screen redraw and start from there
+  // Claude TUI redraws with \x1b[H (cursor home) or \x1b[?1049h (alternate screen)
+  // This discards old animation frames and only keeps the current screen
+  const lastAltScreen = s.lastIndexOf('\x1b[?1049h');
+  const lastCursorHome = s.lastIndexOf('\x1b[H\x1b[2J'); // home + clear screen
+  const lastRedraw = Math.max(lastAltScreen, lastCursorHome);
+  if (lastRedraw > 0 && lastRedraw < s.length - 50) {
+    s = s.slice(lastRedraw);
+  }
+
+  // Step 1: strip ANSI escape sequences (comprehensive)
+  let cleaned = s
+    .replace(/\x1b\[[\x20-\x3f]*[\x40-\x7e]/g, '') // ALL CSI sequences (includes ?/>/= prefixed)
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '') // OSC sequences (BEL or ST terminated)
+    .replace(/\x1b[()][AB012]/g, '')               // charset selection
+    .replace(/\x1b[\x20-\x2f]*[\x40-\x7e]/g, '') // other ESC sequences
+    // Remove control chars EXCEPT \r (0x0d) and \n (0x0a) — \r is needed for overwrite processing
+    .replace(/[\x00-\x09\x0b\x0c\x0e-\x1f]/g, '');
+
+  // Step 2: normalize \r\n → \n, then process standalone \r as "overwrite from column 0"
+  cleaned = cleaned.replace(/\r\n/g, '\n');
+  cleaned = cleaned.split('\n').map(line => {
+    if (!line.includes('\r')) return line;
+    // Simulate carriage return: \r moves cursor to column 0, subsequent chars overwrite
+    const chars: string[] = [];
+    let col = 0;
+    for (const ch of line) {
+      if (ch === '\r') {
+        col = 0;
+      } else {
+        if (col < chars.length) {
+          chars[col] = ch;
+        } else {
+          while (chars.length < col) chars.push(' ');
+          chars.push(ch);
+        }
+        col++;
+      }
+    }
+    return chars.join('');
+  }).join('\n');
+
+  // Step 3: strip TUI chrome and noise
+  cleaned = cleaned
+    .replace(/\??\d{2,}[hl]/g, '')               // leftover mode params
+    .replace(/>[0-9]+[uq]/g, '')                   // leftover CSI params (>1u, >0q)
+    .replace(/<[0-9]+u/g, '')                      // leftover CSI params (<1u)
+    .replace(/^.*⏵⏵.*$/gm, '')                    // bypass permissions line
+    .replace(/^.*(?:shift\+tab|esc to interrupt|to cycle|auto mode).*$/gim, '') // TUI tips
+    .replace(/^\s*[─━]{3,}\s*$/gm, '')            // horizontal rules
+    .replace(/^\s*[\u2800-\u28FF]+\s*$/gm, '')    // braille loading blocks
+    // Spinner lines: ✢✳✶✻✽ followed by text like "Cerebrating...", "Burrowing...", etc.
+    .replace(/^[·✢✳✶✻✽●]+.*(?:brating|rrowing|ndering|inking|nalyzing|ocessing|easoning|onsidering).*$/gim, '')
+    // Claude header: ▐▛███▜▌ClaudeCode...
+    .replace(/^.*[▐▛███▜▌]+.*ClaudeCode.*$/gm, '')
+    // "Tip:" lines (with possible leading whitespace)
+    .replace(/^\s*Tip:.*$/gm, '')
+    // "Claude Code has switched..." lines
+    .replace(/^\s*Claude\s*Code\s*has\s*switched.*$/gim, '')
+    // Garbled TUI: "steerClaudeinreal-time" etc
+    .replace(/^.*steer\s*Claude.*$/gim, '')
+    // "(thinking with ...)" status lines
+    .replace(/^\s*\(thinking\s+with\s+.*\)$/gm, '')
+    // control+v tips
+    .replace(/^\s*control\+v.*$/gim, '')
+    // Spinner words on their own lines
+    .replace(/^\s*(Cerebrating|Finagling|Burrowing|Pondering|Wondering|Analyzing|Processing|Reasoning|Considering)…?.*$/gim, '');
+
+  return cleaned.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+// ── PTY segment parser: same visual as JSONL rendering, different data source ──
+interface PtySegment { type: 'user' | 'text' | 'tool'; content: string; name?: string }
+const PTY_TOOL_RE = /^⏺\s*(Bash|Read|Edit|Write|Glob|Grep|Agent|Skill|ToolSearch|WebFetch|WebSearch|NotebookEdit|Task\w+|Enter\w+|Exit\w+|AskUser\w+)/;
+
+function parsePtySegments(cleaned: string): PtySegment[] {
+  const lines = cleaned.split('\n');
+  const segments: PtySegment[] = [];
+  let cur: PtySegment | null = null;
+
+  const flush = () => {
+    if (!cur) return;
+    cur.content = cur.content.trim();
+    if (cur.content || cur.type === 'user') segments.push(cur);
+    cur = null;
+  };
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    // Skip chrome: header block chars, tips, version notifications, spinner lines
+    if (/^[▜▝▘▌█▛▞▚░▒▓▐]+/.test(trimmed)) continue;
+    if (/^[·✢✳✶✻✽●]+/.test(trimmed)) continue;
+    // Claude TUI chrome: tips, version, status, spinner words
+    if (/^Tip:/i.test(trimmed)) continue;
+    if (/^Claude\s*Code\s*has/i.test(trimmed)) continue;
+    if (/^\(thinking\b/.test(trimmed)) continue;
+    if (/^control\+v/i.test(trimmed)) continue;
+    // Spinner status words (thinking indicators): Cerebrating, Finagling, Burrowing, etc.
+    if (/^(Cerebrating|Finagling|Burrowing|Pondering|Wondering|Analyzing|Processing|Reasoning|Considering|Thinking)…?/i.test(trimmed)) continue;
+    // Skip spinner fragments: very short lines (≤4 chars) that aren't meaningful markers
+    if (trimmed.length <= 4 && !/^[❯⏺⎿>]/.test(trimmed)) continue;
+    // Skip garbled TUI chrome (no spaces = cursor-addressed concatenation)
+    if (trimmed.length > 10 && !trimmed.includes(' ') && /[a-z]{3,}[A-Z]/.test(trimmed)) continue;
+    // Skip garbled TUI text containing "steer" or "real-time" (mangled tip)
+    if (/steer\w*Claude|real-time/i.test(trimmed) && !trimmed.startsWith('❯')) continue;
+    if (!trimmed) { if (cur) cur.content += '\n'; continue; }
+
+    // User prompt: ❯
+    if (trimmed.startsWith('❯')) {
+      flush();
+      const text = trimmed.slice(1).trim();
+      if (text) { segments.push({ type: 'user', content: text }); }
+      continue;
+    }
+
+    // Tool call: ⏺ + known tool name
+    const toolMatch = trimmed.match(PTY_TOOL_RE);
+    if (toolMatch) {
+      flush();
+      const after = trimmed.slice(trimmed.indexOf(toolMatch[1]) + toolMatch[1].length).replace(/^\s*\(?/, '').replace(/\)?\s*$/, '');
+      cur = { type: 'tool', name: toolMatch[1], content: after };
+      continue;
+    }
+
+    // Claude text: ⏺ + non-tool text
+    if (trimmed.startsWith('⏺')) {
+      flush();
+      cur = { type: 'text', content: trimmed.slice(1).trim() };
+      continue;
+    }
+
+    // ⎿ continuation — append to current segment
+    if (trimmed.startsWith('⎿')) {
+      const inner = trimmed.slice(1).trim();
+      if (cur) { cur.content += '\n' + inner; }
+      continue;
+    }
+
+    // Indented line — belongs to current block
+    if (cur && (line.startsWith(' ') || line.startsWith('\t'))) {
+      cur.content += '\n' + line;
+      continue;
+    }
+
+    // Standalone line — start new text segment
+    flush();
+    cur = { type: 'text', content: trimmed };
+  }
+  flush();
+
+  // Post-process: strip TUI chrome lines from within segment content
+  const TUI_CHROME_RE = /^\s*(Tip:|Claude\s*Code\s*has|control\+v|\(thinking\s+with|Cerebrating|Finagling|Burrowing|Pondering|Wondering|Analyzing|Processing|Reasoning|Considering)/i;
+  for (const seg of segments) {
+    if (seg.type === 'text') {
+      seg.content = seg.content.split('\n').filter(l => !TUI_CHROME_RE.test(l.trim())).join('\n').trim();
+    }
+  }
+  return segments.filter(s => s.content.trim());
+}
+
 // Module-level constant — avoids array allocation on every render
-const IDLE_WORDS = ['thinking...', 'pondering...', 'wondering...', 'reasoning...', 'considering...', 'analyzing...', 'processing...'];
+const IDLE_WORDS =['thinking...', 'pondering...', 'wondering...', 'reasoning...', 'considering...', 'analyzing...', 'processing...'];
 
 // ─── Theme ───
 type Theme = 'dark' | 'light' | 'sunny' | 'pixel' | 'glass' | 'bloomberg';
@@ -269,18 +432,30 @@ const MessageRow = React.memo(function MessageRow({ msg }: { msg: Message }) {
               </React.Fragment>
             ))
           }</div>;
-    case 'pty':
-      return <div>{(msg.sections || []).map((sec, i) =>
-        sec.type === 'tool'
-          ? <Collapsible key={i} label={sec.name || 'tool'} preview={sec.content.slice(0, 80).replace(/\n/g, ' ')} content={sec.content} color="var(--text-tertiary)" />
-          : <div key={i} style={{ ...monoOuter, color: 'var(--text-primary)', marginBottom: 3, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{
-              sec.content.split('\n').map((line, j) => (
+    case 'pty': {
+      const cleaned = stripTermEscapesForRender(msg.content);
+      const segments = parsePtySegments(cleaned);
+      if (segments.length === 0) return null;
+      return <>{segments.map((seg, i) => {
+        switch (seg.type) {
+          case 'user':
+            return <div key={i} style={{ ...monoOuter, color: 'var(--success)', marginBottom: 3 }}>
+              <span style={sel} data-sel>&gt; {seg.content}</span>
+            </div>;
+          case 'tool':
+            return <Collapsible key={i} label={seg.name || 'tool'} preview={seg.content.slice(0, 80).replace(/\n/g, ' ')} content={seg.content} color="var(--text-tertiary)" />;
+          case 'text':
+            return <div key={i} style={{ ...monoOuter, color: 'var(--text-primary)', marginBottom: 3, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{
+              seg.content.split('\n').map((line, j) => (
                 <React.Fragment key={j}>
-                  {line === '' ? <div style={{ height: '10px', userSelect: 'none', WebkitUserSelect: 'none' } as any} /> : <span style={sel} data-sel>{line}</span>}
+                  {line.trim() === '' ? <div style={{ height: '10px' }} /> : <span style={sel} data-sel>{line}</span>}
                 </React.Fragment>
               ))
-            }</div>
-      )}</div>;
+            }</div>;
+          default: return null;
+        }
+      })}</>;
+    }
     case 'thinking':
       return <Collapsible label="thinking" preview={msg.content.slice(0, 60)} content={msg.content} color="var(--text-tertiary)" />;
     case 'tool':
@@ -940,14 +1115,15 @@ function cleanTermText(s: string): string {
 }
 
 // Spatial grid — mirrors Ghostty pane layout
-function SpatialGrid({ layout, onSelect }: { layout: any; onSelect: (id: string, display?: string, underlyingSessionId?: string, textPreview?: string) => void }) {
+function SpatialGrid({ layout, onSelect }: { layout: any; onSelect: (id: string, display?: string, textPreview?: string) => void }) {
   if (!layout || !layout.windows || layout.windows.length === 0) return null;
 
   const handlePaneTap = (p: any) => {
     const isRoutable = p.routable !== false;
-    const selectId = p.tty ? `tty:${p.tty}` : p.sessionId;
-    const label = p.cwd?.split('/').pop() || p.tty || p.display;
-    if (isRoutable && selectId) onSelect(selectId, label, p.sessionId || undefined, p.axText || p.textPreview || undefined);
+    const selectId = p.tty ? `tty:${p.tty}` : null;
+    const label = p.cwd?.split('/').pop() || p.tty || 'terminal';
+    // Panel = pure PTY relay. No session concept. Only TTY + textPreview.
+    if (isRoutable && selectId) onSelect(selectId, label, p.axText || p.textPreview || undefined);
   };
 
   return (
@@ -1166,10 +1342,11 @@ function SessionCards({ onSelect, onNewSession }: { onSelect: (sessionId: string
     localStorage.setItem('morph-session-view', next);
   };
 
-  const handleGridSelect = (sessionId: string, display?: string, underlyingSessionId?: string, textPreview?: string) => {
-    markViewed(sessionId);
+  const handleGridSelect = (ttyId: string, display?: string, textPreview?: string) => {
+    markViewed(ttyId);
     setViewed(getViewed());
-    onSelect(sessionId, display, undefined, undefined, underlyingSessionId, 'workspace', textPreview);
+    // Panel: pure TTY, no session/env/relay fields
+    onSelect(ttyId, display, undefined, undefined, undefined, 'workspace', textPreview);
   };
 
   return (
@@ -2185,46 +2362,7 @@ export default function App() {
   // Preload all session histories into cache — deferred so cold load is not competing
   const sessionCache = useRef<Map<string, Message[]>>(new Map());
   const sessionCacheTs = useRef<Map<string, number>>(new Map());
-  useEffect(() => {
-    if (!authed) return;
-    const mainToken = localStorage.getItem('morph-auth') || '';
-    const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const MORPH_SESSION = 'a0a0a0a0-0e00-4000-a000-000000000002';
-
-    function preloadEnv(base: string, token: string, startDelay: number) {
-      setTimeout(() => {
-        fetch(`${base}/v2/claude/sessions?limit=30`, { headers: { 'Authorization': `Bearer ${token}` } })
-          .then(r => r.json())
-          .then(d => {
-            const sessions = (d.sessions || []).filter((s: any) => s.id !== MORPH_SESSION);
-            sessions.forEach((s: any, i: number) => {
-              setTimeout(() => {
-                fetch(`${base}/v2/claude/history/${s.id}?limit=50`, { headers: { 'Authorization': `Bearer ${token}` } })
-                  .then(r => r.json())
-                  .then(d => {
-                    const msgs = (d.messages || []).map((m: any) => ({
-                      id: uid(), role: m.role, type: m.type, content: m.content, name: m.name,
-                      ts: m.ts ? new Date(m.ts).getTime() : Date.now(),
-                    }));
-                    sessionCache.current.set(s.id, msgs);
-                    sessionCacheTs.current.set(s.id, Date.now());
-                  })
-                  .catch(() => {});
-              }, i * 200);
-            });
-          })
-          .catch(() => {});
-      }, startDelay);
-    }
-
-    // Workspace (local relay) — start at 1.5s
-    preloadEnv('', mainToken, 1500);
-    // Other envs via proxy — start at 4s to not compete with workspace
-    const otherEnvs = getEnvironments().filter(e => e.relayUrl);
-    otherEnvs.forEach((env, i) => {
-      preloadEnv(env.relayUrl, env.token || mainToken, 4000 + i * 1000);
-    });
-  }, [authed]);
+  // Session history is loaded on-demand when a pane is tapped — no preloading.
 
   // SAFETY: register all locally-stored envs as relays immediately on auth
   // Prevents cross-env leak when env was added via URL param or Config and page reloads
@@ -2300,87 +2438,57 @@ export default function App() {
   useEffect(() => {
     if (!selectedSession) return;
 
-    // TTY-based session (from spatial grid): load history + subscribe for live PTY updates
+    // ── Panel: pure PTY relay ── No session concept. Subscribe to TTY, show what terminal shows.
     if (isTTYId(selectedSession.id)) {
       const tty = parseTTYId(selectedSession.id);
-      const sessionId = selectedSession.id; // capture for closure guards
+      const ttyKey = selectedSession.id;
       let cancelled = false;
-      liveSessionIdRef.current = sessionId;
+      liveSessionIdRef.current = ttyKey;
       setSessionIsProcessing(false);
-      const abortCtrl = new AbortController();
-
-      // Clear messages immediately to prevent stale content from previous pane
       setSessionMessages([]);
 
-      // Resolve the actual session UUID (not the TTY key) for cache + history
-      const underlyingSession = selectedSession.project || (selectedSession as any).underlyingSessionId;
-
-      // Show textPreview instantly while history loads
+      // Show textPreview as placeholder while subscribe-tty delivers PTY buffer
       const initPreview = (selectedSession as any).textPreview;
       if (initPreview) {
         const uid = `init_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-        setSessionMessages([{ id: uid, role: 'agent' as const, type: 'text' as const, content: initPreview, ts: Date.now() }]);
-      } else if (underlyingSession) {
-        // Cache keyed by actual session UUID (not TTY key) to prevent cross-session stale reads
-        const cached = sessionCache.current.get(underlyingSession);
-        if (cached && cached.length > 0) setSessionMessages(cached);
+        setSessionMessages([{ id: uid, role: 'agent' as const, type: 'pty' as const, content: initPreview, ts: Date.now() }]);
       }
 
-      // Load full conversation history from JSONL
-      if (underlyingSession) {
-        const token = localStorage.getItem('morph-auth') || '';
-        fetch(`/v2/claude/history/${underlyingSession}?limit=50`, { headers: { 'Authorization': `Bearer ${token}` }, signal: abortCtrl.signal })
-          .then(r => r.json())
-          .then(d => {
-            // Guard: skip if session changed while fetch was in flight
-            if (cancelled || liveSessionIdRef.current !== sessionId) return;
-            const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-            const historyMsgs: Message[] = (d.messages || []).map((m: any) => ({
-              id: uid(), role: m.role, type: m.type, content: m.content, name: m.name,
-              ts: m.ts ? new Date(m.ts).getTime() : Date.now(),
-            }));
-            if (historyMsgs.length > 0) {
-              setSessionMessages(prev => {
-                // Keep any live PTY messages (added after init), prepend history
-                const liveMessages = prev.filter(m => m.id && !m.id.startsWith('init_'));
-                return [...historyMsgs, ...liveMessages];
-              });
-              // Cache by actual session UUID, not TTY key
-              sessionCache.current.set(underlyingSession, historyMsgs);
-            }
-          })
-          .catch(() => {});
-      }
-
-      // Subscribe for live PTY output from TTY room
-      const onSessionMsg = (msg: Message) => {
-        // Guard: ignore messages after cleanup or if session switched
-        if (cancelled || liveSessionIdRef.current !== sessionId) return;
-        // Skip very short PTY updates (spinner ticks, empty frames) — but not JSONL text messages
-        if (msg.type === 'pty' && msg.content.length < 10) return;
+      // Subscribe for live output — JSONL preferred, PTY as fallback
+      let gotJsonl = false;
+      const onPtyMsg = (msg: Message) => {
+        if (cancelled || liveSessionIdRef.current !== ttyKey) return;
+        if (msg.type === 'pty' && !msg.content.trim()) return;
+        // Once we have JSONL data, suppress raw PTY noise — JSONL is authoritative
+        if (gotJsonl && msg.type === 'pty') return;
 
         setSessionMessages(prev => {
-          // PTY structured or text: replace the last PTY/agent-text message (terminal screen update)
-          if (msg.type === 'pty' || (msg.role === 'agent' && msg.type === 'text')) {
+          // First structured (JSONL) message: replace the initial PTY preview placeholder
+          if (!gotJsonl && msg.type !== 'pty') {
+            gotJsonl = true;
+            // Remove any initial PTY preview messages — JSONL data is authoritative
+            const cleaned = prev.filter(m => m.type !== 'pty');
+            return [...cleaned, msg];
+          }
+          // Append PTY chunks to single terminal buffer message (only when no JSONL)
+          if (msg.type === 'pty') {
             const lastIdx = prev.length - 1;
-            if (lastIdx >= 0 && (prev[lastIdx].type === 'pty' || (prev[lastIdx].role === 'agent' && prev[lastIdx].type === 'text'))) {
-              if (msg.content.length >= prev[lastIdx].content.length * 0.3) {
-                const next = [...prev]; next[lastIdx] = msg; return next;
-              }
-              return prev;
+            if (lastIdx >= 0 && prev[lastIdx].type === 'pty') {
+              const next = [...prev];
+              next[lastIdx] = { ...prev[lastIdx], content: prev[lastIdx].content + msg.content, ts: msg.ts };
+              return next;
             }
           }
           return [...prev, msg];
         });
         if (msg.role === 'agent' || msg.type === 'tool' || msg.type === 'thinking') setSessionIsProcessing(true);
         if (msg.type === 'status' && (msg.content.includes('done') || msg.content.includes('exit'))) setSessionIsProcessing(false);
-        if (msg.type === 'error') setSessionIsProcessing(false);
         clearTimeout(sessionIdleTimer.current);
         sessionIdleTimer.current = setTimeout(() => setSessionIsProcessing(false), 30000);
       };
-      const unsub = subscribeTTY(tty, onSessionMsg);
+      const unsub = subscribeTTY(tty, onPtyMsg);
 
-      return () => { cancelled = true; unsub(); abortCtrl.abort(); };
+      return () => { cancelled = true; unsub(); };
     }
 
     // CRITICAL: hydrate relay mapping before any network calls — prevents cross-env leak

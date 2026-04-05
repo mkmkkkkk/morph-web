@@ -7,5 +7,9 @@ export default defineConfig({
   use: {
     baseURL: process.env.MORPH_URL || 'http://localhost:8080',
     ignoreHTTPSErrors: true,
+    launchOptions: {
+      // Bypass proxy for localhost to avoid proxy interference
+      args: ['--no-proxy-server'],
+    },
   },
 });

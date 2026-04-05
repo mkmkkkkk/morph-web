@@ -109,6 +109,8 @@ const sessionListeners = new Map<string, Set<Listener>>();
 const lastSeenTs = new Map<string, number>();
 const stateListeners = new Set<StateListener>(); // global (tracks primary relay)
 const compactListeners = new Set<() => void>();
+type LayoutListener = (data: any) => void;
+const layoutListeners = new Set<LayoutListener>();
 type PermissionListener = (sessionId: string, tools: any[]) => void;
 const permissionListeners = new Set<PermissionListener>();
 
@@ -205,11 +207,12 @@ function parseOutput(data: any): Message[] {
     const fallback = sections.map(s => s.content).join('\n');
     return [{ id: uid(), role: 'agent', type: 'pty', content: fallback, sections, ts }];
   }
-  // Legacy PTY raw text (fallback for old wrappers)
+  // PTY screen snapshot — single replacing frame (not appending)
+  // AX text is already clean (no ANSI), don't strip or it destroys TUI content
   if (data?.type === 'pty' && data?.text) {
-    const clean = stripTermEscapes(data.text);
-    if (!clean) return [];
-    return [{ id: uid(), role: 'agent', type: 'text', content: clean, ts: data.ts || Date.now() }];
+    const text = data.text.trim();
+    if (!text) return [];
+    return [{ id: uid(), role: 'agent', type: 'pty', content: text, ts: data.ts || Date.now() }];
   }
   const d = data?.data;
   if (!d) return [];
@@ -282,6 +285,13 @@ function connectRelaySocket(relayId: string): void {
         conn.socket!.emit('direct-subscribe', { sessionId: sid, sinceTs: lastSeenTs.get(sid) || 0 });
       }
     }
+    // Re-subscribe active TTY rooms (spatial grid)
+    if (relayId === PRIMARY) {
+      for (const tty of ttyListeners.keys()) {
+        conn.socket!.emit('subscribe-tty', { tty });
+        clog('tty-resubscribe', `tty=${tty}`);
+      }
+    }
     setConnState('connected');
     // Phase 2: drain offline queue on reconnect
     if (relayId === PRIMARY) drainQueue();
@@ -341,6 +351,19 @@ function connectRelaySocket(relayId: string): void {
     const msg: Message = { id: uid(), role: 'system', type: 'status', content: `--- exit ${data.code} ---`, ts: Date.now() };
     if (sid) routeMessage(sid, msg);
   });
+  // Layout push — relay sends only when pane arrangement changes
+  if (relayId === PRIMARY) {
+    conn.socket.on('layout-update', (data: any) => {
+      layoutListeners.forEach(fn => fn(data));
+    });
+    // TTY came online (wrapper registered) — force layout refresh
+    conn.socket.on('tty-online', () => {
+      clog('tty-online', 'forcing layout refresh');
+      relayGet(relayId, '/v2/claude/layout').then(data => {
+        layoutListeners.forEach(fn => fn(data));
+      }).catch(() => {});
+    });
+  }
 }
 
 // ─── API helpers ───
@@ -610,6 +633,7 @@ export function clearSession() {
 export function onMessage(fn: Listener) { return subscribe(FIXED_SESSION, fn); }
 export function onState(fn: StateListener) { stateListeners.add(fn); return () => { stateListeners.delete(fn); }; }
 export function onCompact(fn: () => void) { compactListeners.add(fn); return () => { compactListeners.delete(fn); }; }
+export function onLayoutUpdate(fn: LayoutListener) { layoutListeners.add(fn); return () => { layoutListeners.delete(fn); }; }
 export function getState(): ConnectionState { return ensurePrimary().state; }
 export function getSessionId() { return FIXED_SESSION; }
 
@@ -650,10 +674,14 @@ export function subscribeTTY(tty: string, cb: Listener): () => void {
   if (!ttyListeners.has(tty)) ttyListeners.set(tty, new Set());
   ttyListeners.get(tty)!.add(cb);
 
+  // Emit now if connected; also registered in connect handler for reconnect/late-connect
   const primary = ensurePrimary();
   if (primary.socket?.connected) {
     primary.socket.emit('subscribe-tty', { tty });
     clog('tty-subscribe', `tty=${tty}`);
+  } else {
+    // Socket not yet connected — will be sent via tty-resubscribe on connect
+    clog('tty-subscribe-queued', `tty=${tty} (socket not connected)`);
   }
 
   return () => {
