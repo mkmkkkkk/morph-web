@@ -597,9 +597,8 @@ export async function connect(): Promise<void> {
 
     if (!alive) {
       await apiPost('/v2/claude/send', {
-        message: `This is Morph Web — a mobile terminal for the CEO to interact with Claude Code remotely.\nYou are a CTO-level AI assistant. Working directory: /workspace. You have full access to the codebase.\nThe CEO may also be running a separate Claude Code session on the desktop terminal — they share the same /workspace files.\nBe concise. Follow CLAUDE.md instructions. Ready for tasks.`,
+        message: `This is Morph Origin Terminal — a dedicated relay-managed Claude session for the CEO.\nYou are a CTO-level AI assistant. Follow CLAUDE.md instructions. Be concise. Ready for tasks.`,
         sessionId: FIXED_SESSION,
-        cwd: '/workspace',
       });
     }
 
