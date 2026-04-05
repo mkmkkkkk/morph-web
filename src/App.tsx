@@ -61,8 +61,8 @@ function stripTermEscapesForRender(s: string): string {
     .replace(/^.*(?:shift\+tab|esc to interrupt|to cycle|auto mode).*$/gim, '') // TUI tips
     .replace(/^\s*[─━]{3,}\s*$/gm, '')            // horizontal rules
     .replace(/^\s*[\u2800-\u28FF]+\s*$/gm, '')    // braille loading blocks
-    // Spinner lines: ✢✳✶✻✽ followed by text like "Cerebrating...", "Burrowing...", etc.
-    .replace(/^[·✢✳✶✻✽●]+.*(?:brating|rrowing|ndering|inking|nalyzing|ocessing|easoning|onsidering).*$/gim, '')
+    // Spinner lines: ✢✳✶✻✽ followed by any spinner word
+    .replace(/^[·✢✳✶✻✽●]+.*….*$/gim, '')
     // Claude header: ▐▛███▜▌ClaudeCode...
     .replace(/^.*[▐▛███▜▌]+.*ClaudeCode.*$/gm, '')
     // "Tip:" lines (with possible leading whitespace)
@@ -75,8 +75,8 @@ function stripTermEscapesForRender(s: string): string {
     .replace(/^\s*\(thinking\s+with\s+.*\)$/gm, '')
     // control+v tips
     .replace(/^\s*control\+v.*$/gim, '')
-    // Spinner words on their own lines
-    .replace(/^\s*(Cerebrating|Finagling|Burrowing|Pondering|Wondering|Analyzing|Processing|Reasoning|Considering)…?.*$/gim, '');
+    // Generic spinner: single capitalized word ending with … (Flambéing…, Channelling…, etc.)
+    .replace(/^\s*[A-Z][a-zé]+…(\s*\(thinking.*\))?\s*$/gm, '');
 
   return cleaned.replace(/\n{3,}/g, '\n\n').trim();
 }
@@ -108,8 +108,8 @@ function parsePtySegments(cleaned: string): PtySegment[] {
     if (/^Claude\s*Code\s*has/i.test(trimmed)) continue;
     if (/^\(thinking\b/.test(trimmed)) continue;
     if (/^control\+v/i.test(trimmed)) continue;
-    // Spinner status words (thinking indicators): Cerebrating, Finagling, Burrowing, etc.
-    if (/^(Cerebrating|Finagling|Burrowing|Pondering|Wondering|Analyzing|Processing|Reasoning|Considering|Thinking)…?/i.test(trimmed)) continue;
+    // Generic spinner: single capitalized word ending with … (Flambéing…, Channelling…, etc.)
+    if (/^[A-Z][a-zéè]+…/.test(trimmed)) continue;
     // Skip spinner fragments: very short lines (≤4 chars) that aren't meaningful markers
     if (trimmed.length <= 4 && !/^[❯⏺⎿>]/.test(trimmed)) continue;
     // Skip garbled TUI chrome (no spaces = cursor-addressed concatenation)
@@ -162,7 +162,7 @@ function parsePtySegments(cleaned: string): PtySegment[] {
   flush();
 
   // Post-process: strip TUI chrome lines from within segment content
-  const TUI_CHROME_RE = /^\s*(Tip:|Claude\s*Code\s*has|control\+v|\(thinking\s+with|Cerebrating|Finagling|Burrowing|Pondering|Wondering|Analyzing|Processing|Reasoning|Considering)/i;
+  const TUI_CHROME_RE = /^\s*(Tip:|Claude\s*Code\s*has|control\+v|\(thinking\s+with|[A-Z][a-zéè]+…)/;
   for (const seg of segments) {
     if (seg.type === 'text') {
       seg.content = seg.content.split('\n').filter(l => !TUI_CHROME_RE.test(l.trim())).join('\n').trim();
@@ -2454,23 +2454,28 @@ export default function App() {
         setSessionMessages([{ id: uid, role: 'agent' as const, type: 'pty' as const, content: initPreview, ts: Date.now() }]);
       }
 
-      // Subscribe for live output — JSONL preferred, PTY as fallback
-      let gotJsonl = false;
+      // Subscribe for live output
+      // Flow: initial JSONL (history) → then PTY (live updates, filtered)
+      let blockPtyUntil = 0;  // Timestamp until which PTY is blocked (initial JSONL settling)
       const onPtyMsg = (msg: Message) => {
         if (cancelled || liveSessionIdRef.current !== ttyKey) return;
         if (msg.type === 'pty' && !msg.content.trim()) return;
-        // Once we have JSONL data, suppress raw PTY noise — JSONL is authoritative
-        if (gotJsonl && msg.type === 'pty') return;
+        // Block PTY during initial JSONL settling window (prevents race with stale PTY)
+        if (msg.type === 'pty' && Date.now() < blockPtyUntil) return;
 
         setSessionMessages(prev => {
-          // First structured (JSONL) message: replace the initial PTY preview placeholder
-          if (!gotJsonl && msg.type !== 'pty') {
-            gotJsonl = true;
-            // Remove any initial PTY preview messages — JSONL data is authoritative
+          // Batch refresh (initial load or reconnect): replace entire list, block PTY briefly
+          if ((msg as any)._batch) {
+            blockPtyUntil = Date.now() + 2000;
+            return [msg];
+          }
+          // Structured (JSONL) message arrived: remove any PTY preview placeholder
+          if (msg.type !== 'pty' && prev.some(m => m.type === 'pty')) {
+            blockPtyUntil = Date.now() + 2000;
             const cleaned = prev.filter(m => m.type !== 'pty');
             return [...cleaned, msg];
           }
-          // Append PTY chunks to single terminal buffer message (only when no JSONL)
+          // Append PTY chunks to single terminal buffer message
           if (msg.type === 'pty') {
             const lastIdx = prev.length - 1;
             if (lastIdx >= 0 && prev[lastIdx].type === 'pty') {
@@ -2944,10 +2949,9 @@ export default function App() {
                 return;
               }
               // TTY-based session: send via direct-send { tty, message }
+              // No local echo — PTY will echo the input naturally
               if (isTTYId(selectedSession.id)) {
                 const tty = parseTTYId(selectedSession.id);
-                const msgId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-                setSessionMessages(prev => [...prev, { id: msgId, role: 'user', type: 'text', content: text, ts: Date.now() }]);
                 sendToTTY(tty, text);
                 setSessionIsProcessing(true);
                 return;

@@ -189,15 +189,17 @@ function parseOutput(data: any): Message[] {
   // JSONL structured messages from wrapper (clean, authoritative source)
   if (data?.type === 'jsonl' && data?.messages?.length) {
     const ts = data.ts || Date.now();
-    return (data.messages as any[]).map((m: any) => {
+    const isBatch = !!data.batch; // Full refresh — first message tagged so client can replace
+    return (data.messages as any[]).map((m: any, i: number) => {
       const role = m.role === 'user' ? 'user' as const : 'agent' as const;
+      const batchTag = (isBatch && i === 0) ? { _batch: true as const } : {};
       if (m.type === 'tool') {
-        return { id: m.toolId || uid(), role, type: 'tool' as const, content: m.content || '', name: m.name, ts, collapsed: true };
+        return { id: m.toolId || uid(), role, type: 'tool' as const, content: m.content || '', name: m.name, ts, collapsed: true, ...batchTag };
       }
       if (m.type === 'tool_result') {
-        return { id: uid(), role, type: 'tool_result' as const, content: m.content || '', ts, collapsed: true };
+        return { id: uid(), role, type: 'tool_result' as const, content: m.content || '', ts, collapsed: true, ...batchTag };
       }
-      return { id: uid(), role, type: 'text' as const, content: m.content || '', ts };
+      return { id: uid(), role, type: 'text' as const, content: m.content || '', ts, ...batchTag };
     });
   }
   // PTY structured sections from wrapper (collapsible tools + clean text)
