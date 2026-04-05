@@ -182,9 +182,9 @@ function parsePtySegments(cleaned: string): PtySegment[] {
 const IDLE_WORDS =['thinking...', 'pondering...', 'wondering...', 'reasoning...', 'considering...', 'analyzing...', 'processing...'];
 
 // ─── Theme ───
-type Theme = 'dark' | 'light' | 'sunny' | 'pixel' | 'glass' | 'bloomberg';
-const THEME_META: Record<Theme, string> = { dark: '#0a0a0a', light: '#f2f2f7', sunny: '#f4ede1', pixel: '#0a0f0a', glass: '#b8d8e8', bloomberg: '#0c0c0c' };
-function getTheme(): Theme { return (localStorage.getItem('morph-theme') as Theme) || 'dark'; }
+type Theme = 'dark' | 'light' | 'sunny' | 'brutalist' | 'glass' | 'bloomberg' | 'ink' | 'cosmos' | 'aurora' | 'hud';
+const THEME_META: Record<Theme, string> = { dark: '#0a0a0a', light: '#f5f0eb', sunny: '#f4ede1', brutalist: '#e8e4e0', glass: '#d5cdc4', bloomberg: '#0c0c0c', ink: '#f0ebe0', cosmos: '#08080f', aurora: '#080810', hud: '#06090c' };
+function getTheme(): Theme { const t = localStorage.getItem('morph-theme'); return (t && t in THEME_META) ? t as Theme : 'dark'; }
 function setThemeGlobal(t: Theme) {
   localStorage.setItem('morph-theme', t);
   document.documentElement.setAttribute('data-theme', t);
@@ -1126,11 +1126,11 @@ function SpatialGrid({ layout, onSelect }: { layout: any; onSelect: (id: string,
   if (!layout || !layout.windows || layout.windows.length === 0) return null;
 
   const handlePaneTap = (p: any) => {
-    const isRoutable = p.routable !== false;
     const selectId = p.tty ? `tty:${p.tty}` : null;
     const label = p.cwd?.split('/').pop() || p.tty || 'terminal';
-    // Panel = pure PTY relay. No session concept. Only TTY + textPreview.
-    if (isRoutable && selectId) onSelect(selectId, label, p.axText || p.textPreview || undefined);
+    // All panes are tappable — routable ones show JSONL, non-routable open shell control
+    // (sendToTTY falls back to AppleScript for panes without wrapper)
+    if (selectId) onSelect(selectId, label, p.axText || p.textPreview || undefined);
   };
 
   return (
@@ -1147,12 +1147,13 @@ function SpatialGrid({ layout, onSelect }: { layout: any; onSelect: (id: string,
           }}>
             {win.panes.map((p: any, pi: number) => {
               const isRoutable = p.routable !== false;
+              const hasTTY = !!p.tty;
               const isIdle = p.idle;
               return (
                 <div
                   key={p.tty || pi}
-                  role={isRoutable ? 'button' : undefined}
-                  tabIndex={isRoutable ? 0 : undefined}
+                  role={hasTTY ? 'button' : undefined}
+                  tabIndex={hasTTY ? 0 : undefined}
                   onClick={() => handlePaneTap(p)}
                   onPointerUp={(e) => { if (e.pointerType === 'touch') { e.preventDefault(); handlePaneTap(p); } }}
                   style={{
@@ -1170,9 +1171,9 @@ function SpatialGrid({ layout, onSelect }: { layout: any; onSelect: (id: string,
                   <div style={{
                     width: '100%', height: '100%',
                     borderRadius: 6,
-                    backgroundColor: isRoutable ? 'var(--accent-bg)' : 'var(--bg-input)',
-                    border: `1px solid ${isRoutable ? 'var(--accent)' : 'var(--border)'}`,
-                    cursor: isRoutable ? 'pointer' : 'default',
+                    backgroundColor: isRoutable ? 'var(--accent-bg)' : hasTTY ? 'var(--bg-card)' : 'var(--bg-input)',
+                    border: `1px solid ${isRoutable ? 'var(--accent)' : hasTTY ? 'var(--text-tertiary)' : 'var(--border)'}`,
+                    cursor: hasTTY ? 'pointer' : 'default',
                     opacity: isIdle ? 0.5 : 1,
                     display: 'flex', flexDirection: 'column', alignItems: 'stretch', justifyContent: 'flex-start',
                     overflow: 'hidden', padding: '3px 5px',
@@ -1180,7 +1181,7 @@ function SpatialGrid({ layout, onSelect }: { layout: any; onSelect: (id: string,
                   }}>
                     <span style={{
                       fontFamily: 'Menlo, monospace', fontSize: 9, fontWeight: 600,
-                      color: isRoutable ? 'var(--accent)' : 'var(--text-tertiary)',
+                      color: isRoutable ? 'var(--accent)' : hasTTY ? 'var(--text-secondary)' : 'var(--text-tertiary)',
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const,
                       pointerEvents: 'none',
                     }}>
@@ -1657,14 +1658,14 @@ function ConfigTab({ connState }: { connState: string }) {
 
       <Section title="Appearance">
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {(['dark', 'light', 'sunny', 'pixel', 'glass', 'bloomberg'] as Theme[]).map(t => (
+          {(['dark', 'light', 'sunny', 'brutalist', 'glass', 'bloomberg', 'ink', 'cosmos', 'aurora', 'hud'] as Theme[]).map(t => (
             <button key={t} onClick={() => { setTheme(t); setThemeGlobal(t); }} style={{
               flex: '1 0 auto', minWidth: 60, padding: '10px 0', border: theme === t ? '2px solid var(--accent)' : '2px solid transparent',
               borderRadius: 10, cursor: 'pointer', fontSize: 12, fontWeight: theme === t ? 700 : 400,
               backgroundColor: theme === t ? 'var(--accent-bg)' : 'var(--bg-input)',
               color: theme === t ? 'var(--accent)' : 'var(--text-secondary)',
               textTransform: 'capitalize', transition: 'all 0.2s',
-            }}>{{ dark: '● dark', light: '○ light', sunny: '☀ sunny', pixel: '▦ pixel', glass: '◈ liquid', bloomberg: '$ BB' }[t]}</button>
+            }}>{{ dark: '● dark', light: '○ light', sunny: '☀ sunny', brutalist: '■ brutal', glass: '◈ liquid', bloomberg: '$ BB', ink: '墨 ink', cosmos: '✦ cosmos', aurora: '◐ aurora', hud: '◇ HUD' }[t]}</button>
           ))}
         </div>
       </Section>
