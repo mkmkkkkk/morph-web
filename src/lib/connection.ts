@@ -1,3 +1,11 @@
+/**
+ * connection.ts — Phone ↔ Relay Socket.IO 通信层
+ *
+ * ⚠️  ARCHITECTURE LOCKED (2026-04-05) — 能不改就不要改 ⚠️
+ * TTY-first routing + preload 是唯一可行方案。
+ * 数据流：tty-preload (预加载缓存) → subscribeTTY (实时流) → direct-send (用户输入)
+ * 改之前必须 review decision.md 和 SPATIAL-GRID-DESIGN.md。
+ */
 import { io, Socket } from 'socket.io-client';
 
 const FIXED_SESSION = 'a0a0a0a0-0e00-4000-a000-000000000002';

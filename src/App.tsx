@@ -1,3 +1,10 @@
+/**
+ * App.tsx — Morph Web 主界面（spatial grid + session view）
+ *
+ * ⚠️  ARCHITECTURE LOCKED (2026-04-05) — 能不改就不要改 ⚠️
+ * TTY pane 打开流程：getPreloadedMessages → subscribeTTY → live updates
+ * 预加载是消除延迟的关键，不要删掉或绕过。
+ */
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, useMotionValue } from 'framer-motion';
@@ -2483,8 +2490,9 @@ export default function App() {
       }
 
       // Subscribe for live output
-      // Flow: initial JSONL (history) → then PTY (live updates, filtered)
-      let blockPtyUntil = 0;  // Timestamp until which PTY is blocked (initial JSONL settling)
+      // Flow: preload (instant) → subscribe-tty (dedup) → live PTY/JSONL (append)
+      const hadPreload = preloaded.length > 0;
+      let blockPtyUntil = hadPreload ? Date.now() + 2000 : 0;
       const onPtyMsg = (msg: Message) => {
         if (cancelled || liveSessionIdRef.current !== ttyKey) return;
         if (msg.type === 'pty' && !msg.content.trim()) return;
@@ -2492,9 +2500,11 @@ export default function App() {
         if (msg.type === 'pty' && Date.now() < blockPtyUntil) return;
 
         setSessionMessages(prev => {
-          // Batch refresh (initial load or reconnect): replace entire list, block PTY briefly
+          // Batch refresh from subscribe-tty: if preloaded data already showing, skip re-render
+          // (preload and subscribe-tty deliver identical data from same relay cache)
           if ((msg as any)._batch) {
             blockPtyUntil = Date.now() + 2000;
+            if (hadPreload && prev.length > 0) return prev; // already showing — no flash
             return [msg];
           }
           // Structured (JSONL) message arrived: remove any PTY preview placeholder
