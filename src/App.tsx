@@ -1118,7 +1118,18 @@ function projectLabel(project: string): string {
 
 // Strip residual DEC escape fragments from terminal text for display
 function cleanTermText(s: string): string {
-  return s.replace(/\??\d{2,}[hl]/g, '').replace(/\n{3,}/g, '\n\n').trim();
+  // Strip ANSI escape sequences, control chars, and terminal noise
+  let t = s
+    .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')   // CSI sequences
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '') // OSC sequences
+    .replace(/\x1b[=><%()][^\x1b]*/g, '')     // Other ESC sequences
+    .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '') // Control chars (keep \n \r \t)
+    .replace(/\r\n?/g, '\n')
+    .replace(/\n{2,}/g, '\n')
+    .trim();
+  // Take last meaningful line (most recent terminal output)
+  const lines = t.split('\n').filter(l => l.trim().length > 2);
+  return lines.length > 0 ? lines[lines.length - 1].trim().slice(0, 80) : '';
 }
 
 // Spatial grid — mirrors Ghostty pane layout
@@ -1187,18 +1198,19 @@ function SpatialGrid({ layout, onSelect }: { layout: any; onSelect: (id: string,
                     }}>
                       {isRoutable ? (p.tty || p.cwd?.split('/').pop() || 'claude') : p.tty}
                     </span>
-                    {p.textPreview && (
-                      <span style={{
-                        fontFamily: 'Menlo, monospace', fontSize: 8, lineHeight: '11px',
-                        color: 'var(--text-secondary)', opacity: 0.7,
-                        overflow: 'hidden', display: '-webkit-box',
-                        WebkitLineClamp: 3, WebkitBoxOrient: 'vertical',
-                        wordBreak: 'break-all',
-                        pointerEvents: 'none', marginTop: 1,
-                      } as React.CSSProperties}>
-                        {cleanTermText(p.textPreview)}
-                      </span>
-                    )}
+                    {p.textPreview && (() => {
+                      const cleaned = cleanTermText(p.textPreview);
+                      return cleaned ? (
+                        <span style={{
+                          fontFamily: 'Menlo, monospace', fontSize: 8, lineHeight: '11px',
+                          color: 'var(--text-secondary)', opacity: 0.5,
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          pointerEvents: 'none', marginTop: 1, display: 'block',
+                        }}>
+                          {cleaned}
+                        </span>
+                      ) : null;
+                    })()}
                   </div>
                 </div>
               );
