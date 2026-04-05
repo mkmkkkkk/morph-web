@@ -365,6 +365,8 @@ function connectRelaySocket(relayId: string): void {
         layoutListeners.forEach(fn => fn(data));
       }).catch(() => {});
     });
+    // TTY preload: relay pushes JSONL data for all matched TTYs before user taps
+    conn.socket.on('tty-preload', handlePreload);
   }
 }
 
@@ -647,6 +649,33 @@ export function subscribeSessionMessages(sid: string, cb: Listener) {
 }
 export function unsubscribeSessionMessages() {
   if (_sessionUnsub) { _sessionUnsub(); _sessionUnsub = null; }
+}
+
+// ─── TTY preload cache (relay pushes JSONL before user taps) ───
+
+const ttyPreloadCache = new Map<string, Message[]>();
+type PreloadListener = (tty: string, messages: Message[]) => void;
+const preloadListeners = new Set<PreloadListener>();
+
+/** Get preloaded messages for a TTY (returns empty array if none cached). */
+export function getPreloadedMessages(tty: string): Message[] {
+  return ttyPreloadCache.get(tty) || [];
+}
+
+/** Listen for preload updates (relay pushes new data for any TTY). */
+export function onPreload(cb: PreloadListener): () => void {
+  preloadListeners.add(cb);
+  return () => { preloadListeners.delete(cb); };
+}
+
+function handlePreload(data: any) {
+  if (!data?.tty || !data?.messages?.length) return;
+  const msgs = parseOutput({ type: 'jsonl', messages: data.messages, batch: true, ts: data.ts || Date.now() });
+  if (msgs.length) {
+    ttyPreloadCache.set(data.tty, msgs);
+    preloadListeners.forEach(fn => fn(data.tty, msgs));
+    clog('tty-preload', `tty=${data.tty} msgs=${msgs.length}`);
+  }
 }
 
 // ─── TTY-based routing (spatial grid) ───

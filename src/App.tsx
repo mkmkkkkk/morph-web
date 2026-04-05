@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, useMotionValue } from 'framer-motion';
-import { connect, send, interrupt, interruptSession, clearSession, setCurrentTab, fetchSessions, onMessage, onState, onCompact, getState, sendToSession, resumeSession, isSessionAlive, loadHistory, subscribe, subscribeSessionMessages, unsubscribeSessionMessages, addRelay, registerSession, approvePermission, denyPermission, stopSession, sendToTTY, sendRawKeyToTTY, subscribeTTY, isTTYId, parseTTYId, onLayoutUpdate, type Message, type PtySection, type RelayConfig } from './lib/connection';
+import { connect, send, interrupt, interruptSession, clearSession, setCurrentTab, fetchSessions, onMessage, onState, onCompact, getState, sendToSession, resumeSession, isSessionAlive, loadHistory, subscribe, subscribeSessionMessages, unsubscribeSessionMessages, addRelay, registerSession, approvePermission, denyPermission, stopSession, sendToTTY, sendRawKeyToTTY, subscribeTTY, isTTYId, parseTTYId, onLayoutUpdate, getPreloadedMessages, type Message, type PtySection, type RelayConfig } from './lib/connection';
 import Sketch from './components/Sketch';
 
 // Cache-bust canvas.html per build (not per page load) — allows HTTP caching across reloads
@@ -2469,11 +2469,17 @@ export default function App() {
       setSessionIsProcessing(false);
       setSessionMessages([]);
 
-      // Show textPreview as placeholder while subscribe-tty delivers PTY buffer
-      const initPreview = (selectedSession as any).textPreview;
-      if (initPreview) {
-        const uid = `init_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-        setSessionMessages([{ id: uid, role: 'agent' as const, type: 'pty' as const, content: initPreview, ts: Date.now() }]);
+      // Instant display from preload cache (relay pushed JSONL before tap)
+      const preloaded = getPreloadedMessages(tty);
+      if (preloaded.length) {
+        setSessionMessages(preloaded);
+      } else {
+        // Fallback: show textPreview as placeholder while subscribe-tty delivers PTY buffer
+        const initPreview = (selectedSession as any).textPreview;
+        if (initPreview) {
+          const uid = `init_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+          setSessionMessages([{ id: uid, role: 'agent' as const, type: 'pty' as const, content: initPreview, ts: Date.now() }]);
+        }
       }
 
       // Subscribe for live output
