@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, useMotionValue } from 'framer-motion';
-import { connect, send, interrupt, interruptSession, clearSession, setCurrentTab, fetchSessions, onMessage, onState, onCompact, getState, sendToSession, resumeSession, isSessionAlive, loadHistory, subscribe, subscribeSessionMessages, unsubscribeSessionMessages, addRelay, registerSession, approvePermission, denyPermission, stopSession, sendToTTY, sendRawKeyToTTY, subscribeTTY, isTTYId, parseTTYId, type Message, type PtySection, type RelayConfig } from './lib/connection';
+import { connect, send, interrupt, interruptSession, clearSession, setCurrentTab, fetchSessions, onMessage, onState, onCompact, getState, sendToSession, resumeSession, isSessionAlive, loadHistory, subscribe, subscribeSessionMessages, unsubscribeSessionMessages, addRelay, registerSession, approvePermission, denyPermission, stopSession, sendToTTY, sendRawKeyToTTY, subscribeTTY, isTTYId, parseTTYId, onLayoutUpdate, type Message, type PtySection, type RelayConfig } from './lib/connection';
 import Sketch from './components/Sketch';
 
 // Cache-bust canvas.html per build (not per page load) — allows HTTP caching across reloads
@@ -1225,18 +1225,15 @@ function SessionCards({ onSelect, onNewSession }: { onSelect: (sessionId: string
     return () => document.removeEventListener('visibilitychange', onVis);
   }, []);
 
-  // Fetch spatial layout for grid view
+  // Spatial layout — initial fetch + live socket push (replaces 30s polling)
   useEffect(() => {
     const token = localStorage.getItem('morph-auth') || '';
-    const fetchLayout = () => {
-      fetch('/v2/claude/layout', { headers: { 'Authorization': `Bearer ${token}` } })
-        .then(r => r.json())
-        .then(d => { if (d.windows && d.windows.length > 0) setLayout(d); })
-        .catch(() => {});
-    };
-    fetchLayout();
-    const interval = setInterval(fetchLayout, 30000);
-    return () => clearInterval(interval);
+    fetch('/v2/claude/layout', { headers: { 'Authorization': `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(d => { if (d.windows && d.windows.length > 0) setLayout(d); })
+      .catch(() => {});
+    const unsub = onLayoutUpdate((d: any) => { if (d.windows && d.windows.length > 0) setLayout(d); });
+    return unsub;
   }, [visKey]);
 
   // Fetch all sessions and group by project
@@ -2171,13 +2168,23 @@ function SessionTerminal({ session, messages, onBack, onSend, onRawKey, onInterr
           <span style={{ color: isCompacting ? 'var(--accent)' : 'var(--text-tertiary)', fontSize: 11, fontFamily: 'Menlo, monospace' }}>
             {w}
           </span>
-          <button tabIndex={-1} onPointerDown={(e) => { e.preventDefault(); onInterrupt(); }} style={{
-            padding: '3px 10px', borderRadius: 5, cursor: 'pointer', flexShrink: 0,
-            border: isProcessing ? '1px solid var(--danger-border)' : '1px solid var(--border)',
-            backgroundColor: isProcessing ? 'var(--danger-bg)' : 'var(--bg-elevated)',
-            color: isProcessing ? 'var(--danger)' : 'var(--text-tertiary)', fontSize: 11, fontFamily: 'Menlo, monospace',
-            pointerEvents: 'auto', touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' as any,
-          }}>ESC</button>
+          {onRawKey ? (
+            <button tabIndex={-1} onPointerDown={(e) => { e.preventDefault(); onRawKey('\t'); }} style={{
+              padding: '3px 10px', borderRadius: 5, cursor: 'pointer', flexShrink: 0,
+              border: '1px solid var(--border)',
+              backgroundColor: 'var(--bg-elevated)',
+              color: 'var(--text-tertiary)', fontSize: 11, fontFamily: 'Menlo, monospace',
+              pointerEvents: 'auto', touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' as any,
+            }}>Tab</button>
+          ) : (
+            <button tabIndex={-1} onPointerDown={(e) => { e.preventDefault(); onInterrupt(); }} style={{
+              padding: '3px 10px', borderRadius: 5, cursor: 'pointer', flexShrink: 0,
+              border: isProcessing ? '1px solid var(--danger-border)' : '1px solid var(--border)',
+              backgroundColor: isProcessing ? 'var(--danger-bg)' : 'var(--bg-elevated)',
+              color: isProcessing ? 'var(--danger)' : 'var(--text-tertiary)', fontSize: 11, fontFamily: 'Menlo, monospace',
+              pointerEvents: 'auto', touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' as any,
+            }}>ESC</button>
+          )}
         </div>
         ); })()}
       </div>
@@ -2192,18 +2199,23 @@ function SessionTerminal({ session, messages, onBack, onSend, onRawKey, onInterr
           Upload failed: {flow.uploadError}
         </div>
       )}
-      {/* Control keys — arrow keys, Tab, Enter for navigating interactive menus */}
-      {onRawKey && (
-        <div style={{
-          display: 'flex', justifyContent: 'center', gap: 6, padding: '6px 12px',
-          borderTop: '1px solid rgba(224,160,48,0.12)', flexShrink: 0,
-        }}>
+      {/* Control keys + quick-send buttons — single row */}
+      <div style={{
+        display: 'flex', justifyContent: 'center', gap: 6, padding: '6px 12px',
+        borderTop: '1px solid rgba(224,160,48,0.12)', flexShrink: 0,
+      }}>
+        {onRawKey && <>
+          <button onPointerDown={(e) => { e.preventDefault(); onInterrupt(); }}
+            style={{
+              flex: 1, maxWidth: 56, padding: '8px 0', borderRadius: 6, cursor: 'pointer',
+              border: isProcessing ? '1px solid var(--danger-border)' : '1px solid var(--border)',
+              backgroundColor: isProcessing ? 'var(--danger-bg)' : 'var(--bg-elevated)',
+              color: isProcessing ? 'var(--danger)' : 'var(--text-secondary)', fontSize: 13, fontFamily: 'Menlo, monospace',
+              touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' as any,
+            }}>ESC</button>
           {[
-            { label: 'Tab', key: '\t' },
             { label: '\u2191', key: '\x1b[A' },
             { label: '\u2193', key: '\x1b[B' },
-            { label: '\u2190', key: '\x1b[D' },
-            { label: '\u2192', key: '\x1b[C' },
             { label: '\u21B5', key: '\r' },
           ].map(({ label, key }) => (
             <button key={label} onPointerDown={(e) => { e.preventDefault(); onRawKey(key); }}
@@ -2214,8 +2226,18 @@ function SessionTerminal({ session, messages, onBack, onSend, onRawKey, onInterr
                 touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' as any,
               }}>{label}</button>
           ))}
-        </div>
-      )}
+        </>}
+        {['Continue', 'OK'].map((txt) => (
+          <button key={txt} onPointerDown={(e) => { e.preventDefault(); flow.handleSend(txt.toLowerCase()); }}
+            style={{
+              flex: 1, maxWidth: 72, padding: '8px 0', borderRadius: 6, cursor: 'pointer',
+              border: '1px solid var(--accent)',
+              backgroundColor: 'var(--accent-bg)',
+              color: 'var(--accent)', fontSize: 13, fontWeight: 600, fontFamily: 'Menlo, monospace',
+              touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' as any,
+            }}>{txt}</button>
+        ))}
+      </div>
       {/* Shared InputBar — amber tint, no terminal toggle (header has Back) */}
       <InputBar
         onSend={flow.handleSend} onStop={onInterrupt}
