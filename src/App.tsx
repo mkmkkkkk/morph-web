@@ -775,9 +775,27 @@ function getViewed(): Set<string> {
 function getViewedTs(): Record<string, number> {
   try { return JSON.parse(localStorage.getItem(VIEWED_TS_KEY) || '{}'); } catch { return {}; }
 }
-function markViewed(id: string) {
+function markViewed(id: string, preview?: string) {
   const s = getViewed(); s.add(id); localStorage.setItem(VIEWED_KEY, JSON.stringify([...s]));
   const ts = getViewedTs(); ts[id] = Date.now(); localStorage.setItem(VIEWED_TS_KEY, JSON.stringify(ts));
+  // Store the textPreview snapshot so we can detect new content later
+  if (preview !== undefined) {
+    try {
+      const snaps = JSON.parse(localStorage.getItem('morph-viewed-snap') || '{}');
+      snaps[id] = preview;
+      localStorage.setItem('morph-viewed-snap', JSON.stringify(snaps));
+    } catch {}
+  }
+}
+function getViewedSnap(): Record<string, string> {
+  try { return JSON.parse(localStorage.getItem('morph-viewed-snap') || '{}'); } catch { return {}; }
+}
+function paneHasNewContent(ttyId: string, preview: string | null): boolean {
+  if (!preview) return false;
+  const snaps = getViewedSnap();
+  const lastSeen = snaps[ttyId];
+  if (lastSeen === undefined) return true; // never viewed → new
+  return lastSeen !== preview;
 }
 function hasUnread(s: any): boolean {
   const ts = getViewedTs();
@@ -1159,15 +1177,13 @@ function cleanTermText(s: string): string {
   return lines.length > 0 ? lines[lines.length - 1].trim().slice(0, 80) : '';
 }
 
-// Spatial grid — mirrors Ghostty pane layout
-function SpatialGrid({ layout, onSelect }: { layout: any; onSelect: (id: string, display?: string, textPreview?: string) => void }) {
+// Spatial grid — mirrors WezTerm pane layout
+function SpatialGrid({ layout, onSelect, snapKey }: { layout: any; onSelect: (id: string, display?: string, textPreview?: string) => void; snapKey: number }) {
   if (!layout || !layout.windows || layout.windows.length === 0) return null;
 
   const handlePaneTap = (p: any) => {
     const selectId = p.tty ? `tty:${p.tty}` : null;
     const label = p.cwd?.split('/').pop() || p.tty || 'terminal';
-    // All panes are tappable — routable ones show JSONL, non-routable open shell control
-    // (sendToTTY falls back to AppleScript for panes without wrapper)
     if (selectId) onSelect(selectId, label, p.axText || p.textPreview || undefined);
   };
 
@@ -1186,6 +1202,9 @@ function SpatialGrid({ layout, onSelect }: { layout: any; onSelect: (id: string,
             {win.panes.map((p: any, pi: number) => {
               const isClaude = p.process === 'claude';
               const hasTTY = !!p.tty;
+              const ttyId = p.tty ? `tty:${p.tty}` : '';
+              const cleaned = p.textPreview ? cleanTermText(p.textPreview) : '';
+              const isNew = isClaude && paneHasNewContent(ttyId, cleaned || null);
               return (
                 <div
                   key={p.tty || pi}
@@ -1209,35 +1228,31 @@ function SpatialGrid({ layout, onSelect }: { layout: any; onSelect: (id: string,
                   <div style={{
                     width: '100%', height: '100%',
                     borderRadius: 6,
-                    backgroundColor: isClaude ? 'var(--accent-bg)' : hasTTY ? 'var(--bg-card)' : 'var(--bg-input)',
-                    border: `1px solid ${isClaude ? 'var(--accent)' : hasTTY ? 'var(--text-tertiary)' : 'var(--border)'}`,
+                    backgroundColor: isNew ? 'var(--accent-bg)' : hasTTY ? 'var(--bg-card)' : 'var(--bg-input)',
+                    border: `1px solid ${hasTTY ? 'var(--border-strong)' : 'var(--border)'}`,
                     cursor: hasTTY ? 'pointer' : 'default',
-                    opacity: isClaude ? 1 : (p.idle ? 0.5 : 1),
                     display: 'flex', flexDirection: 'column', alignItems: 'stretch', justifyContent: 'flex-start',
                     overflow: 'hidden', padding: '3px 5px',
                     pointerEvents: 'auto',
                   }}>
                     <span style={{
                       fontFamily: 'Menlo, monospace', fontSize: 9, fontWeight: 600,
-                      color: isClaude ? 'var(--accent)' : hasTTY ? 'var(--text-secondary)' : 'var(--text-tertiary)',
+                      color: isNew ? 'var(--accent)' : hasTTY ? 'var(--text-secondary)' : 'var(--text-tertiary)',
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const,
                       pointerEvents: 'none',
                     }}>
                       {isClaude ? (p.tty || p.cwd?.split('/').pop() || 'claude') : p.tty}
                     </span>
-                    {p.textPreview && (() => {
-                      const cleaned = cleanTermText(p.textPreview);
-                      return cleaned ? (
-                        <span style={{
-                          fontFamily: 'Menlo, monospace', fontSize: 8, lineHeight: '11px',
-                          color: 'var(--text-secondary)', opacity: 0.5,
-                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                          pointerEvents: 'none', marginTop: 1, display: 'block',
-                        }}>
-                          {cleaned}
-                        </span>
-                      ) : null;
-                    })()}
+                    {cleaned && (
+                      <span style={{
+                        fontFamily: 'Menlo, monospace', fontSize: 8, lineHeight: '11px',
+                        color: 'var(--text-secondary)', opacity: 0.5,
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        pointerEvents: 'none', marginTop: 1, display: 'block',
+                      }}>
+                        {cleaned}
+                      </span>
+                    )}
                   </div>
                 </div>
               );
@@ -1253,6 +1268,7 @@ function SpatialGrid({ layout, onSelect }: { layout: any; onSelect: (id: string,
 function SessionCards({ onSelect, onNewSession }: { onSelect: (sessionId: string, display?: string, relayUrl?: string, relayToken?: string, project?: string, envId?: string, textPreview?: string) => void; onNewSession?: (envId: string, relayUrl?: string, relayToken?: string) => void }) {
   const [groups, setGroups] = useState<{ project: string; sessions: any[] }[]>([]);
   const [viewed, setViewed] = useState<Set<string>>(getViewed);
+  const [snapKey, setSnapKey] = useState(0);
   const [pinned, setPinned] = useState<Set<string>>(() => getPinned('workspace'));
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [visKey, setVisKey] = useState(_visResumeCount);
@@ -1387,8 +1403,9 @@ function SessionCards({ onSelect, onNewSession }: { onSelect: (sessionId: string
   };
 
   const handleGridSelect = (ttyId: string, display?: string, textPreview?: string) => {
-    markViewed(ttyId);
-    setViewed(getViewed());
+    const cleaned = textPreview ? cleanTermText(textPreview) : '';
+    markViewed(ttyId, cleaned || '');
+    setSnapKey(k => k + 1);
     // Panel: pure TTY, no session/env/relay fields
     onSelect(ttyId, display, undefined, undefined, undefined, 'workspace', textPreview);
   };
@@ -1418,7 +1435,7 @@ function SessionCards({ onSelect, onNewSession }: { onSelect: (sessionId: string
       )}
       {/* Spatial grid view */}
       {viewMode === 'grid' && layout && (
-        <SpatialGrid layout={layout} onSelect={handleGridSelect} />
+        <SpatialGrid layout={layout} onSelect={handleGridSelect} snapKey={snapKey} />
       )}
       {/* List view — render layout panes as horizontal rows */}
       {viewMode === 'list' && layout && layout.windows && layout.windows.map((win: any, wi: number) => (
@@ -1431,57 +1448,64 @@ function SessionCards({ onSelect, onNewSession }: { onSelect: (sessionId: string
           {win.panes.map((p: any, pi: number) => {
             const isClaude = p.process === 'claude';
             const hasTTY = !!p.tty;
+            const ttyId = p.tty ? `tty:${p.tty}` : '';
             const cleaned = p.textPreview ? cleanTermText(p.textPreview) : '';
+            const isNew = isClaude && paneHasNewContent(ttyId, cleaned || null);
             return (
-              <motion.div
+              <div
                 key={p.tty || pi}
-                whileTap={{ scale: 0.98 }}
                 role={hasTTY ? 'button' : undefined}
+                className={hasTTY ? 'pane-btn' : undefined}
                 onClick={() => {
                   const selectId = p.tty ? `tty:${p.tty}` : null;
                   const label = p.cwd?.split('/').pop() || p.tty || 'terminal';
                   if (selectId) handleGridSelect(selectId, label, p.axText || p.textPreview || undefined);
                 }}
                 style={{
-                  display: 'flex', alignItems: 'center', gap: 8,
-                  padding: '0 10px', height: 48, marginBottom: 4,
-                  backgroundColor: isClaude ? 'var(--accent-bg)' : 'var(--bg-elevated)',
-                  borderRadius: 10, cursor: hasTTY ? 'pointer' : 'default',
-                  border: `1px solid ${isClaude ? 'var(--accent)' : hasTTY ? 'var(--text-tertiary)' : 'var(--border)'}`,
-                  opacity: isClaude ? 1 : (p.idle ? 0.5 : 1),
-                  userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none',
-                  pointerEvents: 'auto',
-                }}
+                  marginBottom: 4,
+                  touchAction: 'manipulation',
+                  WebkitTapHighlightColor: 'transparent',
+                  userSelect: 'none', WebkitUserSelect: 'none',
+                } as React.CSSProperties}
               >
                 <div style={{
-                  width: 6, height: 6, borderRadius: 3, flexShrink: 0,
-                  backgroundColor: isClaude ? 'var(--accent)' : hasTTY ? 'var(--text-tertiary)' : 'var(--border)',
-                }} />
-                <div style={{ flex: 1, overflow: 'hidden', minWidth: 0 }}>
-                  <div style={{
-                    fontFamily: 'Menlo, monospace', fontSize: 12, fontWeight: 600,
-                    color: isClaude ? 'var(--accent)' : 'var(--text-primary)',
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const,
-                  }}>
-                    {p.title || p.cwd?.split('/').pop() || p.tty || 'terminal'}
-                  </div>
-                  {cleaned && (
-                    <div style={{
-                      fontFamily: 'Menlo, monospace', fontSize: 10, lineHeight: '14px',
-                      color: 'var(--text-secondary)', opacity: 0.6,
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const,
-                      marginTop: 2,
-                    }}>
-                      {cleaned}
-                    </div>
-                  )}
-                </div>
-                <span style={{
-                  fontFamily: 'Menlo, monospace', fontSize: 9, color: 'var(--text-tertiary)', flexShrink: 0,
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '0 10px', height: 48,
+                  backgroundColor: isNew ? 'var(--accent-bg)' : 'var(--bg-elevated)',
+                  borderRadius: 10, cursor: hasTTY ? 'pointer' : 'default',
+                  border: `1px solid ${hasTTY ? 'var(--border-strong)' : 'var(--border)'}`,
+                  pointerEvents: 'auto',
                 }}>
-                  {p.tty || ''}
-                </span>
-              </motion.div>
+                  <div style={{
+                    width: 6, height: 6, borderRadius: 3, flexShrink: 0,
+                    backgroundColor: isNew ? 'var(--accent)' : hasTTY ? 'var(--text-tertiary)' : 'var(--border)',
+                  }} />
+                  <div style={{ flex: 1, overflow: 'hidden', minWidth: 0 }}>
+                    <div style={{
+                      fontFamily: 'Menlo, monospace', fontSize: 12, fontWeight: 600,
+                      color: isNew ? 'var(--accent)' : 'var(--text-primary)',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const,
+                    }}>
+                      {p.title || p.cwd?.split('/').pop() || p.tty || 'terminal'}
+                    </div>
+                    {cleaned && (
+                      <div style={{
+                        fontFamily: 'Menlo, monospace', fontSize: 10, lineHeight: '14px',
+                        color: 'var(--text-secondary)', opacity: 0.6,
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const,
+                        marginTop: 2,
+                      }}>
+                        {cleaned}
+                      </div>
+                    )}
+                  </div>
+                  <span style={{
+                    fontFamily: 'Menlo, monospace', fontSize: 9, color: 'var(--text-tertiary)', flexShrink: 0,
+                  }}>
+                    {p.tty || ''}
+                  </span>
+                </div>
+              </div>
             );
           })}
         </div>
