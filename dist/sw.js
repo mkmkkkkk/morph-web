@@ -1,6 +1,6 @@
 // Morph PWA Service Worker — offline shell + push notifications
 
-const CACHE_NAME = 'morph-shell-v1';
+const CACHE_NAME = 'morph-shell-v2';
 
 // App shell — enough to render the UI when tunnel is down
 const SHELL_URLS = [

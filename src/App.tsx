@@ -417,7 +417,7 @@ function Collapsible({ label, preview, content, color }: { label: string; previe
       </div>
       {open && <pre style={{ color, opacity: 0.7, fontSize: 13, fontFamily: 'Menlo, monospace', lineHeight: '16px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', overflow: 'hidden', maxWidth: '100%', margin: 0, padding: '0 12px 0 28px', userSelect: 'none', WebkitUserSelect: 'none' as any }}>{
         content.split('\n').map((line, i, arr) => (
-          <React.Fragment key={i}><span data-sel style={{ userSelect: 'text', WebkitUserSelect: 'text' } as any}>{line}</span>{i < arr.length - 1 && '\n'}</React.Fragment>
+          <React.Fragment key={i}><span data-sel style={{ userSelect: 'text', WebkitUserSelect: 'text' } as any}>{renderInlineMd(line)}</span>{i < arr.length - 1 && '\n'}</React.Fragment>
         ))
       }</pre>}
     </div>
@@ -482,7 +482,7 @@ const MessageRow = React.memo(function MessageRow({ msg }: { msg: Message }) {
             return <div key={i} style={{ ...monoOuter, color: 'var(--text-primary)', marginBottom: 3, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{
               seg.content.split('\n').map((line, j) => (
                 <React.Fragment key={j}>
-                  {line.trim() === '' ? <div style={{ height: '10px' }} /> : <span style={sel} data-sel>{line}</span>}
+                  {line.trim() === '' ? <div style={{ height: '10px' }} /> : <span style={sel} data-sel>{renderInlineMd(line)}</span>}
                 </React.Fragment>
               ))
             }</div>;
