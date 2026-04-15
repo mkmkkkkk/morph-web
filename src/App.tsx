@@ -424,6 +424,28 @@ function Collapsible({ label, preview, content, color }: { label: string; previe
   );
 }
 
+// ─── Inline Markdown ───
+// Renders **bold**, *italic*, `code`, ~~strike~~ as React elements. No block-level markdown.
+function renderInlineMd(text: string): React.ReactNode {
+  // Split by inline patterns, preserving delimiters
+  const parts: React.ReactNode[] = [];
+  // Regex: **bold** | *italic* | `code` | ~~strike~~
+  const re = /(\*\*(.+?)\*\*|\*(.+?)\*|`([^`]+)`|~~(.+?)~~)/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  let key = 0;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) parts.push(text.slice(last, m.index));
+    if (m[2] != null) parts.push(<strong key={key++}>{m[2]}</strong>);
+    else if (m[3] != null) parts.push(<em key={key++}>{m[3]}</em>);
+    else if (m[4] != null) parts.push(<code key={key++} style={{ background: 'rgba(255,255,255,0.08)', borderRadius: 3, padding: '1px 4px', fontSize: '0.9em' }}>{m[4]}</code>);
+    else if (m[5] != null) parts.push(<s key={key++}>{m[5]}</s>);
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push(text.slice(last));
+  return parts.length === 1 && typeof parts[0] === 'string' ? parts[0] : <>{parts}</>;
+}
+
 // ─── Message Row ───
 const MessageRow = React.memo(function MessageRow({ msg }: { msg: Message }) {
   // Outer div is non-selectable block; only inner <span> is selectable.
@@ -439,7 +461,7 @@ const MessageRow = React.memo(function MessageRow({ msg }: { msg: Message }) {
               <React.Fragment key={i}>
                 {line === ''
                   ? <div style={{ height: '10px', userSelect: 'none', WebkitUserSelect: 'none' } as any} />
-                  : <span style={sel} data-sel>{line}</span>
+                  : <span style={sel} data-sel>{renderInlineMd(line)}</span>
                 }
               </React.Fragment>
             ))
@@ -1398,72 +1420,73 @@ function SessionCards({ onSelect, onNewSession }: { onSelect: (sessionId: string
       {viewMode === 'grid' && layout && (
         <SpatialGrid layout={layout} onSelect={handleGridSelect} />
       )}
-      {/* List view */}
-      {(viewMode === 'list' || !layout) && groups.map((g, gIdx) => {
-        const open = isExpanded(g.project, gIdx);
-        const unviewedCount = g.sessions.filter(s => !viewed.has(s.id)).length;
-        const color = projectColor(g.project);
-        return (
-          <div key={g.project} style={{ marginBottom: 12, pointerEvents: 'none', userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none' }}>
-            <div
-              onClick={() => toggleExpanded(g.project)}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: open ? 6 : 0, cursor: 'pointer', pointerEvents: 'auto' }}
-            >
-              <span style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: color, flexShrink: 0 }} />
-              <span style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase' as const, letterSpacing: 0.5 }}>
-                {projectLabel(g.project)} ({g.sessions.length})
-              </span>
-              {unviewedCount > 0 && <span style={{ fontSize: 9, color: 'var(--warning)' }}>{unviewedCount} new</span>}
-              <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>{open ? '\u25BE' : '\u25B8'}</span>
-              <span
-                onClick={(e) => { e.stopPropagation(); setNewSessionProject(g.project); }}
-                style={{ marginLeft: 'auto', color: 'var(--text-primary)', fontSize: 20, lineHeight: 1, padding: '6px 10px', margin: '-6px -10px', cursor: 'pointer', userSelect: 'none', pointerEvents: 'auto', WebkitTapHighlightColor: 'transparent' }}
-              >+</span>
+      {/* List view — render layout panes as horizontal rows */}
+      {viewMode === 'list' && layout && layout.windows && layout.windows.map((win: any, wi: number) => (
+        <div key={win.id || wi} style={{ marginBottom: 8 }}>
+          {layout.windows.length > 1 && (
+            <div style={{ fontSize: 10, color: 'var(--text-tertiary)', fontFamily: 'Menlo, monospace', marginBottom: 4 }}>
+              Window {wi + 1}
             </div>
-            <AnimatePresence>
-              {open && (
-                <motion.div
-                  initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
-                  transition={{ duration: 0.2 }}
-                  style={{ overflow: 'hidden', pointerEvents: 'auto' }}
-                >
-                  {g.sessions.length === 0 && (
-                    <div style={{ color: 'var(--text-tertiary)', fontSize: 12, padding: '8px 4px' }}>No sessions</div>
+          )}
+          {win.panes.map((p: any, pi: number) => {
+            const isRoutable = p.routable !== false;
+            const hasTTY = !!p.tty;
+            const isIdle = p.idle;
+            const cleaned = p.textPreview ? cleanTermText(p.textPreview) : '';
+            return (
+              <motion.div
+                key={p.tty || pi}
+                whileTap={{ scale: 0.98 }}
+                role={hasTTY ? 'button' : undefined}
+                onClick={() => {
+                  const selectId = p.tty ? `tty:${p.tty}` : null;
+                  const label = p.cwd?.split('/').pop() || p.tty || 'terminal';
+                  if (selectId) handleGridSelect(selectId, label, p.axText || p.textPreview || undefined);
+                }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  padding: '0 10px', height: 48, marginBottom: 4,
+                  backgroundColor: isRoutable ? 'var(--accent-bg)' : 'var(--bg-elevated)',
+                  borderRadius: 10, cursor: hasTTY ? 'pointer' : 'default',
+                  border: `1px solid ${isRoutable ? 'var(--accent)' : hasTTY ? 'var(--text-tertiary)' : 'var(--border)'}`,
+                  opacity: isIdle ? 0.5 : 1,
+                  userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none',
+                  pointerEvents: 'auto',
+                }}
+              >
+                <div style={{
+                  width: 6, height: 6, borderRadius: 3, flexShrink: 0,
+                  backgroundColor: isRoutable ? 'var(--accent)' : hasTTY ? 'var(--text-tertiary)' : 'var(--border)',
+                }} />
+                <div style={{ flex: 1, overflow: 'hidden', minWidth: 0 }}>
+                  <div style={{
+                    fontFamily: 'Menlo, monospace', fontSize: 12, fontWeight: 600,
+                    color: isRoutable ? 'var(--accent)' : 'var(--text-primary)',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const,
+                  }}>
+                    {p.title || p.cwd?.split('/').pop() || p.tty || 'terminal'}
+                  </div>
+                  {cleaned && (
+                    <div style={{
+                      fontFamily: 'Menlo, monospace', fontSize: 10, lineHeight: '14px',
+                      color: 'var(--text-secondary)', opacity: 0.6,
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const,
+                      marginTop: 2,
+                    }}>
+                      {cleaned}
+                    </div>
                   )}
-                  {g.sessions.map(s => (
-                    <motion.div
-                      key={s.id}
-                      whileTap={{ scale: 0.98 }}
-                      {...sessionLongPress(s)}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 8,
-                        padding: '12px 10px', marginBottom: 4,
-                        backgroundColor: 'var(--bg-elevated)',
-                        borderRadius: 10, cursor: 'pointer',
-                        border: `1px solid ${borderColor(s)}`,
-                        userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none',
-                      }}
-                    >
-                      <div style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: dotColor(s), flexShrink: 0 }} />
-                      {pinned.has(s.id) && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#888" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}><path d="M12 17v5M9 2h6l1 7h2l-1 4H7L6 9h2z"/></svg>}
-                      <div style={{ flex: 1, overflow: 'hidden', minWidth: 0 }}>
-                        <div style={{ color: 'var(--text-primary)', fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
-                          {s.display || s.id.slice(0, 8)}
-                        </div>
-                        {s.lastError && <div style={{ color: 'var(--danger)', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, marginTop: 2 }}>{s.lastError}</div>}
-                      </div>
-                      <span style={{ color: 'var(--text-tertiary)', fontSize: 11, flexShrink: 0 }}>{timeAgo(s.updatedAt)}</span>
-                      <span onClick={(e) => { e.stopPropagation(); setPinned(togglePin('workspace', s.id)); }} style={{ cursor: 'pointer', padding: '8px 10px', margin: '-8px -10px -8px 0', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill={pinned.has(s.id) ? 'var(--text-secondary)' : 'none'} stroke={pinned.has(s.id) ? 'var(--text-secondary)' : 'var(--text-tertiary)'} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01z"/></svg>
-                      </span>
-                    </motion.div>
-                  ))}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        );
-      })}
+                </div>
+                <span style={{
+                  fontFamily: 'Menlo, monospace', fontSize: 9, color: 'var(--text-tertiary)', flexShrink: 0,
+                }}>
+                  {p.tty || ''}
+                </span>
+              </motion.div>
+            );
+          })}
+        </div>
+      ))}
       {killTarget && <KillConfirmModal sessionLabel={(killTarget.display || killTarget.id).slice(0, 16)} onConfirm={confirmKill} onCancel={() => setKillTarget(null)} />}
       {newSessionProject !== null && createPortal(
         <AnimatePresence>
@@ -2702,26 +2725,19 @@ export default function App() {
       // Subscribe for live output
       // Flow: preload (instant) → subscribe-tty (dedup) → live PTY/JSONL (append)
       const hadPreload = preloaded.length > 0;
-      let blockPtyUntil = hadPreload ? Date.now() + 2000 : 0;
       const onPtyMsg = (msg: Message) => {
         if (cancelled || liveSessionIdRef.current !== ttyKey) return;
         if (msg.type === 'pty' && !msg.content.trim()) return;
-        // Block PTY during initial JSONL settling window (prevents race with stale PTY)
-        if (msg.type === 'pty' && Date.now() < blockPtyUntil) return;
 
         setSessionMessages(prev => {
-          // Batch refresh from subscribe-tty: if preloaded data already showing, skip re-render
-          // (preload and subscribe-tty deliver identical data from same relay cache)
+          // Batch refresh: skip if preload already showing identical data
           if ((msg as any)._batch) {
-            blockPtyUntil = Date.now() + 2000;
-            if (hadPreload && prev.length > 0) return prev; // already showing — no flash
+            if (hadPreload && prev.length > 0) return prev;
             return [msg];
           }
-          // Structured (JSONL) message arrived: remove any PTY preview placeholder
+          // JSONL message arrived: replace any PTY placeholder
           if (msg.type !== 'pty' && prev.some(m => m.type === 'pty')) {
-            blockPtyUntil = Date.now() + 2000;
-            const cleaned = prev.filter(m => m.type !== 'pty');
-            return [...cleaned, msg];
+            return [...prev.filter(m => m.type !== 'pty'), msg];
           }
           // Append PTY chunks to single terminal buffer message
           if (msg.type === 'pty') {
