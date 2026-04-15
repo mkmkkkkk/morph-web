@@ -1184,9 +1184,8 @@ function SpatialGrid({ layout, onSelect }: { layout: any; onSelect: (id: string,
             border: '1px solid var(--border)',
           }}>
             {win.panes.map((p: any, pi: number) => {
-              const isRoutable = p.routable !== false;
+              const isClaude = p.process === 'claude';
               const hasTTY = !!p.tty;
-              const isIdle = p.idle;
               return (
                 <div
                   key={p.tty || pi}
@@ -1209,21 +1208,21 @@ function SpatialGrid({ layout, onSelect }: { layout: any; onSelect: (id: string,
                   <div style={{
                     width: '100%', height: '100%',
                     borderRadius: 6,
-                    backgroundColor: isRoutable ? 'var(--accent-bg)' : hasTTY ? 'var(--bg-card)' : 'var(--bg-input)',
-                    border: `1px solid ${isRoutable ? 'var(--accent)' : hasTTY ? 'var(--text-tertiary)' : 'var(--border)'}`,
+                    backgroundColor: isClaude ? 'var(--accent-bg)' : hasTTY ? 'var(--bg-card)' : 'var(--bg-input)',
+                    border: `1px solid ${isClaude ? 'var(--accent)' : hasTTY ? 'var(--text-tertiary)' : 'var(--border)'}`,
                     cursor: hasTTY ? 'pointer' : 'default',
-                    opacity: isIdle ? 0.5 : 1,
+                    opacity: isClaude ? 1 : (p.idle ? 0.5 : 1),
                     display: 'flex', flexDirection: 'column', alignItems: 'stretch', justifyContent: 'flex-start',
                     overflow: 'hidden', padding: '3px 5px',
                     pointerEvents: 'auto',
                   }}>
                     <span style={{
                       fontFamily: 'Menlo, monospace', fontSize: 9, fontWeight: 600,
-                      color: isRoutable ? 'var(--accent)' : hasTTY ? 'var(--text-secondary)' : 'var(--text-tertiary)',
+                      color: isClaude ? 'var(--accent)' : hasTTY ? 'var(--text-secondary)' : 'var(--text-tertiary)',
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const,
                       pointerEvents: 'none',
                     }}>
-                      {isRoutable ? (p.tty || p.cwd?.split('/').pop() || 'claude') : p.tty}
+                      {isClaude ? (p.tty || p.cwd?.split('/').pop() || 'claude') : p.tty}
                     </span>
                     {p.textPreview && (() => {
                       const cleaned = cleanTermText(p.textPreview);
@@ -1429,9 +1428,8 @@ function SessionCards({ onSelect, onNewSession }: { onSelect: (sessionId: string
             </div>
           )}
           {win.panes.map((p: any, pi: number) => {
-            const isRoutable = p.routable !== false;
+            const isClaude = p.process === 'claude';
             const hasTTY = !!p.tty;
-            const isIdle = p.idle;
             const cleaned = p.textPreview ? cleanTermText(p.textPreview) : '';
             return (
               <motion.div
@@ -1446,22 +1444,22 @@ function SessionCards({ onSelect, onNewSession }: { onSelect: (sessionId: string
                 style={{
                   display: 'flex', alignItems: 'center', gap: 8,
                   padding: '0 10px', height: 48, marginBottom: 4,
-                  backgroundColor: isRoutable ? 'var(--accent-bg)' : 'var(--bg-elevated)',
+                  backgroundColor: isClaude ? 'var(--accent-bg)' : 'var(--bg-elevated)',
                   borderRadius: 10, cursor: hasTTY ? 'pointer' : 'default',
-                  border: `1px solid ${isRoutable ? 'var(--accent)' : hasTTY ? 'var(--text-tertiary)' : 'var(--border)'}`,
-                  opacity: isIdle ? 0.5 : 1,
+                  border: `1px solid ${isClaude ? 'var(--accent)' : hasTTY ? 'var(--text-tertiary)' : 'var(--border)'}`,
+                  opacity: isClaude ? 1 : (p.idle ? 0.5 : 1),
                   userSelect: 'none', WebkitUserSelect: 'none', WebkitTouchCallout: 'none',
                   pointerEvents: 'auto',
                 }}
               >
                 <div style={{
                   width: 6, height: 6, borderRadius: 3, flexShrink: 0,
-                  backgroundColor: isRoutable ? 'var(--accent)' : hasTTY ? 'var(--text-tertiary)' : 'var(--border)',
+                  backgroundColor: isClaude ? 'var(--accent)' : hasTTY ? 'var(--text-tertiary)' : 'var(--border)',
                 }} />
                 <div style={{ flex: 1, overflow: 'hidden', minWidth: 0 }}>
                   <div style={{
                     fontFamily: 'Menlo, monospace', fontSize: 12, fontWeight: 600,
-                    color: isRoutable ? 'var(--accent)' : 'var(--text-primary)',
+                    color: isClaude ? 'var(--accent)' : 'var(--text-primary)',
                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const,
                   }}>
                     {p.title || p.cwd?.split('/').pop() || p.tty || 'terminal'}
