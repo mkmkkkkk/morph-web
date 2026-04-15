@@ -659,6 +659,7 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
 }) {
   const [text, setText] = useState(() => (storageKey ? localStorage.getItem(storageKey) || '' : ''));
   const ref = useRef<HTMLTextAreaElement>(null);
+  const shiftHeld = useRef(false);
 
   // Persist draft to localStorage on change
   useEffect(() => {
@@ -676,6 +677,23 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
     if (storageKey) localStorage.removeItem(storageKey);
     if (ref.current) ref.current.style.height = '36px';
   }, [text, onSend, pendingSketch, pendingFile, storageKey]);
+
+  // Native beforeinput: catches Enter on mobile IME that bypasses React onKeyDown
+  const handleSendRef = useRef(handleSend);
+  handleSendRef.current = handleSend;
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const handler = (e: Event) => {
+      const ie = e as InputEvent;
+      if ((ie.inputType === 'insertLineBreak' || ie.inputType === 'insertParagraph') && !shiftHeld.current) {
+        e.preventDefault();
+        handleSendRef.current();
+      }
+    };
+    el.addEventListener('beforeinput', handler);
+    return () => el.removeEventListener('beforeinput', handler);
+  }, []);
 
   const isSession = tint === 'amber';
   const accent = isSession ? 'var(--warning)' : 'var(--success)';
@@ -730,13 +748,26 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
       {/* Text input — textarea with auto-grow, Enter=send, Shift+Enter=newline */}
       <textarea ref={ref} value={text}
         onChange={e => {
-          setText(e.target.value);
+          const val = e.target.value;
+          setText(val);
           const el = e.target;
           el.style.height = '36px';
           el.style.height = Math.min(el.scrollHeight, 120) + 'px';
         }}
         onKeyDown={e => {
-          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+          if (e.key === 'Shift') shiftHeld.current = true;
+          if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); handleSend(); }
+        }}
+        onKeyUp={e => {
+          if (e.key === 'Shift') shiftHeld.current = false;
+        }}
+        onCompositionEnd={e => {
+          // Mobile IME: "send" button during composition fires compositionend with \n
+          const val = (e.target as HTMLTextAreaElement).value;
+          if (val.endsWith('\n')) {
+            setText(val.slice(0, -1));
+            setTimeout(() => handleSend(), 0);
+          }
         }}
         placeholder={isSession ? "Message this session..." : "Message Claude Code..."}
         rows={1}
@@ -775,27 +806,9 @@ function getViewed(): Set<string> {
 function getViewedTs(): Record<string, number> {
   try { return JSON.parse(localStorage.getItem(VIEWED_TS_KEY) || '{}'); } catch { return {}; }
 }
-function markViewed(id: string, preview?: string) {
+function markViewed(id: string) {
   const s = getViewed(); s.add(id); localStorage.setItem(VIEWED_KEY, JSON.stringify([...s]));
   const ts = getViewedTs(); ts[id] = Date.now(); localStorage.setItem(VIEWED_TS_KEY, JSON.stringify(ts));
-  // Store the textPreview snapshot so we can detect new content later
-  if (preview !== undefined) {
-    try {
-      const snaps = JSON.parse(localStorage.getItem('morph-viewed-snap') || '{}');
-      snaps[id] = preview;
-      localStorage.setItem('morph-viewed-snap', JSON.stringify(snaps));
-    } catch {}
-  }
-}
-function getViewedSnap(): Record<string, string> {
-  try { return JSON.parse(localStorage.getItem('morph-viewed-snap') || '{}'); } catch { return {}; }
-}
-function paneHasNewContent(ttyId: string, preview: string | null): boolean {
-  if (!preview) return false;
-  const snaps = getViewedSnap();
-  const lastSeen = snaps[ttyId];
-  if (lastSeen === undefined) return true; // never viewed → new
-  return lastSeen !== preview;
 }
 function hasUnread(s: any): boolean {
   const ts = getViewedTs();
@@ -1178,7 +1191,7 @@ function cleanTermText(s: string): string {
 }
 
 // Spatial grid — mirrors WezTerm pane layout
-function SpatialGrid({ layout, onSelect, snapKey }: { layout: any; onSelect: (id: string, display?: string, textPreview?: string) => void; snapKey: number }) {
+function SpatialGrid({ layout, onSelect }: { layout: any; onSelect: (id: string, display?: string, textPreview?: string) => void }) {
   if (!layout || !layout.windows || layout.windows.length === 0) return null;
 
   const handlePaneTap = (p: any) => {
@@ -1197,14 +1210,11 @@ function SpatialGrid({ layout, onSelect, snapKey }: { layout: any; onSelect: (id
             marginBottom: layout.windows.length > 1 ? 20 : 0,
             borderRadius: 10, overflow: 'hidden',
             backgroundColor: 'var(--bg-card)',
-            border: '1px solid var(--border)',
           }}>
+           <div style={{ position: 'absolute', inset: 2 }}>
             {win.panes.map((p: any, pi: number) => {
               const isClaude = p.process === 'claude';
               const hasTTY = !!p.tty;
-              const ttyId = p.tty ? `tty:${p.tty}` : '';
-              const cleaned = p.textPreview ? cleanTermText(p.textPreview) : '';
-              const isNew = isClaude && paneHasNewContent(ttyId, cleaned || null);
               return (
                 <div
                   key={p.tty || pi}
@@ -1212,13 +1222,12 @@ function SpatialGrid({ layout, onSelect, snapKey }: { layout: any; onSelect: (id
                   tabIndex={hasTTY ? 0 : undefined}
                   onClick={() => handlePaneTap(p)}
                   onPointerUp={(e) => { if (e.pointerType === 'touch') { e.preventDefault(); handlePaneTap(p); } }}
-                  className={hasTTY ? 'pane-btn' : undefined}
                   style={{
                     position: 'absolute',
                     left: `${p.x * 100}%`, top: `${p.y * 100}%`,
                     width: `${p.w * 100}%`, height: `${p.h * 100}%`,
                     boxSizing: 'border-box',
-                    padding: 1,
+                    padding: 0,
                     touchAction: 'manipulation',
                     WebkitTapHighlightColor: 'transparent',
                     userSelect: 'none',
@@ -1228,8 +1237,8 @@ function SpatialGrid({ layout, onSelect, snapKey }: { layout: any; onSelect: (id
                   <div style={{
                     width: '100%', height: '100%',
                     borderRadius: 6,
-                    backgroundColor: isNew ? 'var(--accent-bg)' : hasTTY ? 'var(--bg-card)' : 'var(--bg-input)',
-                    border: `1px solid ${hasTTY ? 'var(--border-strong)' : 'var(--border)'}`,
+                    backgroundColor: (isClaude && !p.idle) ? 'var(--accent-bg)' : 'var(--bg-card)',
+                    border: `1px solid ${(isClaude && p.idle) ? 'var(--text-tertiary)' : isClaude ? 'var(--border)' : hasTTY ? 'var(--border-strong)' : 'var(--border)'}`,
                     cursor: hasTTY ? 'pointer' : 'default',
                     display: 'flex', flexDirection: 'column', alignItems: 'stretch', justifyContent: 'flex-start',
                     overflow: 'hidden', padding: '3px 5px',
@@ -1237,26 +1246,17 @@ function SpatialGrid({ layout, onSelect, snapKey }: { layout: any; onSelect: (id
                   }}>
                     <span style={{
                       fontFamily: 'Menlo, monospace', fontSize: 9, fontWeight: 600,
-                      color: isNew ? 'var(--accent)' : hasTTY ? 'var(--text-secondary)' : 'var(--text-tertiary)',
+                      color: (isClaude && p.idle) ? 'var(--accent)' : hasTTY ? 'var(--text-secondary)' : 'var(--text-tertiary)',
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const,
                       pointerEvents: 'none',
                     }}>
-                      {isClaude ? (p.tty || p.cwd?.split('/').pop() || 'claude') : p.tty}
+                      {p.tty || (isClaude ? 'claude' : '')}
                     </span>
-                    {cleaned && (
-                      <span style={{
-                        fontFamily: 'Menlo, monospace', fontSize: 8, lineHeight: '11px',
-                        color: 'var(--text-secondary)', opacity: 0.5,
-                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                        pointerEvents: 'none', marginTop: 1, display: 'block',
-                      }}>
-                        {cleaned}
-                      </span>
-                    )}
                   </div>
                 </div>
               );
             })}
+           </div>
           </div>
         );
       })}
@@ -1268,7 +1268,6 @@ function SpatialGrid({ layout, onSelect, snapKey }: { layout: any; onSelect: (id
 function SessionCards({ onSelect, onNewSession }: { onSelect: (sessionId: string, display?: string, relayUrl?: string, relayToken?: string, project?: string, envId?: string, textPreview?: string) => void; onNewSession?: (envId: string, relayUrl?: string, relayToken?: string) => void }) {
   const [groups, setGroups] = useState<{ project: string; sessions: any[] }[]>([]);
   const [viewed, setViewed] = useState<Set<string>>(getViewed);
-  const [snapKey, setSnapKey] = useState(0);
   const [pinned, setPinned] = useState<Set<string>>(() => getPinned('workspace'));
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [visKey, setVisKey] = useState(_visResumeCount);
@@ -1403,9 +1402,7 @@ function SessionCards({ onSelect, onNewSession }: { onSelect: (sessionId: string
   };
 
   const handleGridSelect = (ttyId: string, display?: string, textPreview?: string) => {
-    const cleaned = textPreview ? cleanTermText(textPreview) : '';
-    markViewed(ttyId, cleaned || '');
-    setSnapKey(k => k + 1);
+    markViewed(ttyId);
     // Panel: pure TTY, no session/env/relay fields
     onSelect(ttyId, display, undefined, undefined, undefined, 'workspace', textPreview);
   };
@@ -1435,7 +1432,7 @@ function SessionCards({ onSelect, onNewSession }: { onSelect: (sessionId: string
       )}
       {/* Spatial grid view */}
       {viewMode === 'grid' && layout && (
-        <SpatialGrid layout={layout} onSelect={handleGridSelect} snapKey={snapKey} />
+        <SpatialGrid layout={layout} onSelect={handleGridSelect} />
       )}
       {/* List view — render layout panes as horizontal rows */}
       {viewMode === 'list' && layout && layout.windows && layout.windows.map((win: any, wi: number) => (
@@ -1448,14 +1445,11 @@ function SessionCards({ onSelect, onNewSession }: { onSelect: (sessionId: string
           {win.panes.map((p: any, pi: number) => {
             const isClaude = p.process === 'claude';
             const hasTTY = !!p.tty;
-            const ttyId = p.tty ? `tty:${p.tty}` : '';
             const cleaned = p.textPreview ? cleanTermText(p.textPreview) : '';
-            const isNew = isClaude && paneHasNewContent(ttyId, cleaned || null);
             return (
               <div
                 key={p.tty || pi}
                 role={hasTTY ? 'button' : undefined}
-                className={hasTTY ? 'pane-btn' : undefined}
                 onClick={() => {
                   const selectId = p.tty ? `tty:${p.tty}` : null;
                   const label = p.cwd?.split('/').pop() || p.tty || 'terminal';
@@ -1471,19 +1465,19 @@ function SessionCards({ onSelect, onNewSession }: { onSelect: (sessionId: string
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: 8,
                   padding: '0 10px', height: 48,
-                  backgroundColor: isNew ? 'var(--accent-bg)' : 'var(--bg-elevated)',
+                  backgroundColor: (isClaude && !p.idle) ? 'var(--accent-bg)' : 'var(--bg-elevated)',
                   borderRadius: 10, cursor: hasTTY ? 'pointer' : 'default',
-                  border: `1px solid ${hasTTY ? 'var(--border-strong)' : 'var(--border)'}`,
+                  border: `1px solid ${(isClaude && p.idle) ? 'var(--text-tertiary)' : isClaude ? 'var(--border)' : hasTTY ? 'var(--border-strong)' : 'var(--border)'}`,
                   pointerEvents: 'auto',
                 }}>
                   <div style={{
                     width: 6, height: 6, borderRadius: 3, flexShrink: 0,
-                    backgroundColor: isNew ? 'var(--accent)' : hasTTY ? 'var(--text-tertiary)' : 'var(--border)',
+                    backgroundColor: (isClaude && p.idle) ? 'var(--accent)' : hasTTY ? 'var(--text-tertiary)' : 'var(--border)',
                   }} />
                   <div style={{ flex: 1, overflow: 'hidden', minWidth: 0 }}>
                     <div style={{
                       fontFamily: 'Menlo, monospace', fontSize: 12, fontWeight: 600,
-                      color: isNew ? 'var(--accent)' : 'var(--text-primary)',
+                      color: (isClaude && p.idle) ? 'var(--accent)' : 'var(--text-primary)',
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const,
                     }}>
                       {p.title || p.cwd?.split('/').pop() || p.tty || 'terminal'}
