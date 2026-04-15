@@ -2129,7 +2129,7 @@ function DraftsTab() {
   };
 
   return (
-    <div style={{ flex: 1, overflow: 'auto', padding: '16px 12px', WebkitOverflowScrolling: 'touch' }}>
+    <div style={{ flex: 1, overflow: 'auto', padding: '16px 12px', paddingTop: 'max(48px, env(safe-area-inset-top, 48px))', WebkitOverflowScrolling: 'touch' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <span style={{ color: 'var(--text-primary)', fontSize: 18, fontWeight: 600 }}>Polished Drafts</span>
         <button onClick={fetchDrafts} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 13 }}>Refresh</button>
