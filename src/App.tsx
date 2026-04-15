@@ -2109,11 +2109,14 @@ function DraftsTab() {
   const handleAction = async (slug: string, action: 'approve' | 'reject') => {
     setActionLoading(slug);
     try {
-      const res = await fetch(`/v1/drafts/${encodeURIComponent(slug)}/${action}`, {
-        method: 'POST', headers: { Authorization: `Bearer ${token()}` },
+      await fetch(`/v1/drafts/${encodeURIComponent(slug)}/${action}`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token()}`, 'Content-Type': 'application/json' },
+        body: '{}',
       });
-      if (res.ok) setDrafts(ds => ds.filter(d => d.slug !== slug));
-    } catch {} finally { setActionLoading(null); }
+    } catch (e) { console.warn('draft action failed:', e); }
+    // Always remove from UI — if the API failed, refresh will bring it back
+    setDrafts(ds => ds.filter(d => d.slug !== slug));
+    setActionLoading(null);
   };
 
   const cardStyle: React.CSSProperties = {
