@@ -198,21 +198,26 @@ function setThemeGlobal(t: Theme) {
 
 // ─── Remote debug logger — sends to relay /v2/debug/log, read via /v2/debug/logs ───
 const _dbgQueue: string[] = [];
+let _dbgTimer: ReturnType<typeof setTimeout> | null = null;
 function dbg(msg: string) {
+  if (localStorage.getItem('morph-debug-enabled') !== 'true') return; // skip entirely when disabled
   const ts = new Date().toLocaleTimeString('en', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 } as any);
   _dbgQueue.push(`${ts} ${msg}`);
+  // Lazy flush: only schedule when there's data, no polling when idle
+  if (!_dbgTimer) {
+    _dbgTimer = setTimeout(() => {
+      _dbgTimer = null;
+      if (_dbgQueue.length === 0) return;
+      const batch = _dbgQueue.splice(0);
+      const relay = localStorage.getItem('morph-relay-url') || '';
+      const token = localStorage.getItem('morph-auth') || '';
+      fetch(`${relay}/v2/debug/log`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ lines: batch }),
+      }).catch(() => {});
+    }, 2000);
+  }
 }
-// Flush every 2s
-setInterval(() => {
-  if (_dbgQueue.length === 0) return;
-  const batch = _dbgQueue.splice(0);
-  const relay = localStorage.getItem('morph-relay-url') || '';
-  const token = localStorage.getItem('morph-auth') || '';
-  fetch(`${relay}/v2/debug/log`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-    body: JSON.stringify({ lines: batch }),
-  }).catch(() => {});
-}, 2000);
 
 // ─── Shared send flow: attachments + fire-and-forget upload ───
 function useSendFlow(sendFn: (msg: string) => void, relayConfig?: { relayUrl?: string; relayToken?: string }) {
@@ -1529,6 +1534,32 @@ function ConfigTab({ connState }: { connState: string }) {
   const [pushError, setPushError] = useState('');
   const [wsState, setWsState] = useState('—');
 
+  // Icon picker
+  const [iconSrc, setIconSrc] = useState('/icon-512-v4.png');
+  const [iconUploading, setIconUploading] = useState(false);
+  const iconInputRef = useRef<HTMLInputElement>(null);
+
+  const handleIconUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIconUploading(true);
+    try {
+      const buf = await file.arrayBuffer();
+      const base64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+      const res = await fetch(`${relayUrl()}/v2/icon`, {
+        method: 'POST',
+        headers: { ...headers(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ base64, mime: file.type }),
+      });
+      const data = await res.json();
+      if (data.ok && data.src) {
+        setIconSrc(data.src + '?t=' + Date.now());
+      }
+    } catch {}
+    setIconUploading(false);
+    if (iconInputRef.current) iconInputRef.current.value = '';
+  };
+
   useEffect(() => {
     fetch(`${relayUrl()}/v2/usage`, { headers: headers() })
       .then(r => r.json())
@@ -1537,6 +1568,12 @@ function ConfigTab({ connState }: { connState: string }) {
         totalSessions: String(d.totalSessions ?? '—'),
         uptime: d.uptime ?? '—',
       }))
+      .catch(() => {});
+
+    // Fetch current icon
+    fetch(`${relayUrl()}/v2/icon`, { headers: headers() })
+      .then(r => r.json())
+      .then(d => { if (d.src) setIconSrc(d.src + '?t=' + Date.now()); })
       .catch(() => {});
 
     fetchSessions()
@@ -1679,6 +1716,39 @@ function ConfigTab({ connState }: { connState: string }) {
               textTransform: 'capitalize', transition: 'all 0.2s',
             }}>{{ dark: '● dark', light: '○ light', sunny: '☀ sunny', brutalist: '■ brutal', onyx: '◉ onyx', clay: '◎ clay', terminal: '> term', noir: '◑ noir', stone: '◻ stone', rust: '⚙ rust' }[t]}</button>
           ))}
+        </div>
+      </Section>
+
+      <Section title="App Icon">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <img
+            src={iconSrc}
+            alt="App Icon"
+            style={{ width: 60, height: 60, borderRadius: 14, border: '1px solid var(--border)' }}
+          />
+          <div style={{ flex: 1 }}>
+            <button
+              onClick={() => iconInputRef.current?.click()}
+              disabled={iconUploading}
+              style={{
+                padding: '8px 16px', borderRadius: 8, border: 'none', cursor: 'pointer',
+                backgroundColor: 'var(--accent-bg)', color: 'var(--accent)', fontSize: 13, fontWeight: 600,
+                opacity: iconUploading ? 0.5 : 1,
+              }}
+            >
+              {iconUploading ? 'Uploading...' : 'Change Icon'}
+            </button>
+            <input
+              ref={iconInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              style={{ display: 'none' }}
+              onChange={handleIconUpload}
+            />
+            <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>
+              PNG/JPEG. Re-add PWA to update home screen.
+            </div>
+          </div>
         </div>
       </Section>
 
@@ -2019,8 +2089,80 @@ function Row({ label, value, valueColor }: { label: string; value: string; value
   );
 }
 
+// ─── Drafts Tab ───
+function DraftsTab() {
+  const [drafts, setDrafts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const token = () => localStorage.getItem('morph-auth') || '';
+
+  const fetchDrafts = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/v1/drafts', { headers: { Authorization: `Bearer ${token()}` } });
+      if (res.ok) { const d = await res.json(); setDrafts(d.drafts || []); }
+    } catch {} finally { setLoading(false); }
+  };
+
+  useEffect(() => { fetchDrafts(); }, []);
+
+  const handleAction = async (slug: string, action: 'approve' | 'reject') => {
+    setActionLoading(slug);
+    try {
+      const res = await fetch(`/v1/drafts/${encodeURIComponent(slug)}/${action}`, {
+        method: 'POST', headers: { Authorization: `Bearer ${token()}` },
+      });
+      if (res.ok) setDrafts(ds => ds.filter(d => d.slug !== slug));
+    } catch {} finally { setActionLoading(null); }
+  };
+
+  const cardStyle: React.CSSProperties = {
+    backgroundColor: 'var(--bg-card)', borderRadius: 12, padding: 16,
+    border: '1px solid var(--border-input)', marginBottom: 12,
+  };
+  const btnBase: React.CSSProperties = {
+    flex: 1, padding: '10px 0', border: 'none', borderRadius: 8,
+    fontSize: 14, fontWeight: 600, cursor: 'pointer',
+  };
+
+  return (
+    <div style={{ flex: 1, overflow: 'auto', padding: '16px 12px', WebkitOverflowScrolling: 'touch' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <span style={{ color: 'var(--text-primary)', fontSize: 18, fontWeight: 600 }}>Polished Drafts</span>
+        <button onClick={fetchDrafts} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 13 }}>Refresh</button>
+      </div>
+      {loading ? (
+        <div style={{ color: 'var(--text-tertiary)', textAlign: 'center', marginTop: 40 }}>Loading...</div>
+      ) : drafts.length === 0 ? (
+        <div style={{ color: 'var(--text-tertiary)', textAlign: 'center', marginTop: 40 }}>No polished drafts</div>
+      ) : drafts.map(d => (
+        <div key={d.slug} style={cardStyle}>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, backgroundColor: 'rgba(99,102,241,0.15)', color: '#818cf8' }}>{d.format}</span>
+            {d.goal && <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, backgroundColor: 'rgba(251,191,36,0.15)', color: '#fbbf24' }}>{d.goal}</span>}
+          </div>
+          <pre style={{ color: 'var(--text-primary)', fontSize: 14, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: '0 0 10px', fontFamily: '-apple-system, sans-serif' }}>{d.post}</pre>
+          <div style={{ color: 'var(--text-tertiary)', fontSize: 11, marginBottom: 10 }}>
+            {d.slug} {d.drafted_at ? `\u00b7 ${d.drafted_at}` : ''}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => handleAction(d.slug, 'approve')} disabled={actionLoading === d.slug}
+              style={{ ...btnBase, backgroundColor: 'rgba(34,197,94,0.15)', color: '#22c55e' }}>
+              {actionLoading === d.slug ? '...' : 'Approve'}
+            </button>
+            <button onClick={() => handleAction(d.slug, 'reject')} disabled={actionLoading === d.slug}
+              style={{ ...btnBase, backgroundColor: 'rgba(239,68,68,0.15)', color: '#ef4444' }}>
+              {actionLoading === d.slug ? '...' : 'Reject'}
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ─── Tab Bar ───
-const tabs = [{ id: 'canvas', label: 'Canvas' }, { id: 'config', label: 'Config' }];
+const tabs = [{ id: 'canvas', label: 'Canvas' }, { id: 'drafts', label: 'Drafts' }, { id: 'config', label: 'Config' }];
 function TabBar({ tab, onTab, disabled }: { tab: string; onTab: (t: string) => void; disabled?: boolean }) {
   return (
     <div style={{ display: 'flex', borderTop: '1px solid var(--border-strong)', paddingBottom: 'max(4px, env(safe-area-inset-bottom))', flexShrink: 0, position: 'relative', backgroundColor: 'var(--bg-primary)', opacity: disabled ? 0.3 : 1, pointerEvents: disabled ? 'none' : 'auto' }}>
@@ -2028,9 +2170,9 @@ function TabBar({ tab, onTab, disabled }: { tab: string; onTab: (t: string) => v
       {!disabled && <motion.div
         layoutId="tab-indicator"
         style={{
-          position: 'absolute', top: 0, height: 2, width: '50%', backgroundColor: 'var(--text-primary)', borderRadius: 1,
+          position: 'absolute', top: 0, height: 2, width: `${100 / tabs.length}%`, backgroundColor: 'var(--text-primary)', borderRadius: 1,
         }}
-        animate={{ x: tab === 'canvas' ? 0 : '100%' }}
+        animate={{ x: `${tabs.findIndex(t => t.id === tab) * 100}%` }}
         transition={{ type: 'spring', stiffness: 500, damping: 35 }}
       />}
       {tabs.map(t => (
@@ -2044,6 +2186,8 @@ function TabBar({ tab, onTab, disabled }: { tab: string; onTab: (t: string) => v
           <span style={{ display: 'flex' }}>
             {t.id === 'canvas' ? (
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M9 3v18"/></svg>
+            ) : t.id === 'drafts' ? (
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8M16 17H8M10 9H8"/></svg>
             ) : (
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 00.73 2.73l.15.1a2 2 0 011 1.72v.51a2 2 0 01-1 1.74l-.15.09a2 2 0 00-.73 2.73l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 00-.73-2.73l-.15-.08a2 2 0 01-1-1.74v-.5a2 2 0 011-1.74l.15-.09a2 2 0 00.73-2.73l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
             )}
@@ -2339,6 +2483,30 @@ function SessionTerminal({ session, messages, onBack, onSend, onRawKey, onInterr
         document.body
       )}
     </motion.div>
+  );
+}
+
+// ─── Offline banner: brief "reconnecting", then "Mac is offline" after 8s ───
+function OfflineBanner() {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setElapsed(s => s + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+  const isOffline = elapsed >= 8;
+  return (
+    <div style={{
+      position: 'fixed', top: 0, left: 0, right: 0, zIndex: 99999,
+      padding: `max(6px, env(safe-area-inset-top)) 16px 6px`,
+      textAlign: 'center',
+      fontSize: 12, fontFamily: 'Menlo, monospace',
+      color: isOffline ? 'var(--danger)' : 'var(--warning)',
+      backgroundColor: isOffline ? 'var(--danger-bg)' : 'transparent',
+      transition: 'background-color 0.3s, color 0.3s',
+      pointerEvents: 'none',
+    }}>
+      {isOffline ? 'Mac is offline' : 'reconnecting...'}
+    </div>
   );
 }
 
@@ -2748,13 +2916,32 @@ export default function App() {
       idleTimer.current = setTimeout(() => setIsProcessing(false), 30000);
     });
     const unsub2 = onState(setConnState);
+    // Offline notification: fire once when relay stays unreachable for 8s
+    let offlineTimer: ReturnType<typeof setTimeout> | null = null;
+    let wasOfflineNotified = false;
+    const unsub2b = onState((s) => {
+      if (s === 'connected') {
+        if (offlineTimer) { clearTimeout(offlineTimer); offlineTimer = null; }
+        wasOfflineNotified = false;
+      } else if (!wasOfflineNotified) {
+        if (!offlineTimer) {
+          offlineTimer = setTimeout(() => {
+            wasOfflineNotified = true;
+            // Browser notification
+            if (Notification.permission === 'granted') {
+              new Notification('Morph', { body: 'Mac is offline', icon: '/icon-192-v4.png', tag: 'morph-offline' });
+            }
+          }, 8000);
+        }
+      }
+    });
     const unsub3 = onCompact(() => {
       setIsCompacting(true);
       if (compactTimer.current) clearTimeout(compactTimer.current);
       compactTimer.current = setTimeout(() => setIsCompacting(false), 8000);
     });
     connect();
-    return () => { unsub1(); unsub2(); unsub3(); clearTimeout(idleTimer.current); if (compactTimer.current) clearTimeout(compactTimer.current); };
+    return () => { unsub1(); unsub2(); unsub2b(); unsub3(); clearTimeout(idleTimer.current); if (compactTimer.current) clearTimeout(compactTimer.current); };
   }, [authed]);
 
   const [terminalVisible, setTerminalVisible] = useState(false);
@@ -2804,16 +2991,8 @@ export default function App() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', maxWidth: 600, margin: '0 auto', width: '100%' }}>
-      {/* Reconnecting indicator */}
-      {connState !== 'connected' && (
-        <div style={{
-          position: 'fixed', top: 'max(8px, env(safe-area-inset-top))', right: 12, zIndex: 99999,
-          color: 'var(--warning)', fontSize: 11, fontFamily: 'Menlo, monospace',
-          pointerEvents: 'none',
-        }}>
-          reconnecting...
-        </div>
-      )}
+      {/* Offline / reconnecting banner */}
+      {connState !== 'connected' && <OfflineBanner />}
       {/* Content area — tab-specific, always full height */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
         {/* Canvas view */}
@@ -2853,6 +3032,11 @@ export default function App() {
             )}
             <iframe src={`/canvas.html?v=${BUILD_TS}`} onLoad={() => setCanvasLoaded(true)} style={{ width: '100%', height: '100%', border: 'none', backgroundColor: 'var(--bg-primary)', willChange: 'transform' }} sandbox="allow-scripts allow-same-origin" />
           </div>
+        </div>
+
+        {/* Drafts content */}
+        <div style={{ flex: 1, display: tab === 'drafts' ? 'flex' : 'none', overflow: 'hidden', flexDirection: 'column' }}>
+          <DraftsTab />
         </div>
 
         {/* Config content — lazy-mounted: only rendered after first visit */}
