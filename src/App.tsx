@@ -1178,7 +1178,7 @@ function SpatialGrid({ layout, onSelect }: { layout: any; onSelect: (id: string,
         return (
           <div key={win.id || wi} style={{
             position: 'relative', width: '100%', aspectRatio: `${1 / aspect}`,
-            marginBottom: layout.windows.length > 1 ? 12 : 0,
+            marginBottom: layout.windows.length > 1 ? 20 : 0,
             borderRadius: 10, overflow: 'hidden',
             backgroundColor: 'var(--bg-card)',
             border: '1px solid var(--border)',
@@ -1193,6 +1193,7 @@ function SpatialGrid({ layout, onSelect }: { layout: any; onSelect: (id: string,
                   tabIndex={hasTTY ? 0 : undefined}
                   onClick={() => handlePaneTap(p)}
                   onPointerUp={(e) => { if (e.pointerType === 'touch') { e.preventDefault(); handlePaneTap(p); } }}
+                  className={hasTTY ? 'pane-btn' : undefined}
                   style={{
                     position: 'absolute',
                     left: `${p.x * 100}%`, top: `${p.y * 100}%`,

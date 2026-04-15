@@ -225,7 +225,8 @@
     [data-theme="clay"] * { border-radius: 24px !important; }
     [data-theme="clay"] div[style*="bg-card"], [data-theme="clay"] div[style*="Card"] { border: none !important; background: #d8d0c8 !important; box-shadow: 8px 8px 16px rgba(0,0,0,0.12), -8px -8px 16px rgba(255,255,255,0.6) !important; border-radius: 24px !important; }
     [data-theme="clay"] button { border: none !important; border-radius: 20px !important; background: #d8d0c8 !important; box-shadow: 4px 4px 10px rgba(0,0,0,0.10), -4px -4px 10px rgba(255,255,255,0.5); font-weight: 600; }
-    [data-theme="clay"] button:active { box-shadow: inset 3px 3px 8px rgba(0,0,0,0.10), inset -3px -3px 8px rgba(255,255,255,0.5); }
+    [data-theme="clay"] .pane-btn > div { box-shadow: 4px 4px 10px rgba(0,0,0,0.10), -4px -4px 10px rgba(255,255,255,0.5); }
+    [data-theme="clay"] button:active, [data-theme="clay"] .pane-btn:active > div { box-shadow: inset 3px 3px 8px rgba(0,0,0,0.10), inset -3px -3px 8px rgba(255,255,255,0.5); }
     [data-theme="clay"] input, [data-theme="clay"] textarea { border: none !important; border-radius: 20px !important; background: #d0c8c0 !important; box-shadow: inset 3px 3px 6px rgba(0,0,0,0.08), inset -3px -3px 6px rgba(255,255,255,0.4); }
     /* Noir: film grain, dramatic shadows, italic serif */
     [data-theme="noir"] body { background-color: #0a0a0a; background-image: url("data:image/svg+xml,%3Csvg width='300' height='300' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E"); }
@@ -247,18 +248,21 @@
     [data-theme="stone"] * { border-radius: 8px !important; font-family: 'Palatino', 'Georgia', 'Times New Roman', serif !important; font-variant: small-caps; }
     [data-theme="stone"] div[style*="bg-card"], [data-theme="stone"] div[style*="Card"] { border: 3px ridge rgba(60,52,44,0.35) !important; background: #c8c0b4 !important; box-shadow: inset 4px 4px 10px rgba(0,0,0,0.12), inset -2px -2px 6px rgba(255,255,255,0.30) !important; border-radius: 8px !important; }
     [data-theme="stone"] button { border: 2px ridge rgba(60,52,44,0.30) !important; border-radius: 8px !important; font-variant: small-caps; letter-spacing: 1px; font-weight: 600; }
-    [data-theme="stone"] button:active { box-shadow: inset 2px 2px 6px rgba(0,0,0,0.15); }
+    [data-theme="stone"] .pane-btn > div { border: 2px ridge rgba(60,52,44,0.30) !important; }
+    [data-theme="stone"] button:active, [data-theme="stone"] .pane-btn:active > div { box-shadow: inset 2px 2px 6px rgba(0,0,0,0.15); }
     [data-theme="stone"] input, [data-theme="stone"] textarea { border: 2px ridge rgba(60,52,44,0.25) !important; border-radius: 8px !important; box-shadow: inset 2px 2px 4px rgba(0,0,0,0.08), inset -1px -1px 3px rgba(255,255,255,0.20); }
     [data-theme="onyx"] * { border-radius: 24px !important; }
     [data-theme="onyx"] div[style*="bg-card"], [data-theme="onyx"] div[style*="Card"] { border: none !important; background: #28241e !important; box-shadow: 8px 8px 16px rgba(0,0,0,0.35), -8px -8px 16px rgba(255,255,255,0.04) !important; border-radius: 24px !important; }
     [data-theme="onyx"] button { border: none !important; border-radius: 20px !important; background: #28241e !important; box-shadow: 4px 4px 10px rgba(0,0,0,0.30), -4px -4px 10px rgba(255,255,255,0.03); font-weight: 600; }
-    [data-theme="onyx"] button:active { box-shadow: inset 3px 3px 8px rgba(0,0,0,0.25), inset -3px -3px 8px rgba(255,255,255,0.02); }
+    [data-theme="onyx"] .pane-btn > div { box-shadow: 4px 4px 10px rgba(0,0,0,0.30), -4px -4px 10px rgba(255,255,255,0.03); }
+    [data-theme="onyx"] button:active, [data-theme="onyx"] .pane-btn:active > div { box-shadow: inset 3px 3px 8px rgba(0,0,0,0.25), inset -3px -3px 8px rgba(255,255,255,0.02); }
     [data-theme="onyx"] input, [data-theme="onyx"] textarea { border: none !important; border-radius: 20px !important; background: #242018 !important; box-shadow: inset 3px 3px 6px rgba(0,0,0,0.20), inset -3px -3px 6px rgba(255,255,255,0.02); }
     /* Brutalist: zero radius, thick borders, heavy shadows, uppercase */
     [data-theme="brutalist"] * { border-radius: 0px !important; font-family: 'Helvetica Neue', 'Arial', system-ui, sans-serif !important; }
     [data-theme="brutalist"] div[style*="bg-card"], [data-theme="brutalist"] div[style*="Card"] { border: 3px solid #1a1a1a !important; box-shadow: 6px 6px 0 #1a1a1a !important; }
     [data-theme="brutalist"] button { border: 2px solid #1a1a1a !important; text-transform: uppercase; letter-spacing: 1px; font-weight: 700; font-size: 12px !important; box-shadow: 3px 3px 0 #1a1a1a; }
-    [data-theme="brutalist"] button:active { box-shadow: 1px 1px 0 #1a1a1a; transform: translate(2px, 2px); }
+    [data-theme="brutalist"] .pane-btn > div { border: 2px solid #1a1a1a !important; box-shadow: 3px 3px 0 #1a1a1a; }
+    [data-theme="brutalist"] button:active, [data-theme="brutalist"] .pane-btn:active > div { box-shadow: 1px 1px 0 #1a1a1a; transform: translate(2px, 2px); }
     [data-theme="brutalist"] input, [data-theme="brutalist"] textarea { border: 2px solid #1a1a1a !important; }
     /* Rust: industrial, thick top-border accent, monospace */
     [data-theme="rust"] body { background-color: #120e0a; background-image: url("data:image/svg+xml,%3Csvg width='300' height='300' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.02'/%3E%3C/svg%3E"); }
@@ -283,7 +287,7 @@
       pointer-events: none;
     }
   </style>
-  <script type="module" crossorigin src="/assets/index-CXeI54td.js"></script>
+  <script type="module" crossorigin src="/assets/index-1WtdvEj8.js"></script>
 </head>
 <body>
   <div id="root"></div>
