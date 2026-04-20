@@ -10,6 +10,7 @@ import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, useMotionValue } from 'framer-motion';
 import { connect, send, interrupt, interruptSession, clearSession, setCurrentTab, fetchSessions, onMessage, onState, onCompact, getState, sendToSession, resumeSession, isSessionAlive, loadHistory, subscribe, subscribeSessionMessages, unsubscribeSessionMessages, addRelay, registerSession, approvePermission, denyPermission, stopSession, sendToTTY, sendRawKeyToTTY, subscribeTTY, isTTYId, parseTTYId, onLayoutUpdate, getPreloadedMessages, type Message, type PtySection, type RelayConfig } from './lib/connection';
 import Sketch from './components/Sketch';
+import Dashboard from './components/Dashboard';
 
 // Cache-bust canvas.html per build (not per page load) — allows HTTP caching across reloads
 declare const __BUILD_TIME__: string;
@@ -3022,6 +3023,10 @@ export default function App() {
       setTerminalVisible(true); // auto-expand terminal so user sees the response
     }
   }, [selectedSession, mainFlow]);
+
+  if (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('view') === 'dashboard') {
+    return <Dashboard />;
+  }
 
   if (!authed) return <PasswordGate onAuth={() => setAuthed(true)} />;
 
