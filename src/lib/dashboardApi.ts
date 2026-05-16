@@ -60,12 +60,43 @@ export interface Snapshot {
 
 const DEFAULT_BASE = 'http://127.0.0.1:3005';
 
-export async function fetchSnapshot(signal?: AbortSignal): Promise<Snapshot> {
+function apiBase(): string {
   const meta = import.meta as unknown as { env?: Record<string, string | undefined> };
-  const base = (meta.env && meta.env.VITE_DASHBOARD_API) || DEFAULT_BASE;
-  const res = await fetch(`${base}/api/snapshot`, { signal, cache: 'no-store' });
+  return (meta.env && meta.env.VITE_DASHBOARD_API) || DEFAULT_BASE;
+}
+
+export async function fetchSnapshot(signal?: AbortSignal): Promise<Snapshot> {
+  const res = await fetch(`${apiBase()}/api/snapshot`, { signal, cache: 'no-store' });
   if (!res.ok) throw new Error(`snapshot ${res.status}`);
   return res.json();
+}
+
+export interface Ask {
+  id: string;
+  ts_created: string;
+  title: string;
+  detail?: string;
+  tag?: string;
+  status: 'pending' | 'done' | string;
+  ts_resolved?: string | null;
+  response?: string | null;
+}
+
+export async function fetchAsks(signal?: AbortSignal): Promise<Ask[]> {
+  const res = await fetch(`${apiBase()}/api/asks`, { signal, cache: 'no-store' });
+  if (!res.ok) throw new Error(`asks ${res.status}`);
+  const data = await res.json();
+  return Array.isArray(data.asks) ? data.asks : [];
+}
+
+export async function resolveAsk(id: string, response: string): Promise<{ ok: boolean; error?: string | null }> {
+  const res = await fetch(`${apiBase()}/api/asks/resolve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, response }),
+  });
+  const data = await res.json().catch(() => ({ ok: false, error: `http ${res.status}` }));
+  return { ok: !!data.ok, error: data.error };
 }
 
 export const POLL_MS = 5000;

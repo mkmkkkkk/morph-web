@@ -4,6 +4,7 @@ import KpiStrip from './dashboard/KpiStrip';
 import RedditFarmPanel from './dashboard/RedditFarmPanel';
 import BoardTable from './dashboard/BoardTable';
 import WorkerFleet from './dashboard/WorkerFleet';
+import AsksPanel from './dashboard/AsksPanel';
 
 export default function Dashboard() {
   const [snap, setSnap] = useState<Snapshot | null>(null);
@@ -56,6 +57,8 @@ export default function Dashboard() {
             <h2 style={{ fontSize: 11, color: '#8b949e', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>KPIs</h2>
             <KpiStrip kpis={snap.board.kpis} />
           </section>
+
+          <AsksPanel />
 
           <RedditFarmPanel data={snap.reddit_farm} />
 
