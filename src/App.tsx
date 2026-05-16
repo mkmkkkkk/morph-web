@@ -782,9 +782,18 @@ function InputBar({ onSend, onStop, isProcessing, connected, terminalVisible, on
         }}
       />
 
-      {/* Send button */}
+      {/* Send button — blur textarea first to commit any pending IME composition,
+          then send on the next tick using the ref so we pick up the committed text. */}
       <button tabIndex={-1}
-        onPointerDown={(e) => { e.preventDefault(); if (canSend) handleSend(); }}
+        onPointerDown={(e) => {
+          e.preventDefault();
+          const ta = ref.current;
+          if (ta && document.activeElement === ta) ta.blur();
+          requestAnimationFrame(() => {
+            if (ta) ta.focus();
+            handleSendRef.current();
+          });
+        }}
         style={{
           width: 36, height: 36, borderRadius: 18, border: 'none', flexShrink: 0,
           backgroundColor: canSend ? sendBg : inputBg, cursor: canSend ? 'pointer' : 'default',
