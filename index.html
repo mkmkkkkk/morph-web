@@ -10,6 +10,19 @@
   <link rel="icon" href="/favicon-v4.png" type="image/png" />
   <link rel="apple-touch-icon" href="/apple-touch-icon-v4.png" />
   <link rel="manifest" href="/manifest.json" />
+  <!-- PWA splash screens (iOS standalone). iOS shows the matching PNG during
+       cold launch of an installed PWA — kills the "10s black screen" by
+       turning Stage 1 (WebView boot) into a visible splash. Each link must
+       match device-width / device-height / -webkit-device-pixel-ratio exactly
+       or iOS silently falls back to blank. -->
+  <link rel="apple-touch-startup-image" href="/splash-1290x2796.png" media="screen and (device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" />
+  <link rel="apple-touch-startup-image" href="/splash-1179x2556.png" media="screen and (device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" />
+  <link rel="apple-touch-startup-image" href="/splash-1170x2532.png" media="screen and (device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" />
+  <link rel="apple-touch-startup-image" href="/splash-1125x2436.png" media="screen and (device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" />
+  <link rel="apple-touch-startup-image" href="/splash-1242x2688.png" media="screen and (device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" />
+  <link rel="apple-touch-startup-image" href="/splash-828x1792.png"  media="screen and (device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" />
+  <link rel="apple-touch-startup-image" href="/splash-750x1334.png"  media="screen and (device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" />
+  <link rel="apple-touch-startup-image" href="/splash-640x1136.png"  media="screen and (device-width: 320px) and (device-height: 568px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" />
   <style>@font-face { font-family: 'CloisterBlack'; src: url('/CloisterBlack.ttf'); }</style>
   <!-- Perf hints (#2 from 2026-05-16 perf audit): early DNS + TLS for the fonts
        subdomain. fonts.googleapis.com hosts the CSS, fonts.gstatic.com hosts the
