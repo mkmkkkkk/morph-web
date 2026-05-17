@@ -2138,77 +2138,319 @@ function Row({ label, value, valueColor }: { label: string; value: string; value
   );
 }
 
-// ─── Drafts Tab ───
+// ─── Content Pipeline Tabs (Drafts / Schedule / Posted) ───
+// Single source: nerve/state/content_queue.json via relay endpoints.
+const queueCardStyle: React.CSSProperties = {
+  backgroundColor: 'var(--bg-card)', borderRadius: 12, padding: 16,
+  border: '1px solid var(--border-input)', marginBottom: 12,
+};
+const queueBtnBase: React.CSSProperties = {
+  flex: 1, padding: '10px 0', border: '1px solid var(--border-input)', borderRadius: 8,
+  fontSize: 14, fontWeight: 600, cursor: 'pointer', backgroundColor: 'transparent', color: 'var(--text-primary)',
+  // iOS Safari adds ~300ms tap delay unless touch-action is set; without it,
+  // a quick tap on Approve can feel unresponsive enough that the user taps
+  // again, queueing a second action.
+  touchAction: 'manipulation', WebkitTapHighlightColor: 'transparent' as any,
+};
+const queueAuth = () => localStorage.getItem('morph-auth') || '';
+
+function QueuePill({ children }: { children: React.ReactNode }) {
+  return <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, backgroundColor: 'transparent', color: 'var(--text-secondary)', border: '1px solid var(--border-input)' }}>{children}</span>;
+}
+
 function DraftsTab() {
-  const [drafts, setDrafts] = useState<any[]>([]);
+  const [pending, setPending] = useState<any[]>([]);
+  const [scheduled, setScheduled] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const token = () => localStorage.getItem('morph-auth') || '';
+  const [postedOpen, setPostedOpen] = useState(false);
+  const [postedItems, setPostedItems] = useState<any[]>([]);
+  const [postedLoading, setPostedLoading] = useState(false);
 
-  const fetchDrafts = async () => {
+  // Tombstone cache: ids the user just acted on. Background polling +
+  // post-action refetch frequently return the item as still-pending for
+  // a few seconds (backend eventual consistency), making the just-approved
+  // card "pop back up". Hide acted ids for 30s to mask that lag.
+  const actedIds = useRef<Map<string, number>>(new Map());
+  const filterActed = (items: any[]): any[] => {
+    const now = Date.now();
+    for (const [id, ts] of actedIds.current) {
+      if (now - ts > 30_000) actedIds.current.delete(id);
+    }
+    return items.filter(item => !actedIds.current.has(item.id));
+  };
+
+  const fetchAll = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/v1/drafts', { headers: { Authorization: `Bearer ${token()}` } });
-      if (res.ok) { const d = await res.json(); setDrafts(d.drafts || []); }
+      const [r1, r2] = await Promise.all([
+        fetch('/v1/drafts', { headers: { Authorization: `Bearer ${queueAuth()}` } }),
+        fetch('/v1/schedule', { headers: { Authorization: `Bearer ${queueAuth()}` } }),
+      ]);
+      if (r1.ok) { const d = await r1.json(); setPending(filterActed(d.drafts || [])); }
+      if (r2.ok) { const d = await r2.json(); setScheduled(d.scheduled || []); }
     } catch {} finally { setLoading(false); }
   };
-
-  useEffect(() => { fetchDrafts(); }, []);
-
-  const handleAction = async (slug: string, action: 'approve' | 'reject') => {
-    setActionLoading(slug);
+  const fetchPosted = async () => {
+    setPostedLoading(true);
     try {
-      await fetch(`/v1/drafts/${encodeURIComponent(slug)}/${action}`, {
-        method: 'POST', headers: { Authorization: `Bearer ${token()}`, 'Content-Type': 'application/json' },
-        body: '{}',
-      });
-    } catch (e) { console.warn('draft action failed:', e); }
-    // Always remove from UI — if the API failed, refresh will bring it back
-    setDrafts(ds => ds.filter(d => d.slug !== slug));
-    setActionLoading(null);
+      const res = await fetch('/v1/posted', { headers: { Authorization: `Bearer ${queueAuth()}` } });
+      if (res.ok) { const d = await res.json(); setPostedItems(d.posted || []); }
+    } catch {} finally { setPostedLoading(false); }
   };
+  useEffect(() => { fetchAll(); const t = setInterval(fetchAll, 10000); return () => clearInterval(t); }, []);
+  useEffect(() => {
+    if (!postedOpen) return;
+    fetchPosted();
+    const t = setInterval(fetchPosted, 10000);
+    return () => clearInterval(t);
+  }, [postedOpen]);
 
-  const cardStyle: React.CSSProperties = {
-    backgroundColor: 'var(--bg-card)', borderRadius: 12, padding: 16,
-    border: '1px solid var(--border-input)', marginBottom: 12,
-  };
-  const btnBase: React.CSSProperties = {
-    flex: 1, padding: '10px 0', border: 'none', borderRadius: 8,
-    fontSize: 14, fontWeight: 600, cursor: 'pointer',
+  const handleAction = async (id: string, action: 'approve' | 'reject') => {
+    if (actionLoading) return; // ignore double-taps while a request is in flight
+    // Optimistic: tombstone + remove from list IMMEDIATELY so the card
+    // doesn't reappear when the background poll or post-action refetch
+    // returns stale data.
+    actedIds.current.set(id, Date.now());
+    setPending(ds => ds.filter(d => d.id !== id));
+    setActionLoading(id);
+    try {
+      const res = await fetch(`/v1/drafts/${encodeURIComponent(id)}/${action}`, {
+        method: 'POST', headers: { Authorization: `Bearer ${queueAuth()}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) {
+        // Roll back tombstone on failure so user can retry / see the item.
+        actedIds.current.delete(id);
+        console.warn(`draft ${action} returned ${res.status}`);
+      }
+    } catch (e) {
+      actedIds.current.delete(id);
+      console.warn('draft action failed:', e);
+    }
+    setActionLoading(null);
+    // Refresh scheduled list so newly-approved item appears below.
+    fetchAll();
   };
 
   return (
-    <div style={{ flex: 1, overflow: 'auto', padding: '16px 12px', paddingTop: 'max(48px, env(safe-area-inset-top, 48px))', WebkitOverflowScrolling: 'touch' }}>
+    <div data-tab="drafts" style={{ flex: 1, overflow: 'auto', padding: '16px 12px', paddingTop: 'max(48px, env(safe-area-inset-top, 48px))', WebkitOverflowScrolling: 'touch' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-        <span style={{ color: 'var(--text-primary)', fontSize: 18, fontWeight: 600 }}>Polished Drafts</span>
-        <button onClick={fetchDrafts} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 13 }}>Refresh</button>
+        <span style={{ color: 'var(--text-primary)', fontSize: 18, fontWeight: 600 }}>Drafts ({pending.length}) · Scheduled ({scheduled.length})</span>
+        <button onClick={fetchAll} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 13 }}>Refresh</button>
       </div>
+
+      {/* Pending drafts — Approve / Reject buttons */}
       {loading ? (
         <div style={{ color: 'var(--text-tertiary)', textAlign: 'center', marginTop: 40 }}>Loading...</div>
-      ) : drafts.length === 0 ? (
-        <div style={{ color: 'var(--text-tertiary)', textAlign: 'center', marginTop: 40 }}>No polished drafts</div>
-      ) : drafts.map(d => (
-        <div key={d.slug} style={cardStyle}>
+      ) : pending.length === 0 ? (
+        <div style={{ color: 'var(--text-tertiary)', textAlign: 'center', marginTop: 24, marginBottom: 16, fontSize: 13 }}>No pending drafts</div>
+      ) : pending.map(d => (
+        <div key={d.id} data-item-id={d.id} data-status="pending" style={queueCardStyle}>
           <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, backgroundColor: 'rgba(99,102,241,0.15)', color: '#818cf8' }}>{d.format}</span>
-            {d.goal && <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 4, backgroundColor: 'rgba(251,191,36,0.15)', color: '#fbbf24' }}>{d.goal}</span>}
+            <QueuePill>{d.channel}</QueuePill>
+            {d.tags && d.tags.slice(0, 3).map((t: string) => <QueuePill key={t}>{t}</QueuePill>)}
           </div>
-          <pre style={{ color: 'var(--text-primary)', fontSize: 14, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: '0 0 10px', fontFamily: '-apple-system, sans-serif' }}>{d.post}</pre>
+          <div style={{ color: 'var(--text-primary)', fontSize: 14, lineHeight: 1.4, marginBottom: 10, fontWeight: 500 }}>{d.title}</div>
           <div style={{ color: 'var(--text-tertiary)', fontSize: 11, marginBottom: 10 }}>
-            {d.slug} {d.drafted_at ? `\u00b7 ${d.drafted_at}` : ''}
+            {d.id} · submitted {(d.submitted_at || '').slice(0, 10)}
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={() => handleAction(d.slug, 'approve')} disabled={actionLoading === d.slug}
-              style={{ ...btnBase, backgroundColor: 'rgba(34,197,94,0.15)', color: '#22c55e' }}>
-              {actionLoading === d.slug ? '...' : 'Approve'}
+            <button data-action="approve" onClick={() => handleAction(d.id, 'approve')} disabled={actionLoading === d.id} style={queueBtnBase}>
+              {actionLoading === d.id ? '...' : 'Approve'}
             </button>
-            <button onClick={() => handleAction(d.slug, 'reject')} disabled={actionLoading === d.slug}
-              style={{ ...btnBase, backgroundColor: 'rgba(239,68,68,0.15)', color: '#ef4444' }}>
-              {actionLoading === d.slug ? '...' : 'Reject'}
+            <button data-action="reject" onClick={() => handleAction(d.id, 'reject')} disabled={actionLoading === d.id} style={queueBtnBase}>
+              {actionLoading === d.id ? '...' : 'Reject'}
             </button>
           </div>
         </div>
       ))}
+
+      {/* Scheduled — read-only, awaiting cron */}
+      {scheduled.length > 0 && (
+        <div data-section="scheduled" style={{ marginTop: 16 }}>
+          <div style={{ color: 'var(--text-secondary)', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Scheduled</div>
+          {scheduled.map(d => (
+            <div key={d.id} data-item-id={d.id} data-status="scheduled" style={{ ...queueCardStyle, opacity: 0.85 }}>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+                <QueuePill>{d.channel}</QueuePill>
+              </div>
+              <div style={{ color: 'var(--text-primary)', fontSize: 14, lineHeight: 1.4, marginBottom: 10, fontWeight: 500 }}>{d.title}</div>
+              <div style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>
+                {d.id} · firing at {(d.scheduled_for || '').slice(0, 16).replace('T', ' ')}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ─── Collapsible Posted section ─── */}
+      <div data-section="posted-collapsible" style={{ marginTop: 24, borderTop: '1px solid var(--border-input)', paddingTop: 12 }}>
+        <button
+          data-toggle="posted"
+          aria-expanded={postedOpen}
+          onClick={() => setPostedOpen(o => !o)}
+          style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'transparent', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', padding: '8px 0', fontSize: 16, fontWeight: 600 }}
+        >
+          <span>Posted{postedOpen ? ` (${postedItems.length})` : ''}</span>
+          <span style={{ color: 'var(--text-secondary)', fontSize: 14 }}>{postedOpen ? '▾' : '▸'}</span>
+        </button>
+        {postedOpen && (
+          <div data-region="posted-list" style={{ marginTop: 8 }}>
+            {postedLoading ? (
+              <div style={{ color: 'var(--text-tertiary)', textAlign: 'center', padding: 16 }}>Loading...</div>
+            ) : postedItems.length === 0 ? (
+              <div style={{ color: 'var(--text-tertiary)', textAlign: 'center', padding: 16 }}>No posts yet</div>
+            ) : postedItems.map(d => {
+              const url = d.tweet_url || (d.channel_meta && d.channel_meta.url) || '';
+              return (
+                <div key={d.id} data-item-id={d.id} data-status="published" style={queueCardStyle}>
+                  <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+                    <QueuePill>{d.channel}</QueuePill>
+                  </div>
+                  <div style={{ color: 'var(--text-primary)', fontSize: 14, lineHeight: 1.4, marginBottom: 10, fontWeight: 500 }}>{d.title}</div>
+                  <div style={{ color: 'var(--text-tertiary)', fontSize: 11, marginBottom: 8 }}>
+                    {d.id} · posted {(d.published_at || '').slice(0, 16).replace('T', ' ')}
+                  </div>
+                  {url && <a data-tweet-url={url} href={url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--text-secondary)', fontSize: 12, wordBreak: 'break-all', textDecoration: 'underline' }}>{url}</a>}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ScheduleTab() {
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [postedOpen, setPostedOpen] = useState(false);
+  const [postedItems, setPostedItems] = useState<any[]>([]);
+  const [postedLoading, setPostedLoading] = useState(false);
+
+  const fetchItems = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/v1/schedule', { headers: { Authorization: `Bearer ${queueAuth()}` } });
+      if (res.ok) { const d = await res.json(); setItems(d.scheduled || []); }
+    } catch {} finally { setLoading(false); }
+  };
+  const fetchPosted = async () => {
+    setPostedLoading(true);
+    try {
+      const res = await fetch('/v1/posted', { headers: { Authorization: `Bearer ${queueAuth()}` } });
+      if (res.ok) { const d = await res.json(); setPostedItems(d.posted || []); }
+    } catch {} finally { setPostedLoading(false); }
+  };
+  useEffect(() => { fetchItems(); const t = setInterval(fetchItems, 10000); return () => clearInterval(t); }, []);
+  useEffect(() => {
+    if (!postedOpen) return;
+    fetchPosted();
+    const t = setInterval(fetchPosted, 10000);
+    return () => clearInterval(t);
+  }, [postedOpen]);
+
+  return (
+    <div data-tab="schedule" style={{ flex: 1, overflow: 'auto', padding: '16px 12px', paddingTop: 'max(48px, env(safe-area-inset-top, 48px))', WebkitOverflowScrolling: 'touch' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <span style={{ color: 'var(--text-primary)', fontSize: 18, fontWeight: 600 }}>Schedule ({items.length})</span>
+        <button onClick={fetchItems} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 13 }}>Refresh</button>
+      </div>
+      {loading ? (
+        <div style={{ color: 'var(--text-tertiary)', textAlign: 'center', marginTop: 40 }}>Loading...</div>
+      ) : items.length === 0 ? (
+        <div style={{ color: 'var(--text-tertiary)', textAlign: 'center', marginTop: 40 }}>No scheduled items</div>
+      ) : items.map(d => (
+        <div key={d.id} data-item-id={d.id} style={queueCardStyle}>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+            <QueuePill>{d.channel}</QueuePill>
+          </div>
+          <div style={{ color: 'var(--text-primary)', fontSize: 14, lineHeight: 1.4, marginBottom: 10, fontWeight: 500 }}>{d.title}</div>
+          <div style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>
+            {d.id} · firing at {(d.scheduled_for || '').slice(0, 16).replace('T', ' ')}
+          </div>
+        </div>
+      ))}
+
+      {/* ─── Collapsible Posted section (folded inside Schedule tab) ─── */}
+      <div data-section="posted-collapsible" style={{ marginTop: 24, borderTop: '1px solid var(--border-input)', paddingTop: 12 }}>
+        <button
+          data-toggle="posted"
+          aria-expanded={postedOpen}
+          onClick={() => setPostedOpen(o => !o)}
+          style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'transparent', border: 'none', color: 'var(--text-primary)', cursor: 'pointer', padding: '8px 0', fontSize: 16, fontWeight: 600 }}
+        >
+          <span>Posted{postedOpen ? ` (${postedItems.length})` : ''}</span>
+          <span style={{ color: 'var(--text-secondary)', fontSize: 14 }}>{postedOpen ? '▾' : '▸'}</span>
+        </button>
+        {postedOpen && (
+          <div data-region="posted-list" style={{ marginTop: 8 }}>
+            {postedLoading ? (
+              <div style={{ color: 'var(--text-tertiary)', textAlign: 'center', padding: 16 }}>Loading...</div>
+            ) : postedItems.length === 0 ? (
+              <div style={{ color: 'var(--text-tertiary)', textAlign: 'center', padding: 16 }}>No posts yet</div>
+            ) : postedItems.map(d => {
+              const url = d.tweet_url || (d.channel_meta && d.channel_meta.url) || '';
+              return (
+                <div key={d.id} data-item-id={d.id} style={queueCardStyle}>
+                  <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+                    <QueuePill>{d.channel}</QueuePill>
+                  </div>
+                  <div style={{ color: 'var(--text-primary)', fontSize: 14, lineHeight: 1.4, marginBottom: 10, fontWeight: 500 }}>{d.title}</div>
+                  <div style={{ color: 'var(--text-tertiary)', fontSize: 11, marginBottom: 8 }}>
+                    {d.id} · posted {(d.published_at || '').slice(0, 16).replace('T', ' ')}
+                  </div>
+                  {url && <a data-tweet-url={url} href={url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--text-secondary)', fontSize: 12, wordBreak: 'break-all', textDecoration: 'underline' }}>{url}</a>}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PostedTab() {
+  const [items, setItems] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchItems = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/v1/posted', { headers: { Authorization: `Bearer ${queueAuth()}` } });
+      if (res.ok) { const d = await res.json(); setItems(d.posted || []); }
+    } catch {} finally { setLoading(false); }
+  };
+  useEffect(() => { fetchItems(); const t = setInterval(fetchItems, 10000); return () => clearInterval(t); }, []);
+
+  return (
+    <div data-tab="posted" style={{ flex: 1, overflow: 'auto', padding: '16px 12px', paddingTop: 'max(48px, env(safe-area-inset-top, 48px))', WebkitOverflowScrolling: 'touch' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <span style={{ color: 'var(--text-primary)', fontSize: 18, fontWeight: 600 }}>Posted ({items.length})</span>
+        <button onClick={fetchItems} style={{ background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 13 }}>Refresh</button>
+      </div>
+      {loading ? (
+        <div style={{ color: 'var(--text-tertiary)', textAlign: 'center', marginTop: 40 }}>Loading...</div>
+      ) : items.length === 0 ? (
+        <div style={{ color: 'var(--text-tertiary)', textAlign: 'center', marginTop: 40 }}>No posts yet</div>
+      ) : items.map(d => {
+        const url = d.tweet_url || (d.channel_meta && d.channel_meta.url) || '';
+        return (
+          <div key={d.id} data-item-id={d.id} style={queueCardStyle}>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
+              <QueuePill>{d.channel}</QueuePill>
+            </div>
+            <div style={{ color: 'var(--text-primary)', fontSize: 14, lineHeight: 1.4, marginBottom: 10, fontWeight: 500 }}>{d.title}</div>
+            <div style={{ color: 'var(--text-tertiary)', fontSize: 11, marginBottom: 8 }}>
+              {d.id} · posted {(d.published_at || '').slice(0, 16).replace('T', ' ')}
+            </div>
+            {url && <a data-tweet-url={url} href={url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--text-secondary)', fontSize: 12, wordBreak: 'break-all', textDecoration: 'underline' }}>{url}</a>}
+          </div>
+        );
+      })}
     </div>
   );
 }
