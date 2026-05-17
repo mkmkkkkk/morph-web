@@ -2821,6 +2821,22 @@ export default function App() {
   });
   const [sessionMessages, setSessionMessages] = useState<Message[]>([]);
   const [hasVisitedConfig, setHasVisitedConfig] = useState(false);
+  // Perf: lazy-mount Drafts tab until first visit (#1 from perf audit 2026-05-16).
+  // Avoids firing /v1/drafts + /v1/schedule on cold load when user lands on Canvas.
+  const [hasVisitedDrafts, setHasVisitedDrafts] = useState(false);
+  // Perf: defer Canvas iframe mount past first paint (#6 from perf audit). Canvas
+  // is the default tab so the iframe used to fetch canvas.html during FCP. After
+  // first paint we flip this to true via requestIdleCallback / setTimeout fallback.
+  const [canvasIframeMounted, setCanvasIframeMounted] = useState(false);
+  useEffect(() => {
+    const ric = (globalThis as any).requestIdleCallback as ((cb: () => void, opts?: any) => number) | undefined;
+    const trigger = () => setCanvasIframeMounted(true);
+    const handle = ric ? ric(trigger, { timeout: 1500 }) : setTimeout(trigger, 200);
+    return () => {
+      if (ric) (globalThis as any).cancelIdleCallback?.(handle);
+      else clearTimeout(handle as any);
+    };
+  }, []);
   const liveSessionIdRef = useRef<string | null>(null); // tracks active process ID after resume
   const sessionAliveCache = useRef<Map<string, { alive: boolean; ts: number; terminal?: boolean }>>(new Map());
   const sessionSendQueue = useRef<Array<() => Promise<void>>>([]);
@@ -3261,7 +3277,7 @@ export default function App() {
 
   const toggleTerminal = () => { setTerminalVisible(v => !v); setHasNew(false); };
 
-  const handleTab = (t: string) => { setTab(t); setCurrentTab(t); if (t === 'config') { setTerminalVisible(false); setHasVisitedConfig(true); } };
+  const handleTab = (t: string) => { setTab(t); setCurrentTab(t); if (t === 'config') { setTerminalVisible(false); setHasVisitedConfig(true); } if (t === 'drafts') setHasVisitedDrafts(true); };
 
   const handleSend = useCallback((text: string) => {
     if (text === '/clear') { setMessages([]); setIsProcessing(false); clearSession(); mainFlow.clearPending(); return; }
@@ -3317,14 +3333,14 @@ export default function App() {
                 <style>{`@keyframes canvasLoad { 0% { transform: translateX(-120%); } 100% { transform: translateX(300%); } }`}</style>
               </div>
             )}
-            <iframe src={`/canvas.html?v=${BUILD_TS}`} onLoad={() => setCanvasLoaded(true)} style={{ width: '100%', height: '100%', border: 'none', backgroundColor: 'var(--bg-primary)', willChange: 'transform' }} sandbox="allow-scripts allow-same-origin" />
+            {canvasIframeMounted && <iframe src={`/canvas.html?v=${BUILD_TS}`} onLoad={() => setCanvasLoaded(true)} style={{ width: '100%', height: '100%', border: 'none', backgroundColor: 'var(--bg-primary)', willChange: 'transform' }} sandbox="allow-scripts allow-same-origin" />}
           </div>
         </div>
 
-        {/* Drafts content */}
-        <div style={{ flex: 1, display: tab === 'drafts' ? 'flex' : 'none', overflow: 'hidden', flexDirection: 'column' }}>
+        {/* Drafts content — lazy-mounted: only rendered after first visit (perf #1) */}
+        {hasVisitedDrafts && <div style={{ flex: 1, display: tab === 'drafts' ? 'flex' : 'none', overflow: 'hidden', flexDirection: 'column' }}>
           <DraftsTab />
-        </div>
+        </div>}
 
         {/* Config content — lazy-mounted: only rendered after first visit */}
         {hasVisitedConfig && <div style={{ flex: 1, display: tab === 'config' ? 'flex' : 'none', overflow: 'hidden', flexDirection: 'column' }}>

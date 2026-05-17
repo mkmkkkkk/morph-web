@@ -7,11 +7,18 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="theme-color" content="#0a0a0a" id="meta-theme-color" />
   <title>Morph</title>
+  <link rel="modulepreload" crossorigin href="/assets/index-D-pOOVR7.js">
   <link rel="icon" href="/favicon-v4.png" type="image/png" />
   <link rel="apple-touch-icon" href="/apple-touch-icon-v4.png" />
   <link rel="manifest" href="/manifest.json" />
   <style>@font-face { font-family: 'CloisterBlack'; src: url('/CloisterBlack.ttf'); }</style>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <!-- Perf hints (#2 from 2026-05-16 perf audit): early DNS + TLS for the fonts
+       subdomain. fonts.googleapis.com hosts the CSS, fonts.gstatic.com hosts the
+       actual font files — the previous preconnect only covered googleapis. -->
+  <link rel="dns-prefetch" href="//fonts.googleapis.com">
+  <link rel="dns-prefetch" href="//fonts.gstatic.com">
+  <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DotGothic16&family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -283,7 +290,7 @@
       pointer-events: none;
     }
   </style>
-  <script type="module" crossorigin src="/assets/index-BNZLPT3V.js"></script>
+  <script type="module" crossorigin src="/assets/index-D-pOOVR7.js"></script>
 </head>
 <body>
   <div id="root"></div>
