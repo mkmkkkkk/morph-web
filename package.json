@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite --port 8081",
-    "build": "vite build",
+    "build": "vite build && node scripts/cf-purge.mjs",
+    "build:offline": "vite build",
     "preview": "vite preview"
   },
   "dependencies": {

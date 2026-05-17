@@ -6,6 +6,14 @@ export default defineConfig({
     // Stable per-build hash for canvas.html cache-busting — prevents re-download on every page load
     __BUILD_TIME__: JSON.stringify(Date.now().toString(36)),
   },
+  build: {
+    // Latch 3 (2026-05-18): preserve previous-build /assets/<hash>.js so a
+    // stale HTML cached at CF edge or in a user's browser can still load its
+    // old bundle URL (HTTP 200) instead of 404'ing into a white screen. Vite
+    // overwrites index.html + same-name files anyway, so accumulation is
+    // bounded to hashed chunks; clean dist/assets manually when it grows.
+    emptyOutDir: false,
+  },
   plugins: [
     react(),
     {
